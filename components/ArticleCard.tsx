@@ -11,6 +11,7 @@ interface ArticleProps {
     link: string
     imageUrl: string | null
     source: string | null
+    description: string | null
     publishedAt: Date
   }
 }
@@ -54,10 +55,15 @@ export function ArticleCard({ article }: ArticleProps) {
       </div>
 
       <div className="flex flex-col flex-grow p-5">
-        <h2 className="text-lg font-bold text-gray-900 line-clamp-3 mb-3 group-hover:text-blue-600 transition-colors">
+        <h2 className="text-lg font-bold text-gray-900 line-clamp-2 mb-2 group-hover:text-blue-600 transition-colors">
           {article.title}
         </h2>
-        
+        {article.description && (
+          <p className="text-sm text-gray-600 line-clamp-4 mb-3">
+            {article.description}
+          </p>
+        )}
+
         <div className="mt-auto flex items-center justify-between text-sm text-gray-500 pt-4 border-t border-gray-100">
           <div className="flex items-center gap-1.5">
             <Calendar size={14} />
