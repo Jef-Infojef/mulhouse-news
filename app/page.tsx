@@ -17,7 +17,7 @@ export default async function Home() {
             <Newspaper className="h-8 w-8 text-white" />
           </div>
           <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight sm:text-5xl mb-2">
-            Mulhouse News
+            Mulhouse News.
           </h1>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
             L'actualité locale en temps réel, agrégée depuis toutes les sources locales.
