@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { getArticlesWithPagination } from './actions'
+import { useState, useEffect, useRef } from 'react'
+import { getLatestArticles } from './actions'
 import { ArticleCard } from '@/components/ArticleCard'
 import { Newspaper, AlertTriangle, Search, Loader2, Moon, Sun } from 'lucide-react'
 import { useTheme } from 'next-themes'
@@ -17,74 +17,63 @@ interface Article {
 }
 
 export default function Home() {
-  const [articles, setArticles] = useState<Article[]>([])
+  const [allArticles, setAllArticles] = useState<Article[]>([])
+  const [displayedArticles, setDisplayedArticles] = useState<Article[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [hasMore, setHasMore] = useState(true)
-  const [skip, setSkip] = useState(0)
   const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [displayCount, setDisplayCount] = useState(20)
   const { theme, setTheme } = useTheme()
   const observerTarget = useRef<HTMLDivElement>(null)
 
   const pageSize = 20
 
-  // Debounce search
+  // Load all articles once
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(search)
-      setArticles([])
-      setSkip(0)
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [search])
+    const loadArticles = async () => {
+      try {
+        const { articles, error: fetchError } = await getLatestArticles()
 
-  // Load articles
-  const loadArticles = useCallback(async (skipValue: number, searchQuery: string) => {
-    try {
-      const { articles: newArticles, total, error: fetchError } = await getArticlesWithPagination(
-        skipValue,
-        pageSize,
-        searchQuery
-      )
+        if (fetchError) {
+          setError(fetchError)
+          return
+        }
 
-      if (fetchError) {
-        setError(fetchError)
-        return
+        setAllArticles(articles)
+        setError(null)
+      } catch (err: any) {
+        setError(err.message || 'Une erreur est survenue')
+      } finally {
+        setLoading(false)
       }
-
-      if (skipValue === 0) {
-        setArticles(newArticles)
-      } else {
-        setArticles((prev) => [...prev, ...newArticles])
-      }
-
-      setHasMore(skipValue + pageSize < total)
-      setError(null)
-    } catch (err: any) {
-      setError(err.message || 'Une erreur est survenue')
-    } finally {
-      setLoading(false)
-      setIsLoadingMore(false)
     }
+
+    loadArticles()
   }, [])
 
-  // Initial load
+  // Filter and slice articles based on search and displayCount
   useEffect(() => {
-    setLoading(true)
-    loadArticles(0, debouncedSearch)
-  }, [debouncedSearch, loadArticles])
+    let filtered = allArticles
+
+    if (search) {
+      const query = search.toLowerCase()
+      filtered = allArticles.filter(
+        (article) =>
+          article.title.toLowerCase().includes(query) ||
+          article.description?.toLowerCase().includes(query) ||
+          article.source?.toLowerCase().includes(query)
+      )
+    }
+
+    setDisplayedArticles(filtered.slice(0, displayCount))
+  }, [allArticles, search, displayCount])
 
   // Infinite scroll
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoadingMore && !loading) {
-          setIsLoadingMore(true)
-          const newSkip = skip + pageSize
-          setSkip(newSkip)
-          loadArticles(newSkip, debouncedSearch)
+        if (entries[0].isIntersecting && displayCount < displayedArticles.length) {
+          setDisplayCount((prev) => prev + pageSize)
         }
       },
       { threshold: 0.1 }
@@ -99,7 +88,7 @@ export default function Home() {
         observer.unobserve(observerTarget.current)
       }
     }
-  }, [hasMore, isLoadingMore, loading, skip, debouncedSearch, loadArticles])
+  }, [displayCount, displayedArticles.length])
 
   return (
     <main className="min-h-screen bg-white dark:bg-gray-950 transition-colors">
@@ -174,12 +163,12 @@ export default function Home() {
         )}
 
         {/* Loading State */}
-        {loading && articles.length === 0 ? (
+        {loading ? (
           <div className="text-center py-20">
             <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
             <p className="text-gray-500 dark:text-gray-400 text-lg">Chargement des articles...</p>
           </div>
-        ) : articles.length === 0 ? (
+        ) : displayedArticles.length === 0 ? (
           <div className="text-center py-20 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800">
             <p className="text-gray-500 dark:text-gray-400 text-lg">Aucun article trouvé.</p>
             {search && <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">Essayez une autre recherche</p>}
@@ -187,24 +176,34 @@ export default function Home() {
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              {articles.map((article) => (
+              {displayedArticles.map((article) => (
                 <ArticleCard key={article.id} article={article} />
               ))}
             </div>
 
             {/* Infinite Scroll Indicator */}
-            {hasMore && (
+            {displayCount < allArticles.filter((a) => {
+              if (!search) return true
+              const query = search.toLowerCase()
+              return a.title.toLowerCase().includes(query) ||
+                a.description?.toLowerCase().includes(query) ||
+                a.source?.toLowerCase().includes(query)
+            }).length && (
               <div ref={observerTarget} className="text-center py-8">
-                {isLoadingMore && (
-                  <div className="flex items-center justify-center gap-2">
-                    <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                    <span className="text-gray-500 dark:text-gray-400">Chargement de plus d'articles...</span>
-                  </div>
-                )}
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                  <span className="text-gray-500 dark:text-gray-400">Chargement de plus d'articles...</span>
+                </div>
               </div>
             )}
 
-            {!hasMore && articles.length > 0 && (
+            {displayCount >= allArticles.filter((a) => {
+              if (!search) return true
+              const query = search.toLowerCase()
+              return a.title.toLowerCase().includes(query) ||
+                a.description?.toLowerCase().includes(query) ||
+                a.source?.toLowerCase().includes(query)
+            }).length && displayedArticles.length > 0 && (
               <div className="text-center py-8">
                 <p className="text-gray-400 dark:text-gray-500">Fin des articles</p>
               </div>
