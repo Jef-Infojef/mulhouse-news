@@ -2,6 +2,7 @@ import os
 import requests
 import xml.etree.ElementTree as ET
 import re
+import html
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from googlenewsdecoder import gnewsdecoder
@@ -34,14 +35,24 @@ def extract_real_url(google_url):
         print(f"    [!] Erreur de décodage: {e}")
     return google_url
 
+import html
+
+# ... (imports)
+
 def fetch_og_image(url):
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 200:
-            match = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\\]+)["\\]', resp.text, re.IGNORECASE)
-            if match:
-                return match.group(1)
+            # Pattern 1: property="og:image" ... content="..."
+            match1 = re.search(r'<meta\s+[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', resp.text, re.IGNORECASE)
+            if match1:
+                return html.unescape(match1.group(1))
+            
+            # Pattern 2: content="..." ... property="og:image" (common in some frameworks)
+            match2 = re.search(r'<meta\s+[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:image["\']', resp.text, re.IGNORECASE)
+            if match2:
+                return html.unescape(match2.group(1))
     except Exception:
         pass
     return None

@@ -31,9 +31,9 @@ export function ArticleCard({ article }: ArticleProps) {
       href={article.link} 
       target="_blank" 
       rel="noopener noreferrer"
-      className="group flex flex-col h-full bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
+      className="group flex flex-col h-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden hover:shadow-lg hover:shadow-gray-200 dark:hover:shadow-gray-900/50 transition-all duration-300 hover:-translate-y-1"
     >
-      <div className="relative h-48 w-full overflow-hidden bg-gray-100">
+      <div className="relative h-48 w-full overflow-hidden bg-gray-100 dark:bg-gray-800">
         {article.imageUrl ? (
           <Image
             src={article.imageUrl}
@@ -43,28 +43,28 @@ export function ArticleCard({ article }: ArticleProps) {
             sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
           />
         ) : (
-          <div className="flex items-center justify-center h-full text-gray-400">
+          <div className="flex items-center justify-center h-full text-gray-400 dark:text-gray-600">
             <Newspaper size={48} />
           </div>
         )}
         <div className="absolute top-3 right-3">
-          <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getSourceColor(article.source)}`}>
+          <span className={`px-3 py-1 text-xs font-semibold rounded-full shadow-sm ${getSourceColor(article.source)}`}>
             {article.source || 'Autre'}
           </span>
         </div>
       </div>
 
       <div className="flex flex-col flex-grow p-5">
-        <h2 className="text-lg font-bold text-gray-900 line-clamp-2 mb-2 group-hover:text-blue-600 transition-colors">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 line-clamp-4 mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
           {article.title}
         </h2>
         {article.description && (
-          <p className="text-sm text-gray-600 line-clamp-4 mb-3">
+          <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-4 mb-3">
             {article.description}
           </p>
         )}
 
-        <div className="mt-auto flex items-center justify-between text-sm text-gray-500 pt-4 border-t border-gray-100">
+        <div className="mt-auto flex items-center justify-between text-sm text-gray-500 dark:text-gray-400 pt-4 border-t border-gray-100 dark:border-gray-800">
           <div className="flex items-center gap-1.5">
             <Calendar size={14} />
             <time dateTime={article.publishedAt.toISOString()}>
