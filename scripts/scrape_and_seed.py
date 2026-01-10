@@ -31,30 +31,31 @@ def extract_real_url(google_url):
         decoded = gnewsdecoder(google_url)
         if decoded.get("status"):
             return decoded["decoded_url"]
+        else:
+            print(f"    [!] Échec décodage: {decoded.get('message', 'Erreur inconnue')}")
     except Exception as e:
-        print(f"    [!] Erreur de décodage: {e}")
+        print(f"    [!] Exception décodage: {e}")
     return google_url
-
-import html
-
-# ... (imports)
 
 def fetch_og_image(url):
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"    [!] fetch_og_image status: {resp.status_code} pour {url[:50]}...")
+        
         if resp.status_code == 200:
             # Pattern 1: property="og:image" ... content="..."
             match1 = re.search(r'<meta\s+[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', resp.text, re.IGNORECASE)
             if match1:
                 return html.unescape(match1.group(1))
             
-            # Pattern 2: content="..." ... property="og:image" (common in some frameworks)
+            # Pattern 2: content="..." ... property="og:image"
             match2 = re.search(r'<meta\s+[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:image["\']', resp.text, re.IGNORECASE)
             if match2:
                 return html.unescape(match2.group(1))
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"    [!] Erreur fetch_og_image: {e}")
     return None
 
 def main():
