@@ -2,13 +2,12 @@
 
 import prisma from '@/lib/prisma'
 
-export async function getLatestArticles(limit = 1000) {
+export async function getLatestArticles() {
   try {
     const articles = await prisma.article.findMany({
       orderBy: {
         publishedAt: 'desc',
       },
-      take: limit,
     })
 
     console.log(`${articles.length} articles récupérés.`)
