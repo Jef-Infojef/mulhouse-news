@@ -110,9 +110,9 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-white dark:bg-gray-950 transition-colors">
+    <main className="min-h-screen bg-background text-foreground transition-colors">
       {/* Top Bar Info */}
-      <div className="w-full bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 py-2">
+      <div className="w-full bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800 py-2">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] sm:text-sm font-medium text-gray-600 dark:text-gray-400">
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-1.5 capitalize">
@@ -149,7 +149,7 @@ export default function Home() {
                 <Newspaper className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
               </div>
               <div>
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight">
                   Mulhouse Actu
                 </h1>
                 <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400 max-w-2xl">
