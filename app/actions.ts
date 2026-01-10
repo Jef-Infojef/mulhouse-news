@@ -2,7 +2,7 @@
 
 import prisma from '@/lib/prisma'
 
-export async function getLatestArticles(limit = 300) {
+export async function getLatestArticles(limit = 1000) {
   try {
     const articles = await prisma.article.findMany({
       orderBy: {
