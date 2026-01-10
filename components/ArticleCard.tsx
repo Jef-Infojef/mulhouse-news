@@ -26,6 +26,17 @@ export function ArticleCard({ article }: ArticleProps) {
     return 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
   }
 
+  // Extraction du domaine pour le favicon de secours
+  const getDomain = (url: string) => {
+    try {
+      return new URL(url).hostname
+    } catch {
+      return ''
+    }
+  }
+
+  const fallbackImageUrl = `https://www.google.com/s2/favicons?domain=${getDomain(article.link)}&sz=256`
+
   return (
     <Link
       href={article.link}
@@ -34,19 +45,14 @@ export function ArticleCard({ article }: ArticleProps) {
       className="group flex flex-col h-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl overflow-hidden hover:shadow-lg dark:hover:shadow-xl dark:hover:shadow-blue-900/50 transition-all duration-300 hover:-translate-y-1"
     >
       <div className="relative h-48 w-full overflow-hidden bg-gray-100 dark:bg-slate-700">
-        {article.imageUrl ? (
-          <Image
-            src={article.imageUrl}
-            alt={article.title}
-            fill
-            className="object-cover transition-transform duration-500 group-hover:scale-105"
-            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full text-gray-400 dark:text-slate-500">
-            <Newspaper size={48} />
-          </div>
-        )}
+        <Image
+          src={article.imageUrl || fallbackImageUrl}
+          alt={article.title}
+          fill
+          className="object-cover transition-transform duration-500 group-hover:scale-105"
+          sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+          unoptimized={!article.imageUrl} // Évite les problèmes d'optimisation sur l'URL externe du favicon
+        />
         <div className="absolute top-3 right-3">
           <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getSourceColor(article.source)}`}>
             {article.source || 'Autre'}
