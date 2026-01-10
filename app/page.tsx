@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { getLatestArticles } from './actions'
 import { ArticleCard } from '@/components/ArticleCard'
-import { Newspaper, AlertTriangle, Search, Loader2, Moon, Sun } from 'lucide-react'
+import { Newspaper, AlertTriangle, Search, Loader2, Moon, Sun, Calendar, Clock, MapPin, Cloud, CloudRain, CloudSnow } from 'lucide-react'
 import { useTheme } from 'next-themes'
 
 interface Article {
@@ -110,9 +110,9 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground transition-colors">
+    <main className="min-h-screen transition-colors">
       {/* Top Bar Info */}
-      <div className="w-full bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800 py-2">
+      <div className="w-full bg-gray-100/50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800 py-2">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] sm:text-sm font-medium text-gray-600 dark:text-gray-400">
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-1.5 capitalize">
