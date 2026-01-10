@@ -19,6 +19,7 @@ interface Article {
 export default function Home() {
   const [allArticles, setAllArticles] = useState<Article[]>([])
   const [displayedArticles, setDisplayedArticles] = useState<Article[]>([])
+  const [filteredCount, setFilteredCount] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -40,6 +41,7 @@ export default function Home() {
         }
 
         setAllArticles(articles)
+        setFilteredCount(articles.length)
         setError(null)
       } catch (err: any) {
         setError(err.message || 'Une erreur est survenue')
@@ -65,6 +67,7 @@ export default function Home() {
       )
     }
 
+    setFilteredCount(filtered.length)
     setDisplayedArticles(filtered.slice(0, displayCount))
   }, [allArticles, search, displayCount])
 
@@ -72,7 +75,7 @@ export default function Home() {
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && displayCount < displayedArticles.length) {
+        if (entries[0].isIntersecting && displayCount < filteredCount) {
           setDisplayCount((prev) => prev + pageSize)
         }
       },
@@ -88,7 +91,7 @@ export default function Home() {
         observer.unobserve(observerTarget.current)
       }
     }
-  }, [displayCount, displayedArticles.length])
+  }, [displayCount, filteredCount])
 
   return (
     <main className="min-h-screen bg-white dark:bg-gray-950 transition-colors">
@@ -173,13 +176,7 @@ export default function Home() {
             </div>
 
             {/* Infinite Scroll Indicator */}
-            {displayCount < allArticles.filter((a) => {
-              if (!search) return true
-              const query = search.toLowerCase()
-              return a.title.toLowerCase().includes(query) ||
-                a.description?.toLowerCase().includes(query) ||
-                a.source?.toLowerCase().includes(query)
-            }).length && (
+            {displayCount < filteredCount && (
               <div ref={observerTarget} className="text-center py-8">
                 <div className="flex items-center justify-center gap-2">
                   <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
@@ -188,13 +185,7 @@ export default function Home() {
               </div>
             )}
 
-            {displayCount >= allArticles.filter((a) => {
-              if (!search) return true
-              const query = search.toLowerCase()
-              return a.title.toLowerCase().includes(query) ||
-                a.description?.toLowerCase().includes(query) ||
-                a.source?.toLowerCase().includes(query)
-            }).length && displayedArticles.length > 0 && (
+            {displayCount >= filteredCount && displayedArticles.length > 0 && (
               <div className="text-center py-8">
                 <p className="text-gray-400 dark:text-gray-500">Fin des articles</p>
               </div>
