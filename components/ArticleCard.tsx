@@ -68,7 +68,10 @@ export function ArticleCard({ article }: ArticleProps) {
           <div className="flex items-center gap-1.5">
             <Calendar size={14} />
             <time dateTime={article.publishedAt.toISOString()}>
-              {formatDistanceToNow(new Date(article.publishedAt), { addSuffix: true, locale: fr })}
+              {formatDistanceToNow(new Date(article.publishedAt), { addSuffix: true, locale: fr })
+                .replace('environ ', '')
+                .replace('minutes', 'mn')
+                .replace('minute', 'mn')}
             </time>
           </div>
           <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
