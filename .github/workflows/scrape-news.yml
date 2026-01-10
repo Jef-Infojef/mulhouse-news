@@ -2,7 +2,7 @@ name: Scrape Mulhouse News
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # Exécution toutes les 15 minutes
+    - cron: '*/5 * * * *' # Exécution toutes les 5 minutes
   workflow_dispatch: # Permet le déclenchement manuel
 
 jobs:
