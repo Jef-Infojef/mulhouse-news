@@ -81,7 +81,7 @@ def main():
     
     new_count = 0
     
-    for item in items[:20]: # Limite aux 20 premiers pour ne pas surcharger
+    for item in items[:100]: # Traiter jusqu'à 100 articles (le max du RSS)
         title_elem = item.find("title")
         link_elem = item.find("link")
         pub_elem = item.find("pubDate")
