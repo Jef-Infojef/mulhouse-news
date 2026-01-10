@@ -1,10 +1,8 @@
 'use server'
 
-import { PrismaClient } from '@prisma/client'
+import prisma from '@/lib/prisma'
 
-const prisma = new PrismaClient()
-
-export async function getLatestArticles(limit = 50) {
+export async function getLatestArticles(limit = 100) {
   try {
     const articles = await prisma.article.findMany({
       orderBy: {
@@ -12,9 +10,13 @@ export async function getLatestArticles(limit = 50) {
       },
       take: limit,
     })
+    
+    // Log pour debug (visible dans les logs Vercel)
+    console.log(`${articles.length} articles récupérés de la base.`)
+    
     return articles
   } catch (error) {
-    console.error('Erreur lors de la récupération des articles:', error)
+    console.error('ERREUR PRISMA:', error)
     return []
   }
 }
