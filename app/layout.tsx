@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mulhouse News - Actualités locales",
-  description: "L'actualité locale de Mulhouse en temps réel",
-};
+  title: "Mulhouse Actu - Actualités locales",
+  description: "Suivez l'actualité de Mulhouse et sa région en temps réel.",
+}
 
 export default function RootLayout({
   children,

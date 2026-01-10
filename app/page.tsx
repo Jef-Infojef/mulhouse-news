@@ -92,7 +92,7 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight sm:text-5xl">
-                  Mulhouse News.
+                  Mulhouse Actu
                 </h1>
                 <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl">
                   L'actualité locale en temps réel
@@ -186,7 +186,7 @@ export default function Home() {
 
         {/* Footer */}
         <footer className="mt-16 text-center text-gray-400 dark:text-gray-600 text-sm pb-8 border-t border-gray-200 dark:border-gray-800 pt-8">
-          <p>© {new Date().getFullYear()} Mulhouse News • Agrégateur automatique</p>
+          <p>© {new Date().getFullYear()} Mulhouse Actu • Agrégateur automatique</p>
         </footer>
       </div>
     </main>
