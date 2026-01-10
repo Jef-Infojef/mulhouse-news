@@ -11,12 +11,10 @@ export async function getLatestArticles(limit = 100) {
       take: limit,
     })
     
-    // Log pour debug (visible dans les logs Vercel)
-    console.log(`${articles.length} articles récupérés de la base.`)
-    
-    return articles
-  } catch (error) {
+    console.log(`${articles.length} articles récupérés.`)
+    return { articles, error: null }
+  } catch (error: any) {
     console.error('ERREUR PRISMA:', error)
-    return []
+    return { articles: [], error: error.message || String(error) }
   }
 }

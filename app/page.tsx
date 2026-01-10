@@ -1,13 +1,13 @@
 import { getLatestArticles } from './actions'
 import { ArticleCard } from '@/components/ArticleCard'
-import { Newspaper, RefreshCw } from 'lucide-react'
+import { Newspaper, AlertTriangle } from 'lucide-react'
 
 // Force le rendu dynamique pour avoir toujours les dernières news
 export const dynamic = 'force-dynamic'
-export const revalidate = 60 // Revalidation toutes les minutes au max
+export const revalidate = 60 
 
 export default async function Home() {
-  const articles = await getLatestArticles(100)
+  const { articles, error } = await getLatestArticles(100)
 
   return (
     <main className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
@@ -31,7 +31,25 @@ export default async function Home() {
           </div>
         </header>
 
-        {articles.length === 0 ? (
+        {error && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-8 rounded-r">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <AlertTriangle className="h-5 w-5 text-red-400" aria-hidden="true" />
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-red-700">
+                  Erreur de connexion : {error}
+                </p>
+                <p className="text-xs text-red-500 mt-1">
+                  Vérifiez la variable DATABASE_URL dans Vercel.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!error && articles.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-2xl shadow-sm">
             <p className="text-gray-500 text-lg">Aucun article trouvé pour le moment.</p>
             <p className="text-sm text-gray-400 mt-2">Le scraper est peut-être en train de tourner ?</p>
