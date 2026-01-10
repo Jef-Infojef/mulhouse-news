@@ -25,13 +25,42 @@ export default function Home() {
   const [search, setSearch] = useState('')
   const [displayCount, setDisplayCount] = useState(20)
   const [mounted, setMounted] = useState(false)
+  const [currentTime, setCurrentTime] = useState(new Date())
+  const [weather, setWeather] = useState<{ temp: number; code: number } | null>(null)
   const { resolvedTheme, setTheme } = useTheme()
 
   useEffect(() => {
     setMounted(true)
+    // Horloge en temps réel
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000)
+    
+    // Récupération météo Mulhouse
+    const fetchWeather = async () => {
+      try {
+        const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=47.7508&longitude=7.3359&current_weather=true')
+        const data = await res.json()
+        if (data.current_weather) {
+          setWeather({
+            temp: data.current_weather.temperature,
+            code: data.current_weather.weathercode
+          })
+        }
+      } catch (e) { console.error("Erreur météo", e) }
+    }
+    fetchWeather()
+    
+    return () => clearInterval(timer)
   }, [])
 
   const pageSize = 20
+
+  // Helper pour l'icône météo
+  const getWeatherIcon = (code: number) => {
+    if (code === 0) return <Sun size={18} className="text-yellow-500" />
+    if (code <= 3) return <Cloud size={18} className="text-gray-400" />
+    if (code <= 67) return <CloudRain size={18} className="text-blue-400" />
+    return <CloudSnow size={18} className="text-blue-200" />
+  }
 
   // Load all articles once
   useEffect(() => {
@@ -82,6 +111,33 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-white dark:bg-gray-950 transition-colors">
+      {/* Top Bar Info */}
+      <div className="w-full bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 py-2">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5 capitalize">
+              <Calendar size={14} className="text-blue-600" />
+              {mounted ? currentTime.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '...'}
+            </div>
+            <div className="flex items-center gap-1.5 border-l border-gray-300 dark:border-gray-700 pl-4">
+              <Clock size={14} className="text-blue-600" />
+              {mounted ? currentTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '...'}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-4 mt-1 sm:mt-0">
+            {weather && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-white dark:bg-gray-800 rounded-full shadow-sm border border-gray-200 dark:border-gray-700">
+                <MapPin size={12} className="text-red-500" />
+                <span>Mulhouse</span>
+                <span className="font-bold text-gray-900 dark:text-white">{weather.temp}°C</span>
+                {getWeatherIcon(weather.code)}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <header className="mb-10">
