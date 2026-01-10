@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { getLatestArticles } from './actions'
 import { ArticleCard } from '@/components/ArticleCard'
 import { Newspaper, AlertTriangle, Search, Loader2, Moon, Sun } from 'lucide-react'
@@ -25,7 +25,6 @@ export default function Home() {
   const [search, setSearch] = useState('')
   const [displayCount, setDisplayCount] = useState(20)
   const { theme, setTheme } = useTheme()
-  const observerTarget = useRef<HTMLDivElement>(null)
 
   const pageSize = 20
 
@@ -71,27 +70,10 @@ export default function Home() {
     setDisplayedArticles(filtered.slice(0, displayCount))
   }, [allArticles, search, displayCount])
 
-  // Infinite scroll
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && displayCount < filteredCount) {
-          setDisplayCount((prev) => prev + pageSize)
-        }
-      },
-      { threshold: 0.1 }
-    )
-
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current)
-    }
-
-    return () => {
-      if (observerTarget.current) {
-        observer.unobserve(observerTarget.current)
-      }
-    }
-  }, [displayCount, filteredCount])
+  // Load more function
+  const loadMore = () => {
+    setDisplayCount((prev) => prev + pageSize)
+  }
 
   return (
     <main className="min-h-screen bg-white dark:bg-gray-950 transition-colors">
@@ -175,19 +157,21 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Infinite Scroll Indicator */}
+            {/* Load More Button */}
             {displayCount < filteredCount && (
-              <div ref={observerTarget} className="text-center py-8">
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                  <span className="text-gray-500 dark:text-gray-400">Chargement de plus d'articles...</span>
-                </div>
+              <div className="text-center py-8">
+                <button
+                  onClick={loadMore}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+                >
+                  Charger plus d'articles ({filteredCount - displayCount} restants)
+                </button>
               </div>
             )}
 
             {displayCount >= filteredCount && displayedArticles.length > 0 && (
               <div className="text-center py-8">
-                <p className="text-gray-400 dark:text-gray-500">Fin des articles</p>
+                <p className="text-gray-400 dark:text-gray-500">Fin des articles ({filteredCount} articles)</p>
               </div>
             )}
           </>
