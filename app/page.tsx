@@ -113,23 +113,25 @@ export default function Home() {
     <main className="min-h-screen bg-white dark:bg-gray-950 transition-colors">
       {/* Top Bar Info */}
       <div className="w-full bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 py-2">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap justify-between items-center text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">
-          <div className="flex items-center gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] sm:text-sm font-medium text-gray-600 dark:text-gray-400">
+          <div className="flex items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-1.5 capitalize">
-              <Calendar size={14} className="text-blue-600" />
-              {mounted ? currentTime.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '...'}
+              <Calendar size={14} className="text-blue-600 shrink-0" />
+              <span className="whitespace-nowrap">
+                {mounted ? currentTime.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '...'}
+              </span>
             </div>
-            <div className="flex items-center gap-1.5 border-l border-gray-300 dark:border-gray-700 pl-4">
-              <Clock size={14} className="text-blue-600" />
-              {mounted ? currentTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '...'}
+            <div className="flex items-center gap-1.5 border-l border-gray-300 dark:border-gray-700 pl-3 sm:pl-4">
+              <Clock size={14} className="text-blue-600 shrink-0" />
+              <span>{mounted ? currentTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '...'}</span>
             </div>
           </div>
           
-          <div className="flex items-center gap-4 mt-1 sm:mt-0">
+          <div className="flex items-center gap-4">
             {weather && (
               <div className="flex items-center gap-2 px-3 py-1 bg-white dark:bg-gray-800 rounded-full shadow-sm border border-gray-200 dark:border-gray-700">
-                <MapPin size={12} className="text-red-500" />
-                <span>Mulhouse</span>
+                <MapPin size={12} className="text-red-500 shrink-0" />
+                <span className="hidden xs:inline">Mulhouse</span>
                 <span className="font-bold text-gray-900 dark:text-white">{weather.temp}°C</span>
                 {getWeatherIcon(weather.code)}
               </div>
@@ -138,34 +140,35 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <header className="mb-10">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <div className="inline-flex items-center justify-center p-3 bg-blue-600 rounded-full shadow-lg shadow-blue-200 dark:shadow-blue-900/50">
-                <Newspaper className="h-8 w-8 text-white" />
+        <header className="mb-8 sm:mb-10">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="inline-flex items-center justify-center p-2.5 sm:p-3 bg-blue-600 rounded-full shadow-lg shadow-blue-200 dark:shadow-blue-900/50">
+                <Newspaper className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
               </div>
               <div>
-                <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight sm:text-5xl">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight">
                   Mulhouse Actu
                 </h1>
-                <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl">
+                <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400 max-w-2xl">
                   L'actualité locale en temps réel
                 </p>
               </div>
             </div>
             {mounted && (
-              <button
-                onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-                className="p-2 rounded-lg bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700 shadow-sm"
-                aria-label="Toggle dark mode"
-              >
-                {resolvedTheme === 'dark' ? <Sun size={20} className="text-yellow-500" /> : <Moon size={20} className="text-blue-600" />}
-              </button>
+              <div className="self-end sm:self-center">
+                <button
+                  onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+                  className="p-2 sm:p-2.5 rounded-lg bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700 shadow-sm"
+                  aria-label="Toggle dark mode"
+                >
+                  {resolvedTheme === 'dark' ? <Sun size={20} className="text-yellow-500" /> : <Moon size={20} className="text-blue-600" />}
+                </button>
+              </div>
             )}
           </div>
-
         </header>
 
         {/* Search Bar */}
