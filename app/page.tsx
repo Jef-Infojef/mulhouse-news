@@ -164,15 +164,18 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Espace Pub - Bandeau Publicitaire */}
+            {/* Espace Pub - Medium Rectangle (IAB Standard) */}
             <div className="hidden lg:flex shrink-0">
-              <div className="w-40 h-32 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
-                <div className="text-center px-2">
-                  <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+              <div className="w-80 h-64 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
+                <div className="text-center px-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 font-medium">
                     Espace Publicitaire
                   </p>
-                  <p className="text-[10px] text-gray-500 dark:text-gray-500 mt-1">
-                    160×128px
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                    300×250px
+                  </p>
+                  <p className="text-[10px] text-gray-400 dark:text-gray-600 mt-1">
+                    Medium Rectangle (IAB)
                   </p>
                 </div>
               </div>
