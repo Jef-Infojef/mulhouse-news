@@ -114,13 +114,12 @@ export default function Home() {
       {/* Top Bar Info */}
       <div className="w-full bg-gray-100/50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800 py-2">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] sm:text-sm font-medium text-gray-600 dark:text-gray-400">
-          <div className="flex items-center gap-1.5 capitalize">
-            <Calendar size={14} className="text-blue-600 shrink-0" />
-            <span className="whitespace-nowrap">
-              {mounted ? currentTime.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '...'}
-            </span>
-          </div>
-          
+                      <div className="flex items-center gap-1.5 capitalize">
+                        <Calendar size={14} className="text-blue-600 shrink-0" />
+                        <span className="whitespace-nowrap">
+                          {mounted ? currentTime.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '...'}
+                        </span>
+                      </div>          
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-1.5 sm:border-l border-gray-300 dark:border-gray-700 sm:pl-4">
               <Clock size={14} className="text-blue-600 shrink-0" />
