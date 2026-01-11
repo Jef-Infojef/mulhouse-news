@@ -223,7 +223,7 @@ export default function Home() {
                   onClick={loadMore}
                   className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
                 >
-                  Charger plus d'articles ({filteredCount - displayCount} restants)
+                  Charger plus d'articles
                 </button>
               </div>
             )}
