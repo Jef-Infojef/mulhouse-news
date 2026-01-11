@@ -60,12 +60,12 @@ export function ArticleCard({ article }: ArticleProps) {
         </div>
       </div>
 
-      <div className="flex flex-col flex-grow p-5">
+      <div className="flex flex-col flex-grow p-5" title={article.description || ''}>
         <h2 className="text-lg font-bold text-gray-900 dark:text-slate-50 line-clamp-4 mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-300 transition-colors">
           {article.title}
         </h2>
         {article.description && (
-          <p className="text-sm text-gray-600 dark:text-slate-300 line-clamp-3 mb-3">
+          <p className="text-sm text-gray-600 dark:text-slate-300 line-clamp-3 group-hover:line-clamp-none mb-3 transition-all duration-300">
             {article.description}
           </p>
         )}
