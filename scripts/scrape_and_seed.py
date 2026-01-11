@@ -9,151 +9,140 @@ from googlenewsdecoder import gnewsdecoder
 import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
+import time
+import random
 
-# Charger les variables d'environnement depuis le fichier .env
-load_dotenv()
+# Charger les variables d'environnement
+load_dotenv(".env.local")
 
 # Configuration
 DATABASE_URL = os.environ.get("DATABASE_URL")
 RSS_URL = "https://news.google.com/rss/search?q=Mulhouse&hl=fr&gl=FR&ceid=FR:fr"
+MAX_CONSECUTIVE_DECODE_ERRORS = 3  # Arrêt si trop d'échecs de décodage (IP bannie)
 
 def get_db_connection():
     if not DATABASE_URL:
         raise Exception("DATABASE_URL non définie")
-    try:
-        return psycopg2.connect(DATABASE_URL)
-    except Exception as e:
-        # Si l'URL est au format Prisma (prisma+postgres://), psycopg2 ne va pas aimer.
-        raise Exception(f"Erreur de connexion DB (URL invalide ou serveur injoignable): {e}")
+    return psycopg2.connect(DATABASE_URL)
 
 def extract_real_url(google_url):
+    """Tente de décoder l'URL Google News"""
     try:
         decoded = gnewsdecoder(google_url)
         if decoded.get("status"):
             return decoded["decoded_url"]
         else:
-            print(f"    [!] Échec décodage: {decoded.get('message', 'Erreur inconnue')}")
+            print(f"    [!] Échec décodage Google: {decoded.get('message', 'Erreur inconnue')}")
     except Exception as e:
         print(f"    [!] Exception décodage: {e}")
     return google_url
 
-def fetch_og_image(url):
+def fetch_content_data(url):
+    """Récupère l'image OG et la description avec un User-Agent robuste"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+    }
+    
+    img, desc = None, None
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            print(f"    [!] fetch_og_image status: {resp.status_code} pour {url[:50]}...")
-        
+        resp = requests.get(url, headers=headers, timeout=12, allow_redirects=True)
         if resp.status_code == 200:
-            # Pattern 1: property="og:image" ... content="..."
-            match1 = re.search(r'<meta\s+[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', resp.text, re.IGNORECASE)
-            if match1:
-                return html.unescape(match1.group(1))
+            content = resp.text
+            # Extraction Image
+            m_img = re.search(r'property=["\"]og:image["\"][^>]*content=["\"]([^"\"]+)["\"]', content)
+            if not m_img: m_img = re.search(r'content=["\"]([^"\"]+)["\"][^>]*property=["\"]og:image["\"]', content)
+            if m_img: img = html.unescape(m_img.group(1))
             
-            # Pattern 2: content="..." ... property="og:image"
-            match2 = re.search(r'<meta\s+[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:image["\']', resp.text, re.IGNORECASE)
-            if match2:
-                return html.unescape(match2.group(1))
-    except Exception as e:
-        print(f"    [!] Erreur fetch_og_image: {e}")
-    return None
+            # Extraction Description
+            m_desc = re.search(r'property=["\"]og:description["\"][^>]*content=["\"]([^"\"]+)["\"]', content)
+            if not m_desc: m_desc = re.search(r'name=["\"]description["\"][^>]*content=["\"]([^"\"]+)["\"]', content)
+            if m_desc:
+                desc = html.unescape(m_desc.group(1))
+                if len(desc) > 250: desc = desc[:247] + "..."
+        else:
+            print(f"    [!] Erreur HTTP {resp.status_code} sur le média")
+    except Exception:
+        pass
+    return img, desc
 
 def main():
-    print("[*] Démarrage du scraping Google News...")
+    print(f"[*] Démarrage Mulhouse Actu Scraper - {datetime.now().strftime('%H:%M:%S')}")
     
-    # 1. Récupération du RSS
     try:
         resp = requests.get(RSS_URL, timeout=15)
-        if resp.status_code != 200:
-            print(f"[!] Erreur RSS: {resp.status_code}")
-            exit(1)
-    except Exception as e:
-        print(f"[!] Exception lors de la récupération RSS: {e}")
-        exit(1)
-        
-    try:
         root = ET.fromstring(resp.content)
         items = root.findall(".//item")
     except Exception as e:
-        print(f"[!] Erreur parsing XML: {e}")
-        exit(1)
+        print(f"[!] Erreur RSS: {e}")
+        return
 
     print(f"[+] {len(items)} articles trouvés dans le RSS.")
     
     conn = None
-    cur = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        print("[*] Connexion base de données : OK")
     except Exception as e:
-        print(f"[!] Impossible de se connecter à la base de données : {e}")
-        print("[*] Passage en mode SIMULATION (pas d'écriture en base)")
-        cur = None
-    
-    new_count = 0
-    
-    for item in items[:100]: # Traiter jusqu'à 100 articles (le max du RSS)
-        title_elem = item.find("title")
-        link_elem = item.find("link")
-        pub_elem = item.find("pubDate")
-        src_elem = item.find("source")
+        print(f"[!] Erreur DB: {e}")
+        return
 
-        title = title_elem.text if title_elem is not None else "Sans titre"
-        google_link = link_elem.text if link_elem is not None else ""
-        pub_date_str = pub_elem.text if pub_elem is not None else ""
-        source = src_elem.text if src_elem is not None else "Inconnu"
+    new_count = 0
+    consecutive_decode_errors = 0
+    
+    for item in items[:100]:
+        title = item.find("title").text or "Sans titre"
+        google_link = item.find("link").text or ""
+        pub_date_str = item.find("pubDate").text or ""
+        source = item.find("source").text or "Inconnu"
         
-        if not google_link:
+        if not google_link: continue
+
+        # 1. Décodage obligatoire
+        real_url = extract_real_url(google_link)
+        
+        # SÉCURITÉ : Si le lien est toujours un lien Google, on refuse l'article
+        if "google.com" in real_url:
+            consecutive_decode_errors += 1
+            print(f"\n[!] REJET : Impossible de décoder le lien pour '{title[:40]}...' ")
+            
+            if consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
+                print(f"\n[!!!] ARRÊT D'URGENCE : {consecutive_decode_errors} échecs de décodage consécutifs. IP probablement bannie.")
+                break
+            continue
+        
+        # Si succès, on reset le compteur d'erreurs
+        consecutive_decode_errors = 0
+
+        # 2. Vérifier si déjà en base
+        cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
+        if cur.fetchone():
             continue
 
-        # Convert date
-        try:
-            pub_date = parsedate_to_datetime(pub_date_str)
-        except:
-            pub_date = datetime.now()
-
-        print(f"\nTraitement: {title}")
+        print(f"\nNouveau: {title[:70]}")
         
-        # 2. Obtenir l'URL réelle
-        real_url = extract_real_url(google_link)
-        print(f"  -> URL: {real_url}")
-        
-        if cur:
-            # Vérifier si existe déjà
-            try:
-                cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
-                if cur.fetchone():
-                    print("  -> Déjà en base. Ignoré.")
-                    continue
-            except Exception as e:
-                print(f"  -> [!] Erreur lecture DB: {e}")
-                conn.rollback() # Reset transaction
-        
-        # 3. Récupérer l'image
-        image_url = fetch_og_image(real_url)
-        print(f"  -> Image: {image_url if image_url else 'Aucune'}")
+        # 3. Récupération métadonnées (Image + Description)
+        # On attend un peu pour ne pas brusquer les médias
+        time.sleep(random.uniform(0.5, 1.5))
+        image_url, description = fetch_content_data(real_url)
         
         # 4. Insertion
-        if cur:
-            try:
-                cur.execute("""
-                    INSERT INTO \"Article\" (id, title, link, \"imageUrl\", source, \"publishedAt\", \"updatedAt\")
-                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, NOW())
-                """, (title, real_url, image_url, source, pub_date))
-                conn.commit()
-                new_count += 1
-                print("  -> [+] Inséré !")
-            except Exception as e:
-                conn.rollback()
-                print(f"  -> [!] Erreur insertion: {e}")
-        else:
-            print("  -> [SIMULATION] Article prêt à être inséré.")
+        try:
+            cur.execute("""
+                INSERT INTO \"Article\" (id, title, link, \"imageUrl\", source, description, \"publishedAt\", \"updatedAt\")
+                VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW())
+            """, (title, real_url, image_url, source, description, parsedate_to_datetime(pub_date_str)))
+            conn.commit()
+            new_count += 1
+            print(f"  -> [+] Inséré (Img: {bool(image_url)}, Desc: {bool(description)})")
+        except Exception as e:
+            conn.rollback()
+            print(f"  -> [!] Erreur insertion: {e}")
 
-    print(f"\n[*] Terminé. {new_count} nouveaux articles ajoutés.")
-    if conn:
-        cur.close()
-        conn.close()
+    print(f"\n[*] Terminé. {new_count} articles ajoutés.")
+    cur.close()
+    conn.close()
 
 if __name__ == "__main__":
     main()
