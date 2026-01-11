@@ -11,7 +11,6 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  directUrl = env("DATABASE_DIRECT_URL")
 }
 
 model Article {
@@ -28,20 +27,4 @@ model Article {
 
   @@index([publishedAt])
   @@index([source])
-}
-
-model WeatherHistory {
-  id          String   @id @default(cuid())
-  location    String
-  day         Int
-  month       Int
-  year        Int
-  tempMax     Float
-  tempMin     Float
-  weatherCode Int
-  createdAt   DateTime @default(now())
-
-  @@unique([location, day, month, year])
-  @@index([location])
-  @@index([day, month])
 }

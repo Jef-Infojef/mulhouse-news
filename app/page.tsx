@@ -149,17 +149,33 @@ export default function Home() {
       <div className="max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <header className="mb-8 sm:mb-10">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <div className="inline-flex items-center justify-center p-2.5 sm:p-3 bg-blue-600 rounded-full shadow-lg shadow-blue-200 dark:shadow-blue-900/50">
-              <Newspaper className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+          <div className="flex items-start justify-between gap-4 sm:gap-6">
+            <div className="flex items-center gap-3 sm:gap-4 flex-1">
+              <div className="inline-flex items-center justify-center p-2.5 sm:p-3 bg-blue-600 rounded-full shadow-lg shadow-blue-200 dark:shadow-blue-900/50 shrink-0">
+                <Newspaper className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight">
+                  Mulhouse Actu
+                </h1>
+                <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400">
+                  L'actualité locale en temps réel
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight">
-                Mulhouse Actu
-              </h1>
-              <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400 max-w-2xl">
-                L'actualité locale en temps réel
-              </p>
+
+            {/* Espace Pub - Bandeau Publicitaire */}
+            <div className="hidden lg:flex shrink-0">
+              <div className="w-40 h-32 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
+                <div className="text-center px-2">
+                  <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                    Espace Publicitaire
+                  </p>
+                  <p className="text-[10px] text-gray-500 dark:text-gray-500 mt-1">
+                    160×128px
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </header>
