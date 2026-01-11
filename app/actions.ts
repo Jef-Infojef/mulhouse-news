@@ -2,10 +2,19 @@
 
 import prisma from '@/lib/prisma'
 
-export async function getLatestArticles() {
+export async function getLatestArticles(query?: string) {
   try {
+    const whereClause = query ? {
+      OR: [
+        { title: { contains: query, mode: 'insensitive' as const } },
+        { description: { contains: query, mode: 'insensitive' as const } },
+        { source: { contains: query, mode: 'insensitive' as const } },
+      ],
+    } : {};
+
     const articles = await prisma.article.findMany({
-      take: 200, // Optimisation : on ne récupère que les 200 derniers
+      where: whereClause,
+      take: 200, 
       orderBy: {
         publishedAt: 'desc',
       },

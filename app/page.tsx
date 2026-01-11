@@ -31,10 +31,8 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true)
-    // Horloge en temps réel
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     
-    // Récupération météo Mulhouse
     const fetchWeather = async () => {
       try {
         const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=47.7508&longitude=7.3359&current_weather=true')
@@ -54,19 +52,12 @@ export default function Home() {
 
   const pageSize = 20
 
-  // Helper pour l'icône météo
-  const getWeatherIcon = (code: number) => {
-    if (code === 0) return <Sun size={18} className="text-yellow-500" />
-    if (code <= 3) return <Cloud size={18} className="text-gray-400" />
-    if (code <= 67) return <CloudRain size={18} className="text-blue-400" />
-    return <CloudSnow size={18} className="text-blue-200" />
-  }
-
-  // Load all articles once
+  // Load articles with search
   useEffect(() => {
     const loadArticles = async () => {
+      setLoading(true)
       try {
-        const { articles, error: fetchError } = await getLatestArticles()
+        const { articles, error: fetchError } = await getLatestArticles(search)
 
         if (fetchError) {
           setError(fetchError)
@@ -74,7 +65,6 @@ export default function Home() {
         }
 
         setAllArticles(articles)
-        setFilteredCount(articles.length)
         setError(null)
       } catch (err: any) {
         setError(err.message || 'Une erreur est survenue')
@@ -83,26 +73,19 @@ export default function Home() {
       }
     }
 
-    loadArticles()
-  }, [])
+    // Système de debounce pour la recherche
+    const timeoutId = setTimeout(() => {
+      loadArticles()
+    }, search ? 500 : 0)
 
-  // Filter and slice articles based on search and displayCount
+    return () => clearTimeout(timeoutId)
+  }, [search])
+
+  // Slice articles for display
   useEffect(() => {
-    let filtered = allArticles
-
-    if (search) {
-      const query = search.toLowerCase()
-      filtered = allArticles.filter(
-        (article) =>
-          article.title.toLowerCase().includes(query) ||
-          article.description?.toLowerCase().includes(query) ||
-          article.source?.toLowerCase().includes(query)
-      )
-    }
-
-    setFilteredCount(filtered.length)
-    setDisplayedArticles(filtered.slice(0, displayCount))
-  }, [allArticles, search, displayCount])
+    setFilteredCount(allArticles.length)
+    setDisplayedArticles(allArticles.slice(0, displayCount))
+  }, [allArticles, displayCount])
 
   // Load more function
   const loadMore = () => {
@@ -146,16 +129,17 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <header className="mb-8 sm:mb-10">
-          <div className="flex items-start justify-between gap-4 sm:gap-6">
-            <div className="flex items-center gap-3 sm:gap-4 flex-1">
+      {/* HEADER PRINCIPAL - Intégré avec espace pub */}
+      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          <div className="flex items-start justify-between gap-6 lg:gap-8">
+            {/* Partie gauche - Logo et titre */}
+            <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
               <div className="inline-flex items-center justify-center p-2.5 sm:p-3 bg-blue-600 rounded-full shadow-lg shadow-blue-200 dark:shadow-blue-900/50 shrink-0">
                 <Newspaper className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
               </div>
-              <div>
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight">
+              <div className="min-w-0">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight truncate">
                   Mulhouse Actu
                 </h1>
                 <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400">
@@ -164,7 +148,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Espace Pub - Medium Rectangle (IAB Standard) */}
+            {/* Partie droite - Espace publicitaire (Medium Rectangle) */}
             <div className="hidden lg:flex shrink-0">
               <div className="w-80 h-64 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
                 <div className="text-center px-4">
@@ -181,7 +165,10 @@ export default function Home() {
               </div>
             </div>
           </div>
-        </header>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
 
         {/* Search Bar */}
         <div className="mb-8">
