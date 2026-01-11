@@ -5,6 +5,7 @@ import time
 import requests
 import xml.etree.ElementTree as ET
 import re
+import html
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +30,7 @@ load_dotenv(env_path)
 NEWS_DB_URL = os.environ.get("NEWS_DATABASE_URL")
 CITY = "Mulhouse"
 HISTORY_FILE = os.path.join(script_dir, "scraped_days.json")
+MAX_CONSECUTIVE_DECODE_ERRORS = 3
 
 class NewsScraperApp:
     def __init__(self, root):
@@ -39,6 +41,7 @@ class NewsScraperApp:
         
         self.history = self.load_history()
         self.stop_requested = False
+        self.consecutive_decode_errors = 0
         
         self.setup_ui()
         
@@ -77,7 +80,7 @@ class NewsScraperApp:
         main_frame = tk.Frame(self.root, bg="#f3f4f6", padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(main_frame, text="🚀 News Scraper & History Manager", font=("Helvetica", 16, "bold"), bg="#f3f4f6", fg="#1e293b").pack(pady=(0, 20))
+        tk.Label(main_frame, text="🚀 Mulhouse Actu - Scraper & History", font=("Helvetica", 16, "bold"), bg="#f3f4f6", fg="#1e293b").pack(pady=(0, 20))
 
         # Date Selection Frame
         date_frame = tk.LabelFrame(main_frame, text=" Période de Scraping ", bg="#f3f4f6", padx=15, pady=15)
@@ -116,11 +119,11 @@ class NewsScraperApp:
         self.status_label.pack(anchor=tk.W)
 
         # Logs
-        tk.Label(main_frame, text="Journal d'activité :", bg="#f3f4f6", font=("Helvetica", 10, "bold")).pack(anchor=tk.W, pady=(10, 5))
+        tk.Label(main_frame, text="Journal d\'activité :", bg="#f3f4f6", font=("Helvetica", 10, "bold")).pack(anchor=tk.W, pady=(10, 5))
         self.log_area = scrolledtext.ScrolledText(main_frame, height=15, font=("Consolas", 9), bg="#1e293b", fg="#f8fafc")
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
-        # Menu contextuel (clic droit) pour copier
+        # Menu contextuel
         self.context_menu = tk.Menu(self.log_area, tearoff=0)
         self.context_menu.add_command(label="Copier", command=self.copy_selection)
         self.log_area.bind("<Button-3>", self.show_context_menu)
@@ -133,8 +136,7 @@ class NewsScraperApp:
             selected_text = self.log_area.get(tk.SEL_FIRST, tk.SEL_LAST)
             self.root.clipboard_clear()
             self.root.clipboard_append(selected_text)
-        except:
-            pass 
+        except: pass 
 
     def log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -143,7 +145,7 @@ class NewsScraperApp:
 
     def stop_scraping(self):
         self.stop_requested = True
-        self.log("🛑 Arrêt demandé... Veuillez patienter à la fin du jour en cours.")
+        self.log("🛑 Arrêt demandé... Veuillez patienter.")
 
     def clear_history(self):
         if os.path.exists(HISTORY_FILE):
@@ -153,6 +155,7 @@ class NewsScraperApp:
 
     def start_scraping(self):
         self.stop_requested = False
+        self.consecutive_decode_errors = 0
         start_dt = self.start_cal.get_date()
         end_dt = self.end_cal.get_date()
         
@@ -176,7 +179,7 @@ class NewsScraperApp:
                 
             conn = psycopg2.connect(NEWS_DB_URL)
             cur = conn.cursor()
-            self.log("🔗 Connecté à la base de données Supabase (News).")
+            self.log("🔗 Connecté à la base de données.")
         except Exception as e:
             self.log(f"❌ Erreur DB : {e}")
             self.root.after(0, self.reset_buttons)
@@ -196,7 +199,11 @@ class NewsScraperApp:
                 self.log(f"🔍 Traitement du {day_fr}...")
                 self.status_label.config(text=f"Traitement du {day_fr}...")
                 
-                self.scrape_single_day(current_date, cur, conn)
+                success = self.scrape_single_day(current_date, cur, conn)
+                if not success and self.consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
+                    self.log(f"⛔ ARRÊT D'URGENCE : {self.consecutive_decode_errors} échecs de décodage consécutifs.")
+                    self.stop_requested = True
+                
                 self.save_history(day_str)
 
             processed_days += 1
@@ -204,16 +211,11 @@ class NewsScraperApp:
             self.progress_var.set(progress)
             
             current_date += timedelta(days=1)
-            time.sleep(0.3)
+            time.sleep(0.5)
 
         cur.close()
         conn.close()
-        
-        if self.stop_requested:
-            self.log("⏹️ Scraping arrêté par l'utilisateur.")
-        else:
-            self.log("🎉 Scraping terminé avec succès !")
-
+        self.log("🎉 Processus terminé.")
         self.root.after(0, self.reset_buttons)
 
     def reset_buttons(self):
@@ -232,76 +234,70 @@ class NewsScraperApp:
             resp = requests.get(rss_url, timeout=10)
             root = ET.fromstring(resp.content)
             items = root.findall(".//item")
-            total_rss = len(items)
             
-            # 1. Filtrer les articles pertinents et non présents en base
             to_process = []
             for item in items:
                 title = item.find("title").text
                 if CITY.lower() not in title.lower(): continue
-                
                 source = item.find("source").text if item.find("source") is not None else "Inconnu"
                 
                 cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND source = %s", (title, source))
                 if cur.fetchone(): continue
                 
-                google_link = item.find("link").text
-                pub_date_str = item.find("pubDate").text
-                try:
-                    pub_date = parsedate_to_datetime(pub_date_str)
-                except:
-                    pub_date = date_obj
-                
                 to_process.append({
                     'title': title,
                     'source': source,
-                    'google_link': google_link,
-                    'pub_date': pub_date
+                    'google_link': item.find("link").text,
+                    'pub_date': parsedate_to_datetime(item.find("pubDate").text) if item.find("pubDate") is not None else date_obj
                 })
 
             if not to_process:
-                self.log(f"   📊 RSS : {total_rss} trouvé(s) | Base : 0 ajouté(s) (déjà à jour).")
-                self.log("=" * 60)
-                return
+                self.log(f"   📊 {day_str} : Déjà à jour.")
+                return True
 
-            self.log(f"   🚀 Récupération parallèle de {len(to_process)} articles...")
+            self.log(f"   🚀 Traitement de {len(to_process)} articles...")
 
-            # 2. Fonction pour traiter un article (URL + Image)
-            def fetch_data(art):
-                real_url = self.decode_url(art['google_link'])
-                img_url = self.get_image(real_url)
-                art['real_url'] = real_url
-                art['image_url'] = img_url
-                return art
-
-            # 3. Exécution parallèle (max 10 workers)
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                results = list(executor.map(fetch_data, to_process))
-
-            # 4. Insertion séquentielle
             added_count = 0
-            for art in results:
+            for art in to_process:
                 if self.stop_requested: break
+                
+                # 1. Décodage sécurisé
+                real_url = self.decode_url(art['google_link'])
+                if "google.com" in real_url:
+                    self.consecutive_decode_errors += 1
+                    self.log(f"   ⚠️ REJET : Échec décodage ({self.consecutive_decode_errors}/3)")
+                    if self.consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
+                        return False
+                    continue
+                
+                self.consecutive_decode_errors = 0 # Reset si succès
+                
+                # 2. Vérification doublon URL réelle
+                cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
+                if cur.fetchone(): continue
+
+                # 3. Enrichissement
+                img_url, description = self.fetch_content_data(real_url)
+                
+                # 4. Insertion
                 try:
-                    display_title = (art['title'][:75] + '...') if len(art['title']) > 75 else art['title']
-                    self.log(f"   📰 {display_title}")
-                    
                     cur.execute("""
-                        INSERT INTO \"Article\" (id, title, link, \"imageUrl\", source, \"publishedAt\", \"updatedAt\")
-                        VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, NOW())
-                        ON CONFLICT (link) DO UPDATE SET \"imageUrl\" = EXCLUDED.\"imageUrl\", \"updatedAt\" = NOW()
-                    """, (art['title'], art['real_url'], art['image_url'], art['source'], art['pub_date']))
+                        INSERT INTO \"Article\" (id, title, link, \"imageUrl\", source, description, \"publishedAt\", \"updatedAt\")
+                        VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW())
+                    """, (art['title'], real_url, img_url, art['source'], description, art['pub_date']))
                     conn.commit()
                     added_count += 1
-                except:
+                    self.log(f"   ✅ {art['title'][:50]}...")
+                except Exception as e:
                     conn.rollback()
+                    self.log(f"   ❌ Erreur insertion: {e}")
             
-            self.log(f"   📊 RSS : {total_rss} trouvé(s) | Base : {added_count} ajouté(s).")
-            self.log("=" * 60)
+            self.log(f"   📊 Total : {added_count} ajoutés.")
+            return True
             
         except Exception as e:
             self.log(f"⚠️ Erreur le {day_str}: {e}")
-            self.log("=" * 60)
+            return True
 
     def decode_url(self, url):
         if gnewsdecoder:
@@ -311,15 +307,28 @@ class NewsScraperApp:
             except: pass
         return url
 
-    def get_image(self, url):
+    def fetch_content_data(self, url):
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        img, desc = None, None
         try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            r = requests.get(url, headers=headers, timeout=5)
+            r = requests.get(url, headers=headers, timeout=8)
             if r.status_code == 200:
-                m = re.search(r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\\]+)["\\]', r.text, re.IGNORECASE)
-                if m: return m.group(1)
+                # Image
+                m_img = re.search(r'property=["\"]og:image["\"][^>]*content=["\"]([^"\\]+)["\\]', r.text)
+                if not m_img: m_img = re.search(r'content=["\"]([^"\\]+)["\\][^>]*property=["\"]og:image["\"]', r.text)
+                if m_img: img = html.unescape(m_img.group(1))
+                # Description
+                m_desc = re.search(r'property=["\"]og:description["\"][^>]*content=["\"]([^"\\]+)["\\]', r.text)
+                if m_desc:
+                    desc = html.unescape(m_desc.group(1))
+                    if len(desc) > 250: desc = desc[:247] + "..."
         except: pass
-        return None
+        return img, desc
+
+    def reset_buttons(self):
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.status_label.config(text="Prêt")
 
 if __name__ == "__main__":
     root = tk.Tk()

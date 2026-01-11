@@ -101,19 +101,6 @@ def main():
 
         # 1. Décodage obligatoire
         real_url = extract_real_url(google_link)
-        
-        # SÉCURITÉ : Si le lien est toujours un lien Google, on refuse l'article
-        if "google.com" in real_url:
-            consecutive_decode_errors += 1
-            print(f"\n[!] REJET : Impossible de décoder le lien pour '{title[:40]}...' ")
-            
-            if consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
-                print(f"\n[!!!] ARRÊT D'URGENCE : {consecutive_decode_errors} échecs de décodage consécutifs. IP probablement bannie.")
-                break
-            continue
-        
-        # Si succès, on reset le compteur d'erreurs
-        consecutive_decode_errors = 0
 
         # 2. Vérifier si déjà en base
         cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
