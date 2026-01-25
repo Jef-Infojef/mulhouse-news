@@ -117,12 +117,16 @@ def main():
         time.sleep(random.uniform(0.5, 1.5))
         img, desc = fetch_content_data(real_url)
         
-        # Vérification doublon par image (si image présente)
+        # Vérification doublon par image (si image présente et non générique)
         if img:
-            cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (img,))
-            if cur.fetchone():
-                print(f"    [-] Doublon image détecté. Ignoré.")
-                continue
+            placeholders = ['logo', 'placeholder', 'header', 'facebook-share', 'default', 'image.png']
+            is_generic = any(p in img.lower() for p in placeholders)
+            
+            if not is_generic:
+                cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (img,))
+                if cur.fetchone():
+                    print(f"    [-] Doublon image détecté. Ignoré.")
+                    continue
 
         # 3. Insertion
         try:

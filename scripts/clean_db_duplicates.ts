@@ -3,52 +3,65 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function cleanDuplicates() {
-  console.log('--- Nettoyage des doublons d\'articles ---');
+  console.log('--- Nettoyage des doublons d\'articles (Titre & Image) ---');
 
-  // 1. Identifier les groupes de doublons (même titre)
-  const duplicates: any[] = await prisma.$queryRaw`
+  // 1. Doublons par TITRE
+  const titleDuplicates: any[] = await prisma.$queryRaw`
     SELECT title, COUNT(*) as count
     FROM "Article"
     GROUP BY title
-    HAVING COUNT(*) > 1
-    ORDER BY count DESC;
+    HAVING COUNT(*) > 1;
   `;
 
-  console.log(`${duplicates.length} titres en double identifiés.`);
+  console.log(`${titleDuplicates.length} groupes de doublons par titre identifiés.`);
 
-  let totalDeleted = 0;
-
-  for (const group of duplicates) {
-    const title = group.title;
-    
-    // Récupérer tous les articles avec ce titre
+  for (const group of titleDuplicates) {
     const articles = await prisma.article.findMany({
-      where: { title: title },
-      orderBy: [
-        { content: 'desc' }, // Garder celui qui a du contenu en priorité
-        { publishedAt: 'desc' }
-      ]
+      where: { title: group.title },
+      orderBy: [{ content: 'desc' }, { publishedAt: 'desc' }]
     });
+    if (articles.length > 1) {
+      const toDelete = articles.slice(1).map(a => a.id);
+      await prisma.article.deleteMany({ where: { id: { in: toDelete } } });
+      console.log(`[OK] Supprimé ${toDelete.length} doublon(s) pour le titre: "${group.title.substring(0, 50)}"...`);
+    }
+  }
 
-    if (articles.length <= 1) continue;
+  // 2. Doublons par IMAGE URL (ignorer les images génériques)
+  const imageDuplicates: any[] = await prisma.$queryRaw`
+    SELECT "imageUrl", COUNT(*) as count
+    FROM "Article"
+    WHERE "imageUrl" IS NOT NULL 
+      AND "imageUrl" <> '' 
+      AND "imageUrl" <> 'null'
+      AND "imageUrl" NOT ILIKE '%logo%'
+      AND "imageUrl" NOT ILIKE '%placeholder%'
+      AND "imageUrl" NOT ILIKE '%default%'
+      AND "imageUrl" NOT ILIKE '%header%'
+      AND "imageUrl" NOT ILIKE 'image.png'
+    GROUP BY "imageUrl"
+    HAVING COUNT(*) > 1;
+  `;
 
-    // Le premier est celui qu'on garde
-    const toKeep = articles[0];
-    const toDeleteIds = articles.slice(1).map(a => a.id);
+  console.log(`
+${imageDuplicates.length} groupes de doublons par URL d'image identifiés.`);
 
-    // Suppression
-    const result = await prisma.article.deleteMany({
-      where: {
-        id: { in: toDeleteIds }
-      }
+  let imgDeleted = 0;
+  for (const group of imageDuplicates) {
+    const articles = await prisma.article.findMany({
+      where: { imageUrl: group.imageUrl },
+      orderBy: [{ content: 'desc' }, { publishedAt: 'desc' }]
     });
-
-    totalDeleted += result.count;
-    console.log(`[OK] Titre: "${title.substring(0, 50)}"..." | Gardé: ${toKeep.id} | Supprimés: ${result.count}`);
+    if (articles.length > 1) {
+      const toDelete = articles.slice(1).map(a => a.id);
+      const res = await prisma.article.deleteMany({ where: { id: { in: toDelete } } });
+      imgDeleted += res.count;
+      console.log(`[OK] Supprimé ${res.count} doublon(s) pour l'image: "${group.imageUrl.substring(0, 60)}"...`);
+    }
   }
 
   console.log(`
-Fini ! Total supprimés : ${totalDeleted}`);
+Fini ! Total images supprimées : ${imgDeleted}`);
 }
 
 cleanDuplicates()
