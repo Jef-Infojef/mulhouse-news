@@ -123,9 +123,14 @@ def main():
             is_generic = any(p in img.lower() for p in placeholders)
             
             if not is_generic:
-                cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (img,))
+                # On ne bloque que si la même image a été utilisée AUJOURD'HUI
+                cur.execute("""
+                    SELECT id FROM \"Article\" 
+                    WHERE \"imageUrl\" = %s 
+                      AND \"publishedAt\"::date = %s::date
+                """, (img, parsedate_to_datetime(pub_date_str)))
                 if cur.fetchone():
-                    print(f"    [-] Doublon image détecté. Ignoré.")
+                    print(f"    [-] Doublon image détecté pour aujourd'hui. Ignoré.")
                     continue
 
         # 3. Insertion
