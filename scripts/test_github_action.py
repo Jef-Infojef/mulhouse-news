@@ -85,28 +85,18 @@ def main():
         print("[*] Cookies injectés.")
 
     try:
-        url = db_url.replace("?pgbouncer=true", "")
-        conn = psycopg2.connect(url)
-        cur = conn.cursor()
-        # On essaie de trouver un article qui a l'air "Premium" ou un long article
-        cur.execute("""
-            SELECT title, link FROM \"Article\" 
-            WHERE source ILIKE '%Alsace%' AND link LIKE '%www.lalsace.fr%' AND content IS NULL 
-            ORDER BY \"publishedAt\" DESC LIMIT 1
-        """)
-        article = cur.fetchone()
-        if article:
-            print(f"[*] Article : {article[0]}")
-            content = fetch_content(session, article[1])
-            if content:
-                print(f"✅ RÉSULTAT : {len(content)} caractères.")
-                # Si on a plus de 1000 chars, c'est presque sûr que la session marche !
-                if len(content) > 1000:
-                    print("🚀 LA SESSION SEMBLE FONCTIONNER SUR GITHUB !")
+        # Test sur l'article spécifique de 4ko
+        test_link = "https://www.lalsace.fr/insolite/2026/01/25/course-d-orientation-quand-l-histoire-industrielle-se-decouvre-un-plan-et-une-boussole-a-la-main"
+        print(f"[*] Article de test (4ko) : {test_link}")
+        content = fetch_content(session, test_link)
+        if content:
+            print(f"✅ RÉSULTAT : {len(content)} caractères.")
+            if len(content) > 3000:
+                print("🚀 LA SESSION FONCTIONNE PARFAITEMENT SUR GITHUB !")
             else:
-                print("❌ RÉSULTAT : Vide.")
-        cur.close()
-        conn.close()
+                print(f"⚠️ ATTENTION : Seulement {len(content)}/3927 caractères récupérés. Session probablement inactive.")
+        else:
+            print("❌ RÉSULTAT : Vide.")
     except Exception as e:
         print(f"❌ Erreur BDD : {e}")
 
