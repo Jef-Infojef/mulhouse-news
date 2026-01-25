@@ -81,8 +81,9 @@ def run_image_scripts():
     """Lance les scripts TS et retourne un résumé."""
     print("\n[*] Traitement des images et B2...")
     try:
-        subprocess.run(["npx", "ts-node", "scripts/download_images.ts"], check=True)
-        subprocess.run(["npx", "ts-node", "scripts/sync_to_b2.ts"], check=True)
+        # Utilisation de tsx (plus robuste sur GitHub Actions/ESM)
+        subprocess.run(["npx", "tsx", "scripts/download_images.ts"], check=True)
+        subprocess.run(["npx", "tsx", "scripts/sync_to_b2.ts"], check=True)
         return "Success"
     except Exception as e:
         return f"Error: {str(e)}"
