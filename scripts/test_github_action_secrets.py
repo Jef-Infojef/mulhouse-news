@@ -11,7 +11,7 @@ def load_config():
     return db_url, cookies_raw
 
 def fetch_content(url, cookies_dict):
-    print(f"[*] Fetching with curl_cffi (chrome110): {url}")
+    print(f"[*] Fetching with curl_cffi: {url}")
     try:
         resp = requests.get(
             url, 
@@ -40,40 +40,49 @@ def fetch_content(url, cookies_dict):
         return None
 
 def main():
-    print("=== TEST SCRAPER GITHUB AVEC SECRETS V2 ===")
+    print("=== TEST SCRAPER GITHUB AVEC SECRETS V3 ===")
     db_url, cookies_raw = load_config()
-    if not db_url or not cookies_raw: return
+    if not db_url or not cookies_raw: 
+        print("❌ Secrets manquants.")
+        return
 
     cookies_dict = {}
-    # Nettoyage des caractères invisibles et guillemets
+    # Nettoyage des guillemets
     clean = cookies_raw.strip().replace('"', '').replace("'", "")
     
-    # Extraction de TOUTES les paires Nom=Valeur
-    # Si le secret est ".XCONNECT_SESSION : 2=ABC; .X...", on cherche ce qui ressemble à des cookies
-    found_pairs = re.findall(r'([^;=\s]+)\s*=\s*([^;]+)', clean)
-    
-    for name, value in found_pairs:
-        name = name.strip()
-        value = value.strip()
-        
-        # Correction automatique si le nom est "2" ou commence par un point bizarre
-        if name == "2" or len(value) > 400:
-            # Si la valeur est très longue ou que le nom est "2", c'est la session
+    # Parsing manuel robuste
+    # On sépare par ';' puis on split seulement sur le PREMIER '=' trouvé pour chaque partie
+    parts = [p.strip() for p in clean.split(';') if p.strip()]
+    for p in parts:
+        if '=' in p:
+            name, value = p.split('=', 1)
+            name = name.strip()
+            value = value.strip()
+            
+            # Correction des noms de cookies mal formés (ex: ".XCONNECT_SESSION : 2")
+            if ':' in name: name = name.split(':')[-1].strip()
+            
+            # Si le nom est juste "2", c'est la valeur de .XCONNECT_SESSION qui a été mal collée
             if name == "2":
                 cookies_dict[".XCONNECT_SESSION"] = f"2={value}"
             else:
-                cookies_dict[".XCONNECT_SESSION"] = value
-        else:
-            cookies_dict[name] = value
+                cookies_dict[name] = value
 
-    # Si après ça on n'a toujours pas .XCONNECT_SESSION mais qu'on a un truc qui ressemble
+    # Si .XCONNECT_SESSION n'est pas nommé explicitement mais qu'on a une valeur longue
     if ".XCONNECT_SESSION" not in cookies_dict:
-        # On cherche la valeur la plus longue
-        longest_key = max(cookies_dict.keys(), key=lambda k: len(cookies_dict[k]), default=None)
-        if longest_key and len(cookies_dict[longest_key]) > 100:
-            cookies_dict[".XCONNECT_SESSION"] = cookies_dict.pop(longest_key)
+        for k, v in list(cookies_dict.items()):
+            if v.startswith('2=') and len(v) > 100:
+                cookies_dict[".XCONNECT_SESSION"] = cookies_dict.pop(k)
+                break
 
-    print(f"[*] Cookies préparés : {', '.join(cookies_dict.keys())}")
+    print(f"[*] Cookies préparés ({len(cookies_dict)}) : {', '.join(cookies_dict.keys())}")
+    
+    # Debug sécurisé de la longueur du cookie de session
+    if ".XCONNECT_SESSION" in cookies_dict:
+        sess_len = len(cookies_dict[".XCONNECT_SESSION"])
+        print(f"[*] Longueur de la session : {sess_len} caractères")
+        if sess_len < 400:
+            print("⚠️ ATTENTION : Le cookie de session semble trop court (valeur tronquée ?)")
 
     test_link = "https://www.lalsace.fr/insolite/2026/01/25/course-d-orientation-quand-l-histoire-industrielle-se-decouvre-un-plan-et-une-boussole-a-la-main"
     content = fetch_content(test_link, cookies_dict)
@@ -81,9 +90,7 @@ def main():
     if content:
         print(f"✅ RÉSULTAT : {len(content)} caractères.")
         if len(content) > 3000:
-            print("🚀 SUCCÈS : Les Secrets GitHub fonctionnent enfin !")
-        else:
-            print(f"⚠️ TRONQUÉ : {len(content)}/3927 chars.")
+            print("🚀 SUCCÈS TOTAL AVEC LES SECRETS GITHUB !")
     else:
         print("❌ ÉCHEC : Aucun contenu.")
 
