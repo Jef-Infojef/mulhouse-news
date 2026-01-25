@@ -13,7 +13,7 @@ import time
 import random
 
 # Charger les variables d'environnement
-load_dotenv(".env.local")
+load_dotenv()
 
 # Configuration
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -23,7 +23,8 @@ MAX_CONSECUTIVE_DECODE_ERRORS = 3
 def get_db_connection():
     if not DATABASE_URL:
         raise Exception("DATABASE_URL non définie")
-    return psycopg2.connect(DATABASE_URL)
+    clean_url = DATABASE_URL.replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+    return psycopg2.connect(clean_url)
 
 def extract_real_url(google_url):
     try:
@@ -102,9 +103,15 @@ def main():
             continue
         consecutive_decode_errors = 0
 
-        # 2. Vérifier doublon
+        # 2. Vérifier doublon (Lien OU Titre récent)
         cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
         if cur.fetchone(): continue
+
+        # Vérification par titre sur les 48 dernières heures (pour éviter les doublons multisources)
+        cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (title,))
+        if cur.fetchone():
+            # print(f"    [-] Doublon titre détecté: {title[:40]}...")
+            continue
 
         print(f"\nNouveau: {title[:70]}")
         time.sleep(random.uniform(0.5, 1.5))
