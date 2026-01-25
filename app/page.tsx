@@ -48,7 +48,7 @@ export default function Home() {
             code: data.current_weather.weathercode
           })
         }
-      } catch (e) { console.error(\"Erreur météo\", e) }
+      } catch (e) { console.error("Erreur mÃ©tÃ©o", e) }
     }
     fetchWeather()
     
@@ -102,74 +102,74 @@ export default function Home() {
   }
 
   function getWeatherIcon(code: number) {
-    if (code === 0) return <Sun size={14} className=\"text-yellow-500 shrink-0\" />
-    if (code >= 1 && code <= 3) return <Cloud size={14} className=\"text-blue-400 shrink-0\" />
-    if (code >= 45 && code <= 48) return <Cloud size={14} className=\"text-gray-400 shrink-0\" />
-    if (code >= 51 && code <= 67) return <CloudRain size={14} className=\"text-blue-500 shrink-0\" />
-    if (code >= 71 && code <= 77) return <CloudSnow size={14} className=\"text-blue-200 shrink-0\" />
-    if (code >= 80 && code <= 82) return <CloudRain size={14} className=\"text-blue-600 shrink-0\" />
-    if (code >= 85 && code <= 86) return <CloudSnow size={14} className=\"text-blue-300 shrink-0\" />
-    return <Sun size={14} className=\"text-yellow-500 shrink-0\" />
+    if (code === 0) return <Sun size={14} className="text-yellow-500 shrink-0" />
+    if (code >= 1 && code <= 3) return <Cloud size={14} className="text-blue-400 shrink-0" />
+    if (code >= 45 && code <= 48) return <Cloud size={14} className="text-gray-400 shrink-0" />
+    if (code >= 51 && code <= 67) return <CloudRain size={14} className="text-blue-500 shrink-0" />
+    if (code >= 71 && code <= 77) return <CloudSnow size={14} className="text-blue-200 shrink-0" />
+    if (code >= 80 && code <= 82) return <CloudRain size={14} className="text-blue-600 shrink-0" />
+    if (code >= 85 && code <= 86) return <CloudSnow size={14} className="text-blue-300 shrink-0" />
+    return <Sun size={14} className="text-yellow-500 shrink-0" />
   }
 
   return (
-    <main className=\"min-h-screen transition-colors\">
+    <main className="min-h-screen transition-colors">
       {/* Top Bar Info */}
-      <div className=\"w-full bg-gray-100/50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800 py-2\">
-        <div className=\"max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] sm:text-sm font-medium text-gray-600 dark:text-gray-400\">
-          <div className=\"flex items-center gap-1.5 capitalize\">
-            <Calendar size={14} className=\"text-blue-600 shrink-0\" />
-            <span className=\"whitespace-nowrap\">
+      <div className="w-full bg-gray-100/50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800 py-2">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] sm:text-sm font-medium text-gray-600 dark:text-gray-400">
+          <div className="flex items-center gap-1.5 capitalize">
+            <Calendar size={14} className="text-blue-600 shrink-0" />
+            <span className="whitespace-nowrap">
               {mounted ? currentTime.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '...'}
             </span>
           </div>
-          <div className=\"flex items-center gap-3 sm:gap-4\">
-            <div className=\"flex items-center gap-1.5 sm:border-l border-gray-300 dark:border-gray-700 sm:pl-4\">
-              <Clock size={14} className=\"text-blue-600 shrink-0\" />
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex items-center gap-1.5 sm:border-l border-gray-300 dark:border-gray-700 sm:pl-4">
+              <Clock size={14} className="text-blue-600 shrink-0" />
               <span>{mounted ? currentTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '...'}</span>
             </div>
 
             {weather && (
-              <div className=\"flex items-center gap-1.5 border-l border-gray-300 dark:border-gray-700 pl-3 sm:pl-4\">
+              <div className="flex items-center gap-1.5 border-l border-gray-300 dark:border-gray-700 pl-3 sm:pl-4">
                 {getWeatherIcon(weather.code)}
-                <span className=\"font-bold text-gray-900 dark:text-white\">{weather.temp}°C</span>
+                <span className="font-bold text-gray-900 dark:text-white">{weather.temp}Â°C</span>
               </div>
             )}
 
             {mounted && (
               <button
                 onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-                className=\"flex items-center justify-center p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm\"
-                aria-label=\"Toggle dark mode\"
+                className="flex items-center justify-center p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm"
+                aria-label="Toggle dark mode"
               >
-                {resolvedTheme === 'dark' ? <Sun size={14} className=\"text-yellow-500\" /> : <Moon size={14} className=\"text-blue-600\" />}
+                {resolvedTheme === 'dark' ? <Sun size={14} className="text-yellow-500" /> : <Moon size={14} className="text-blue-600" />}
               </button>
             )}
           </div>
         </div>
       </div>
 
-      <header className=\"bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700\">
-        <div className=\"max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8\">
-          <div className=\"flex items-start justify-between gap-6 lg:gap-8\">
-            <div className=\"flex items-center gap-3 sm:gap-4 flex-1 min-w-0\">
-              <div className=\"inline-flex items-center justify-center p-2.5 sm:p-3 bg-blue-600 rounded-full shadow-lg shadow-blue-200 dark:shadow-blue-900/50 shrink-0\">
-                <Newspaper className=\"h-6 w-6 sm:h-8 sm:w-8 text-white\" />
+      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          <div className="flex items-start justify-between gap-6 lg:gap-8">
+            <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+              <div className="inline-flex items-center justify-center p-2.5 sm:p-3 bg-blue-600 rounded-full shadow-lg shadow-blue-200 dark:shadow-blue-900/50 shrink-0">
+                <Newspaper className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
               </div>
-              <div className=\"min-w-0\">
-                <h1 className=\"text-3xl sm:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight truncate\">
+              <div className="min-w-0">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight truncate">
                   Mulhouse Actu
                 </h1>
-                <p className=\"text-sm sm:text-lg text-gray-600 dark:text-gray-400\">
-                  L''actualité locale en temps réel
+                <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400">
+                  L'actualitÃ© locale en temps rÃ©el
                 </p>
               </div>
             </div>
-            <div className=\"hidden lg:flex shrink-0\">
-              <div className=\"w-80 h-64 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center\">
-                <div className=\"text-center px-4\">
-                  <p className=\"text-sm text-gray-600 dark:text-gray-400 font-medium\">Espace Publicitaire</p>
-                  <p className=\"text-xs text-gray-500 dark:text-gray-500 mt-2\">300×250px</p>
+            <div className="hidden lg:flex shrink-0">
+              <div className="w-80 h-64 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center">
+                <div className="text-center px-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 font-medium">Espace Publicitaire</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">300x250px</p>
                 </div>
               </div>
             </div>
@@ -177,78 +177,78 @@ export default function Home() {
         </div>
       </header>
 
-      <div className=\"max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8\">
-        <div className=\"mb-8\">
-          <div className=\"relative\">
-            <Search className=\"absolute left-3 top-3 h-5 w-5 text-gray-400\" />
+      <div className="max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
+        <div className="mb-8">
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
             <input
-              type=\"text\"
-              placeholder=\"Rechercher et taper Entrée...\"
+              type="text"
+              placeholder="Rechercher et taper EntrÃ©e..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={handleKeyDown}
-              className=\"w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors\"
+              className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
             />
           </div>
         </div>
 
         {activeSearch && !loading && (
-          <div className=\"mb-8 flex items-center justify-between bg-blue-50/50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-900/30\">
-            <p className=\"text-blue-800 dark:text-blue-300 font-medium\">
+          <div className="mb-8 flex items-center justify-between bg-blue-50/50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-900/30">
+            <p className="text-blue-800 dark:text-blue-300 font-medium">
               {filteredCount > 0 
-                ? `${filteredCount} article${filteredCount > 1 ? ''s'' : ''} trouvé${filteredCount > 1 ? ''s'' : ''} pour \"${activeSearch}\"`
-                : `Aucun article trouvé pour \"${activeSearch}\"`
+                ? `${filteredCount} article${filteredCount > 1 ? 's' : ''} trouvÃ©${filteredCount > 1 ? 's' : ''} pour "${activeSearch}"`
+                : `Aucun article trouvÃ© pour "${activeSearch}"`
               }
             </p>
-            <button onClick={clearSearch} className=\"text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline\">
+            <button onClick={clearSearch} className="text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline">
               Effacer la recherche
             </button>
           </div>
         )}
 
         {error && (
-          <div className=\"bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 mb-8 rounded-r\">
-            <div className=\"flex\">
-              <AlertTriangle className=\"h-5 w-5 text-red-400\" />
-              <div className=\"ml-3\">
-                <p className=\"text-sm text-red-700 dark:text-red-400\">Erreur : {error}</p>
+          <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 mb-8 rounded-r">
+            <div className="flex">
+              <AlertTriangle className="h-5 w-5 text-red-400" />
+              <div className="ml-3">
+                <p className="text-sm text-red-700 dark:text-red-400">Erreur : {error}</p>
               </div>
             </div>
           </div>
         )}
 
         {loading ? (
-          <div className=\"text-center py-20\">
-            <Loader2 className=\"h-12 w-12 animate-spin text-blue-600 mx-auto mb-4\" />
-            <p className=\"text-gray-500 dark:text-gray-400 text-lg\">Chargement des articles...</p>
+          <div className="text-center py-20">
+            <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+            <p className="text-gray-500 dark:text-gray-400 text-lg">Chargement des articles...</p>
           </div>
         ) : displayedArticles.length === 0 ? (
-          <div className=\"text-center py-20 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800\">
-            <p className=\"text-gray-500 dark:text-gray-400 text-lg\">Aucun article trouvé.</p>
+          <div className="text-center py-20 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800">
+            <p className="text-gray-500 dark:text-gray-400 text-lg">Aucun article trouvÃ©.</p>
           </div>
         ) : (
           <>
-            <div className=\"grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8\">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               {displayedArticles.map((article) => (
                 <ArticleCard key={article.id} article={article} />
               ))}
             </div>
 
             {displayCount < filteredCount && (
-              <div className=\"text-center py-8\">
+              <div className="text-center py-8">
                 <button
                   onClick={loadMore}
-                  className=\"px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors\"
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
                 >
-                  Charger plus d''articles
+                  Charger plus d'articles
                 </button>
               </div>
             )}
           </>
         )}
 
-        <footer className=\"mt-16 text-center text-gray-400 dark:text-gray-600 text-sm pb-8 border-t border-gray-200 dark:border-gray-800 pt-8\">
-          <p>© {new Date().getFullYear()} Mulhouse Actu • Agrégateur automatique</p>
+        <footer className="mt-16 text-center text-gray-400 dark:text-gray-600 text-sm pb-8 border-t border-gray-200 dark:border-gray-800 pt-8">
+          <p>Â© {new Date().getFullYear()} Mulhouse Actu â€¢ AgrÃ©gateur automatique</p>
         </footer>
       </div>
     </main>
