@@ -44,13 +44,22 @@ def fetch_article_content(url, cookies_dict):
         if any(x in url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"]):
             chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
             if chapo: text_parts.append(chapo.get_text().strip())
+            
+            # Nouveau : Ciblage spécifique des descriptions vidéo/contenu court
+            inner = soup.find(class_='innerContent')
+            if inner: text_parts.append(inner.get_text(strip=True))
+
             for block in soup.find_all('div', class_='textComponent'):
                 txt = block.get_text("\n", strip=True)
                 if len(txt) > 10: text_parts.append(txt)
-            if not text_parts:
+            
+            if not text_parts or len("\n".join(text_parts)) < 100:
                 for script in soup.find_all('script', type='application/ld+json'):
                     try:
-                        data = json.loads(script.string)
+                        raw_json = script.string.strip()
+                        # Nettoyage des clés bizarres comme " @type"
+                        raw_json = raw_json.replace('" @', '"@')
+                        data = json.loads(raw_json)
                         items = data if isinstance(data, list) else [data]
                         for item in items:
                             if item.get('@type') in ['VideoObject', 'NewsArticle'] and item.get('description'):
