@@ -27,14 +27,29 @@ def get_db_connection():
 def fetch_article_content(url, cookies_dict):
     """Récupère le contenu complet selon la source."""
     try:
+        # Fallback intelligent pour le groupe EBRA (DNA, Est Républicain, etc.)
+        # Si on a des cookies L'Alsace, on tente de transformer l'URL DNA/EstRep en L'Alsace
+        target_url = url
+        if ALSACE_COOKIES and ("dna.fr" in url or "estrepublicain.fr" in url or "vosgesmatin.fr" in url):
+            target_url = url.replace("www.dna.fr", "www.lalsace.fr").replace("www.estrepublicain.fr", "www.lalsace.fr").replace("www.vosgesmatin.fr", "www.lalsace.fr")
+            if target_url != url:
+                print(f"    [🔄] Test Fallback L'Alsace pour : {url[:40]}...")
+
         time.sleep(random.uniform(1.0, 2.0))
-        resp = requests.get(url, cookies=cookies_dict, impersonate="chrome110", timeout=30, allow_redirects=True)
+        resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome110", timeout=30, allow_redirects=True)
+        
+        # Si le fallback L'Alsace échoue (404), on tente l'URL originale sans cookies (pour les gratuits)
+        if resp.status_code == 404 and target_url != url:
+            resp = requests.get(url, impersonate="chrome110", timeout=20, allow_redirects=True)
+            
         if resp.status_code != 200:
             return None, True, f"HTTP {resp.status_code}"
 
         page_text = resp.text
-        is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber", "premium"])
-        if not is_connected and ALSACE_COOKIES and "lalsace.fr" in url:
+        is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber", "premium", "Abonné"])
+        
+        # Si c'était un article L'Alsace (ou transformé en L'Alsace) et qu'on n'est pas connecté
+        if not is_connected and ALSACE_COOKIES and "lalsace.fr" in target_url:
             return None, False, "Session lost"
 
         soup = BeautifulSoup(page_text, 'html.parser')
