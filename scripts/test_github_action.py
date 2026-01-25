@@ -3,7 +3,6 @@ import requests
 import psycopg2
 from bs4 import BeautifulSoup
 import json
-import re
 
 def load_config():
     db_url = os.environ.get("DATABASE_URL")
@@ -15,55 +14,37 @@ def fetch_content(session, url):
     try:
         resp = session.get(url, timeout=20)
         
-        # Debug Cookies réellement envoyés
-        sent = session.cookies.get_dict()
-        print(f"[*] Cookies en session ({len(sent)}) : {', '.join(sent.keys())}")
-
-        # Détection de connexion plus fiable
-        page_text = resp.text
-        is_connected = "Se déconnecter" in page_text
-        has_login_btn = "Se connecter" in page_text
+        # Vérification de connexion améliorée
+        page_text = resp.text.lower()
+        # On cherche des indices de profil abonné
+        is_connected = any(x in page_text for x in ["se déconnecter", "mon compte", "mon profil", "suscriber", "premium"])
         
-        print(f"[*] Marqueur 'Se déconnecter' présent : {is_connected}")
-        print(f"[*] Marqueur 'Se connecter' présent : {has_login_btn}")
+        print(f"[*] État session sur GitHub : {'✅ CONNECTÉ' if is_connected else '❌ NON CONNECTÉ'}")
         
-        if is_connected:
-            print("   ✅ Statut : RÉELLEMENT CONNECTÉ")
-        else:
-            print("   ❌ Statut : NON CONNECTÉ")
-
         soup = BeautifulSoup(resp.text, 'html.parser')
         text_parts = []
         
         # 1. Chapô
         chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
-        if chapo: 
-            print("   ✅ Chapô extrait")
-            text_parts.append(chapo.get_text().strip())
+        if chapo: text_parts.append(chapo.get_text().strip())
         
-        # 2. Corps
+        # 2. Corps (textComponent)
         content_blocks = soup.find_all('div', class_='textComponent')
-        if content_blocks:
-            print(f"   ✅ {len(content_blocks)} blocs texte extraits")
-            for block in content_blocks:
-                txt = block.get_text("\n", strip=True)
-                if len(txt) > 10: text_parts.append(txt)
+        for block in content_blocks:
+            txt = block.get_text("\n", strip=True)
+            if len(txt) > 10: text_parts.append(txt)
             
-        # 3. LD+JSON (Vidéo)
-        scripts = soup.find_all('script', type='application/ld+json')
-        for script in scripts:
-            try:
-                data = json.loads(script.string)
-                items = data if isinstance(data, list) else [data]
-                for item in items:
-                    t = item.get('@type')
-                    print(f"   🔍 LD+JSON type trouvé : {t}")
-                    if t in ['VideoObject', 'NewsArticle'] and item.get('description'):
-                        desc = item['description'].strip()
-                        if len(desc) > 100:
-                            print(f"   ✅ Description extraite du JSON ({t})")
-                            text_parts.append(desc)
-            except: pass
+        # 3. Fallback Vidéo/LD+JSON
+        if not text_parts or len("\n".join(text_parts)) < 300:
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    data = json.loads(script.string)
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if item.get('@type') in ['VideoObject', 'NewsArticle'] and item.get('description'):
+                            desc = item['description'].strip()
+                            if len(desc) > 100: text_parts.append(desc)
+                except: pass
 
         return "\n\n".join(text_parts)
     except Exception as e:
@@ -71,7 +52,7 @@ def fetch_content(session, url):
         return None
 
 def main():
-    print("=== TEST SCRAPER GITHUB ACTIONS V4 ===")
+    print("=== TEST SCRAPER GITHUB ACTIONS V5 ===")
     db_url, cookies_raw = load_config()
     if not db_url: return
 
@@ -83,26 +64,31 @@ def main():
     })
     
     if cookies_raw:
-        # Nettoyage agressif des cookies (enlève guillemets, espaces, et préfixe si présent)
-        # On cherche des paires clé=valeur
-        raw = cookies_raw.replace('"', '').replace("'", "")
-        # Si l'utilisateur a collé ".XCONNECT_SESSION : 2=...", on enlève le préfixe
-        if ':' in raw and '=' in raw and raw.find(':') < raw.find('='):
-            raw = raw.split(':', 1)[1].strip()
-            
-        print(f"[*] Raw cookies après nettoyage (début) : {raw[:50]}...")
+        # Nettoyage et affectation intelligente
+        raw = cookies_raw.replace('"', '').replace("'", "").strip()
         
+        # Cas spécial : l'utilisateur n'a mis que la valeur "2=42F6..."
+        if raw.startswith('2=') and '.XCONNECT_SESSION' not in raw:
+            session.cookies.set(".XCONNECT_SESSION", raw, domain=".lalsace.fr")
+            print("[*] Cookie .XCONNECT_SESSION configuré automatiquement.")
+        
+        # Traitement des autres cookies (séparés par ;)
         parts = [p.strip() for p in raw.split(';') if '=' in p]
         for p in parts:
-            try:
-                k, v = p.split('=', 1)
-                session.cookies.set(k.strip(), v.strip(), domain=".lalsace.fr")
-            except: pass
+            k, v = p.split('=', 1)
+            k = k.strip()
+            if k == ".XCONNECT_SESSION":
+                session.cookies.set(k, v.strip(), domain=".lalsace.fr")
+            elif k in [".XCONNECTKeepAlive", ".XCONNECT", "_poool"]:
+                session.cookies.set(k, v.strip(), domain=".lalsace.fr")
+        
+        print(f"[*] Cookies chargés : {', '.join(session.cookies.get_dict().keys())}")
 
     try:
         url = db_url.replace("?pgbouncer=true", "")
         conn = psycopg2.connect(url)
         cur = conn.cursor()
+        # On cherche un article récent sans contenu
         cur.execute("""
             SELECT title, link FROM \"Article\" 
             WHERE source ILIKE '%Alsace%' AND link LIKE '%www.lalsace.fr%' AND content IS NULL 
@@ -113,9 +99,10 @@ def main():
             print(f"[*] Article : {article[0]}")
             content = fetch_content(session, article[1])
             if content:
-                print(f"✅ RÉSULTAT : {len(content)} chars.")
+                print(f"✅ SUCCÈS : {len(content)} caractères.")
+                print(content[:500] + "...")
             else:
-                print("❌ RÉSULTAT : Vide.")
+                print("❌ ÉCHEC : Contenu vide.")
         cur.close()
         conn.close()
     except Exception as e:
