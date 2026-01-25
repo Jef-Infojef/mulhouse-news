@@ -1,34 +1,44 @@
-import { PrismaClient } from '@prisma/client';
+import os
+import psycopg2
+from dotenv import load_dotenv
 
-const prisma = new PrismaClient();
+def get_count():
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for f in ["..env", ".env.local", ".env"]:
+        path = os.path.join(root_dir, f)
+        if os.path.exists(path):
+            load_dotenv(path)
+            break
+    
+    url = os.environ.get("DATABASE_URL").replace("?pgbouncer=true", "")
+    try:
+        conn = psycopg2.connect(url)
+        cur = conn.cursor()
+        
+        for month, start, end in [("Juillet", "2025-07-01", "2025-08-01"), ("Août", "2025-08-01", "2025-09-01")]:
+            cur.execute(f"""
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(content) as completed,
+                    COUNT(*) FILTER (WHERE LENGTH(content) < 500) as short
+                FROM \"Article\" 
+                WHERE source ILIKE '%%Alsace%%' 
+                  AND \"publishedAt\" >= '{start}' 
+                  AND \"publishedAt\" < '{end}'
+            """)
+            total, completed, short = cur.fetchone()
+            
+            print(f"L'Alsace - {month} 2025 :")
+            print(f" - Total articles : {total}")
+            print(f" - Articles complétés : {completed}")
+            print(f" - Articles sans contenu : {total - completed}")
+            print(f" - Articles complétés < 500 chars : {short}")
+            print("-" * 30)
+        
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"Erreur BDD: {e}")
 
-async function checkMonth(name: string, startStr: string, endStr: string) {
-  const start = new Date(startStr);
-  const end = new Date(endStr);
-
-  const total = await prisma.article.count({
-    where: { publishedAt: { gte: start, lte: end } }
-  });
-
-  const withImage = await prisma.article.count({
-    where: { 
-      publishedAt: { gte: start, lte: end },
-      imageUrl: { not: null, notIn: [''] }
-    }
-  });
-
-  const pct = total > 0 ? (withImage / total) * 100 : 0;
-  console.log(`${name} : ${pct.toFixed(1)}% (${withImage}/${total})`);
-}
-
-async function main() {
-  console.log('--- Rapport Complémentaire 2025 ---');
-  await checkMonth('Juin 2025  ', '2025-06-01T00:00:00Z', '2025-06-30T23:59:59Z');
-  await checkMonth('Juillet 2025', '2025-07-01T00:00:00Z', '2025-07-31T23:59:59Z');
-  await checkMonth('Août 2025   ', '2025-08-01T00:00:00Z', '2025-08-31T23:59:59Z');
-  await checkMonth('Septembre 2025', '2025-09-01T00:00:00Z', '2025-09-30T23:59:59Z');
-}
-
-main()
-  .catch((e) => console.error(e))
-  .finally(async () => await prisma.$disconnect());
+if __name__ == "__main__":
+    get_count()

@@ -1,42 +1,33 @@
-import { PrismaClient } from '@prisma/client';
+import os
+import psycopg2
+from dotenv import load_dotenv
 
-const prisma = new PrismaClient();
+def check_images():
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for f in ["..envenv", ".env.local", ".env"]:
+        if os.path.exists(f):
+            load_dotenv(f)
+            break
+    
+    url = os.environ.get("DATABASE_URL").replace("?pgbouncer=true", "")
+    try:
+        conn = psycopg2.connect(url)
+        cur = conn.cursor()
+        
+        cur.execute("SELECT COUNT(*) FROM \"Article\" WHERE \"imageUrl\" IS NULL OR \"imageUrl\" = ''")
+        missing = cur.fetchone()[0]
+        
+        cur.execute("SELECT COUNT(*) FROM \"Article\"")
+        total = cur.fetchone()[0]
+        
+        print(f"Total articles : {total}")
+        print(f"Articles sans image : {missing}")
+        print(f"Taux de complétion images : {((total - missing) / total * 100):.1f}%")
+        
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"Erreur BDD: {e}")
 
-async function main() {
-  const totalArticles = await prisma.article.count();
-  const withImage = await prisma.article.count({
-    where: {
-      imageUrl: { not: null, notIn: [''] }
-    }
-  });
-
-  const globalPercentage = (withImage / totalArticles) * 100;
-
-  console.log('--- Rapport sur les Images d\'illustration ---');
-  console.log(`Total articles : ${totalArticles}`);
-  console.log(`Avec image     : ${withImage}`);
-  console.log(`Pourcentage    : ${globalPercentage.toFixed(2)}%\n`);
-
-  // Détail par mois
-  const stats: any = await prisma.$queryRaw`
-    SELECT 
-      TO_CHAR("publishedAt", 'YYYY-MM') as month,
-      COUNT(*) as total,
-      SUM(CASE WHEN "imageUrl" IS NOT NULL AND "imageUrl" <> '' THEN 1 ELSE 0 END) as has_image
-    FROM "Article"
-    GROUP BY month
-    ORDER BY month DESC;
-  `;
-
-  console.log('Détail par mois :');
-  stats.forEach((row: any) => {
-    const total = Number(row.total);
-    const hasImage = Number(row.has_image);
-    const pct = (hasImage / total) * 100;
-    console.log(`- ${row.month} : ${pct.toFixed(1)}% (${hasImage}/${total})`);
-  });
-}
-
-main()
-  .catch((e) => console.error(e))
-  .finally(async () => await prisma.$disconnect());
+if __name__ == "__main__":
+    check_images()

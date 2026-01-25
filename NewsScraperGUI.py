@@ -31,7 +31,7 @@ load_dotenv(env_path)
 NEWS_DB_URL = os.environ.get("NEWS_DATABASE_URL")
 CITY = "Mulhouse"
 HISTORY_FILE = os.path.join(script_dir, "scraped_days.json")
-MAX_CONSECUTIVE_DECODE_ERRORS = 3
+MAX_CONSECUTIVE_DECODE_ERRORS = 5
 
 class NewsScraperApp:
     def __init__(self, root):
@@ -95,6 +95,21 @@ class NewsScraperApp:
         tk.Label(main_frame, text="Journal d'activité :", bg="#f3f4f6", font=("Helvetica", 10, "bold")).pack(anchor=tk.W, pady=(5, 5))
         self.log_area = scrolledtext.ScrolledText(main_frame, height=18, font=("Consolas", 9), bg="#1e293b", fg="#f8fafc")
         self.log_area.pack(fill=tk.BOTH, expand=True)
+
+        # Menu contextuel (clic droit)
+        self.context_menu = tk.Menu(self.log_area, tearoff=0)
+        self.context_menu.add_command(label="Copier", command=self.copy_selection)
+        self.log_area.bind("<Button-3>", self.show_context_menu)
+
+    def show_context_menu(self, event):
+        self.context_menu.post(event.x_root, event.y_root)
+
+    def copy_selection(self):
+        try:
+            selected_text = self.log_area.get(tk.SEL_FIRST, tk.SEL_LAST)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(selected_text)
+        except: pass 
 
     def log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -225,10 +240,14 @@ class NewsScraperApp:
             self.log(f"   🚀 {len(to_process)} nouveaux trouvés.")
             for art in to_process:
                 if self.stop_requested: break
+                # 1. Décodage sécurisé
                 real_url = self.decode_url(art['link'])
                 if "google.com" in real_url:
                     self.consecutive_decode_errors += 1
-                    if self.consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS: return False
+                    self.log(f"   ⚠️ Échec décodage Google ({self.consecutive_decode_errors}/{MAX_CONSECUTIVE_DECODE_ERRORS})")
+                    if self.consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
+                        self.log("⛔ ARRÊT D'URGENCE : IP probablement bloquée par Google.")
+                        return False
                     continue
                 self.consecutive_decode_errors = 0
                 img, desc = self.fetch_content_data(real_url)

@@ -10,6 +10,8 @@ interface ArticleProps {
     title: string
     link: string
     imageUrl: string | null
+    localImage: string | null
+    r2Url: string | null
     source: string | null
     description: string | null
     publishedAt: Date
@@ -17,25 +19,12 @@ interface ArticleProps {
 }
 
 export function ArticleCard({ article }: ArticleProps) {
-  // Fonction pour obtenir une couleur de badge selon la source
-  const getSourceColor = (source: string | null) => {
-    const s = source?.toLowerCase() || ''
-    if (s.includes('l\'alsace')) return 'bg-red-100 dark:bg-red-950/60 text-red-900 dark:text-red-100'
-    if (s.includes('dna')) return 'bg-blue-100 dark:bg-blue-950/60 text-blue-900 dark:text-blue-100'
-    if (s.includes('mulhouse')) return 'bg-purple-100 dark:bg-purple-950/60 text-purple-900 dark:text-purple-100'
-    return 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
-  }
-
-  // Extraction du domaine pour le favicon de secours
-  const getDomain = (url: string) => {
-    try {
-      return new URL(url).hostname
-    } catch {
-      return ''
-    }
-  }
+  // ... (reste du code identique)
 
   const fallbackImageUrl = `https://www.google.com/s2/favicons?domain=${getDomain(article.link)}&sz=256`
+  
+  // Priorité pour le web : Image distante originale > Backup R2 > Favicon
+  const displayImageUrl = article.imageUrl || article.r2Url || fallbackImageUrl
 
   return (
     <Link
@@ -46,12 +35,12 @@ export function ArticleCard({ article }: ArticleProps) {
     >
       <div className="relative h-48 w-full overflow-hidden bg-gray-100 dark:bg-slate-700">
         <Image
-          src={article.imageUrl || fallbackImageUrl}
+          src={displayImageUrl}
           alt={article.title}
           fill
           className="object-cover transition-transform duration-500 group-hover:scale-105"
           sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-          unoptimized={!article.imageUrl} // Évite les problèmes d'optimisation sur l'URL externe du favicon
+          unoptimized={true} // On désactive l'optimisation pour les images externes et locales simples
         />
         <div className="absolute top-3 right-3">
           <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getSourceColor(article.source)}`}>

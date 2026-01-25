@@ -11,6 +11,7 @@ interface Article {
   title: string
   link: string
   imageUrl: string | null
+  localImage: string | null
   source: string | null
   description: string | null
   publishedAt: Date
