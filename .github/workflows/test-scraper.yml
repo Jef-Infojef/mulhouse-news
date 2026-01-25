@@ -16,7 +16,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests psycopg2-binary beautifulsoup4
+          pip install requests psycopg2-binary beautifulsoup4 curl_cffi
 
       - name: Run Test Script
         env:
