@@ -13,9 +13,9 @@ def log_failure():
         cur = conn.cursor()
         
         cur.execute("""
-            INSERT INTO \"ScrapingLog\" (id, \"startedAt\", \"finishedAt\", status, \"errorMessage\")
-            VALUES (gen_random_uuid(), NOW(), NOW(), 'GITHUB_CRASH', 'GitHub Action a échoué avant ou pendant l\'exécution du script principal.')
-        """)
+            INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "errorMessage")
+            VALUES (gen_random_uuid(), NOW(), NOW(), 'GITHUB_CRASH', %s)
+        """, ('GitHub Action a échoué avant ou pendant l\'exécution du script principal.',))
         conn.commit()
         cur.close()
         conn.close()
