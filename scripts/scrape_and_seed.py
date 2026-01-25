@@ -117,6 +117,13 @@ def main():
         time.sleep(random.uniform(0.5, 1.5))
         img, desc = fetch_content_data(real_url)
         
+        # Vérification doublon par image (si image présente)
+        if img:
+            cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (img,))
+            if cur.fetchone():
+                print(f"    [-] Doublon image détecté. Ignoré.")
+                continue
+
         # 3. Insertion
         try:
             cur.execute("""
