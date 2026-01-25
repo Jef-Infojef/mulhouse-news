@@ -58,7 +58,7 @@ export function ArticleCard({ article }: ArticleProps) {
 
   const getSourceColor = (source: string | null) => {
     const s = source?.toLowerCase() || ''
-    if (s.includes('l''alsace')) return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
+    if (s.includes("l'alsace")) return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
     if (s.includes('dna')) return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200'
     if (s.includes('mplus') || s.includes('mulhouse')) return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200'
     if (s.includes('france bleu')) return 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
