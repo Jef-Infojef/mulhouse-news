@@ -21,9 +21,14 @@ def fetch_content(url, cookies_dict):
         )
         
         page_text = resp.text
+        # Détection de connexion
         is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber"])
         print(f"[*] État session sur GitHub : {'✅ CONNECTÉ' if is_connected else '❌ NON CONNECTÉ'}")
         
+        if not is_connected:
+            print("[!] Marqueurs non trouvés. Vérifiez si vous voyez 'Se connecter' dans le texte suivant :")
+            print(page_text[:500].replace('\n', ' '))
+
         soup = BeautifulSoup(page_text, 'html.parser')
         text_parts = []
         chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
@@ -40,49 +45,37 @@ def fetch_content(url, cookies_dict):
         return None
 
 def main():
-    print("=== TEST SCRAPER GITHUB AVEC SECRETS V3 ===")
+    print("=== TEST SCRAPER GITHUB AVEC SECRETS V4 ===")
     db_url, cookies_raw = load_config()
     if not db_url or not cookies_raw: 
         print("❌ Secrets manquants.")
         return
 
-    cookies_dict = {}
-    # Nettoyage des guillemets
-    clean = cookies_raw.strip().replace('"', '').replace("'", "")
-    
-    # Parsing manuel robuste
-    # On sépare par ';' puis on split seulement sur le PREMIER '=' trouvé pour chaque partie
-    parts = [p.strip() for p in clean.split(';') if p.strip()]
-    for p in parts:
-        if '=' in p:
-            name, value = p.split('=', 1)
-            name = name.strip()
-            value = value.strip()
-            
-            # Correction des noms de cookies mal formés (ex: ".XCONNECT_SESSION : 2")
-            if ':' in name: name = name.split(':')[-1].strip()
-            
-            # Si le nom est juste "2", c'est la valeur de .XCONNECT_SESSION qui a été mal collée
-            if name == "2":
-                cookies_dict[".XCONNECT_SESSION"] = f"2={value}"
-            else:
-                cookies_dict[name] = value
+    # NETTOYAGE SPÉCIFIQUE POUR LE FORMAT : .XCONNECT_SESSION : "2=..."
+    clean = cookies_raw.strip()
+    print(f"[*] Raw secret reçu (longueur: {len(clean)})")
 
-    # Si .XCONNECT_SESSION n'est pas nommé explicitement mais qu'on a une valeur longue
-    if ".XCONNECT_SESSION" not in cookies_dict:
-        for k, v in list(cookies_dict.items()):
-            if v.startswith('2=') and len(v) > 100:
-                cookies_dict[".XCONNECT_SESSION"] = cookies_dict.pop(k)
-                break
-
-    print(f"[*] Cookies préparés ({len(cookies_dict)}) : {', '.join(cookies_dict.keys())}")
+    # 1. On enlève les guillemets au début et à la fin s'ils existent
+    clean = re.sub(r'^["\']|["\']$', '', clean)
     
-    # Debug sécurisé de la longueur du cookie de session
-    if ".XCONNECT_SESSION" in cookies_dict:
-        sess_len = len(cookies_dict[".XCONNECT_SESSION"])
-        print(f"[*] Longueur de la session : {sess_len} caractères")
-        if sess_len < 400:
-            print("⚠️ ATTENTION : Le cookie de session semble trop court (valeur tronquée ?)")
+    # 2. Si le format est ".XCONNECT_SESSION : "2=...", on extrait la partie après les deux-points
+    if ':' in clean:
+        parts = clean.split(':', 1)
+        # On ne garde que la partie valeur et on enlève les guillemets intérieurs si présents
+        clean = parts[1].strip().replace('"', '').replace("'", "")
+    
+    # 3. Si le format était juste ".XCONNECT_SESSION = 2=...", on gère aussi
+    elif clean.startswith('.XCONNECT_SESSION='):
+        clean = clean.replace('.XCONNECT_SESSION=', '', 1).strip().replace('"', '').replace("'", "")
+
+    cookies_dict = {
+        ".XCONNECT_SESSION": clean,
+        ".XCONNECTKeepAlive": "2=1",
+        ".XCONNECT": "2=1"
+    }
+
+    print(f"[*] Session extraite (début) : {cookies_dict['.XCONNECT_SESSION'][:50]}...")
+    print(f"[*] Longueur finale de la session : {len(cookies_dict['.XCONNECT_SESSION'])} caractères")
 
     test_link = "https://www.lalsace.fr/insolite/2026/01/25/course-d-orientation-quand-l-histoire-industrielle-se-decouvre-un-plan-et-une-boussole-a-la-main"
     content = fetch_content(test_link, cookies_dict)
@@ -90,7 +83,7 @@ def main():
     if content:
         print(f"✅ RÉSULTAT : {len(content)} caractères.")
         if len(content) > 3000:
-            print("🚀 SUCCÈS TOTAL AVEC LES SECRETS GITHUB !")
+            print("🚀 SUCCÈS : Le nettoyage du secret a fonctionné !")
     else:
         print("❌ ÉCHEC : Aucun contenu.")
 
