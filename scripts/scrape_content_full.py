@@ -121,6 +121,13 @@ def main():
         articles = cur.fetchall()
         
         for i, (art_id, title, link) in enumerate(articles, 1):
+            # Si on n'est pas connecté, on saute les sites qui nécessitent un compte
+            is_ebra = any(x in link for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"])
+            if is_ebra and not stats["is_connected"]:
+                print(f"    [{i}/{len(articles)}] SKIP | {title[:40]}... (Non connecté)")
+                session_details.append({"title": title, "link": link, "status": "SKIPPED", "error": "Not connected"})
+                continue
+
             content, active, err = fetch_article_content(link, cookies_dict)
             status = "SUCCESS" if content else "FAILED"
             if not active:

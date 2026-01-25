@@ -169,6 +169,15 @@ export default function AdminLogsPage() {
 
                 {expandedLog === log.id && (
                   <div className="border-t border-gray-700 p-6 bg-gray-900/50 rounded-b-2xl">
+                    {!log.isConnected && (
+                      <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-xl mb-6 flex items-center gap-3">
+                        <ShieldAlert className="shrink-0" />
+                        <div className="text-sm">
+                          <strong>Scraping EBRA désactivé :</strong> La session abonné est expirée ou invalide. Les articles de L'Alsace, DNA et Est Républicain ont été ignorés pour éviter les contenus tronqués.
+                        </div>
+                      </div>
+                    )}
+
                     {log.errorMessage && (
                       <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl mb-6 font-mono text-sm">
                         <strong>ERREUR CRITIQUE :</strong> {log.errorMessage}
@@ -177,7 +186,7 @@ export default function AdminLogsPage() {
                     
                     <h3 className="text-sm font-bold uppercase tracking-widest text-gray-500 mb-4">Détails des articles</h3>
                     <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                      {log.details && JSON.parse(JSON.stringify(log.details)).map((detail: any, idx: number) => (
+                      {(log.details ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : []).map((detail: any, idx: number) => (
                         <div key={idx} className="flex items-start justify-between gap-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 group">
                           <div className="flex-1 min-w-0">
                             <div className="text-white font-medium truncate">{detail.title}</div>
@@ -192,13 +201,14 @@ export default function AdminLogsPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
-                            {detail.chars && <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded font-mono">{detail.chars} chars</span>}
+                            {detail.chars > 0 && <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded font-mono">{detail.chars} chars</span>}
                             <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${
                               detail.status === 'SUCCESS' ? 'bg-green-500/20 text-green-400' :
                               detail.status === 'SESSION_LOST' ? 'bg-orange-500/20 text-orange-400' :
+                              detail.status === 'SKIPPED' ? 'bg-gray-700 text-gray-400' :
                               'bg-red-500/20 text-red-400'
                             }`}>
-                              {detail.status}
+                              {detail.status === 'SKIPPED' ? 'IGNORÉ' : detail.status}
                             </span>
                           </div>
                         </div>
