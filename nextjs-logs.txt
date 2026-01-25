@@ -540,3 +540,7 @@ https://nextjs.org/docs/messages/module-not-found
  GET /admin/logs 200 in 29ms (compile: 4ms, render: 26ms)
  GET /admin/logs 200 in 95ms (compile: 5ms, render: 90ms)
  POST /admin/logs 200 in 372ms (compile: 4ms, render: 368ms)
+ GET /admin/logs 200 in 52ms (compile: 4ms, render: 48ms)
+ POST /admin/logs 200 in 330ms (compile: 3ms, render: 326ms)
+✓ Compiled in 198ms
+^C^C

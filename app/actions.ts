@@ -6,7 +6,7 @@ export async function getLatestArticles(query?: string) {
   try {
     const whereClause = query ? {
       OR: [
-        { title: { contains: query, mode: 'insensitive' as const } },
+        { title: { contains: query, mode: 'insensitive' as const } }, { content: { contains: query, mode: 'insensitive' as const } },
         { description: { contains: query, mode: 'insensitive' as const } },
         { source: { contains: query, mode: 'insensitive' as const } },
       ],
@@ -82,3 +82,4 @@ export async function getScrapingLogs() {
     return { logs: [], error: error.message || String(error) }
   }
 }
+

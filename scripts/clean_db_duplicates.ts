@@ -1,74 +1,56 @@
-import { PrismaClient } from '@prisma/client'
-const prisma = new PrismaClient()
+import { PrismaClient } from '@prisma/client';
 
-async function main() {
-  console.log("Recherche des doublons dans la base de données...")
-  
-  // On récupère tous les articles récents (on limite aux 1000 derniers pour la performance, 
-  // car les doublons sont généralement proches dans le temps)
-  const articles = await prisma.article.findMany({
-    take: 1000,
-    orderBy: { createdAt: 'desc' }
-  })
+const prisma = new PrismaClient();
 
-  const seenTitles = new Map<string, string>() // title.toLowerCase() -> id
-  const seenImageUrls = new Map<string, string>() // imageUrl -> id
-  const seenImageUuids = new Map<string, string>() // uuid -> id
-  const toDelete = new Set<string>()
+async function cleanDuplicates() {
+  console.log('--- Nettoyage des doublons d\'articles ---');
 
-  for (const article of articles) {
-    const cleanTitle = article.title.trim().toLowerCase()
-    const imageUrl = article.imageUrl
-    let ebraUuid = null
+  // 1. Identifier les groupes de doublons (même titre)
+  const duplicates: any[] = await prisma.$queryRaw`
+    SELECT title, COUNT(*) as count
+    FROM "Article"
+    GROUP BY title
+    HAVING COUNT(*) > 1
+    ORDER BY count DESC;
+  `;
+
+  console.log(`${duplicates.length} titres en double identifiés.`);
+
+  let totalDeleted = 0;
+
+  for (const group of duplicates) {
+    const title = group.title;
     
-    if (imageUrl) {
-      const match = imageUrl.match(/\/images\/([^\/]+)\//)
-      if (match) ebraUuid = match[1]
-    }
+    // Récupérer tous les articles avec ce titre
+    const articles = await prisma.article.findMany({
+      where: { title: title },
+      orderBy: [
+        { content: 'desc' }, // Garder celui qui a du contenu en priorité
+        { publishedAt: 'desc' }
+      ]
+    });
 
-    let isDuplicate = false
-    let reason = ""
+    if (articles.length <= 1) continue;
 
-    // Vérification Titre
-    if (seenTitles.has(cleanTitle)) {
-      isDuplicate = true
-      reason = `Titre identique à ${seenTitles.get(cleanTitle)}`
-    } 
-    // Vérification Image URL
-    else if (imageUrl && seenImageUrls.has(imageUrl)) {
-      isDuplicate = true
-      reason = `Image URL identique à ${seenImageUrls.get(imageUrl)}`
-    }
-    // Vérification UUID EBRA
-    else if (ebraUuid && seenImageUuids.has(ebraUuid)) {
-      isDuplicate = true
-      reason = `UUID Image EBRA identique à ${seenImageUuids.get(ebraUuid)}`
-    }
+    // Le premier est celui qu'on garde
+    const toKeep = articles[0];
+    const toDeleteIds = articles.slice(1).map(a => a.id);
 
-    if (isDuplicate) {
-      toDelete.add(article.id)
-      console.log(`[DOUBLON] Supprimer: "${article.title}" (${article.source}) - Raison: ${reason}`)
-    } else {
-      // Si ce n'est pas un doublon, on enregistre ses caractéristiques pour les suivants
-      seenTitles.set(cleanTitle, article.id)
-      if (imageUrl) seenImageUrls.set(imageUrl, article.id)
-      if (ebraUuid) seenImageUuids.set(ebraUuid, article.id)
-    }
-  }
-
-  if (toDelete.size > 0) {
-    console.log(`\nSuppression de ${toDelete.size} articles...`)
+    // Suppression
     const result = await prisma.article.deleteMany({
       where: {
-        id: { in: Array.from(toDelete) }
+        id: { in: toDeleteIds }
       }
-    })
-    console.log(`Terminé. ${result.count} articles supprimés avec succès.`)
-  } else {
-    console.log("\nAucun doublon trouvé dans les 1000 derniers articles.")
+    });
+
+    totalDeleted += result.count;
+    console.log(`[OK] Titre: "${title.substring(0, 50)}"..." | Gardé: ${toKeep.id} | Supprimés: ${result.count}`);
   }
+
+  console.log(`
+Fini ! Total supprimés : ${totalDeleted}`);
 }
 
-main()
-  .catch(console.error)
-  .finally(() => prisma.$disconnect())
+cleanDuplicates()
+  .catch(e => console.error(e))
+  .finally(async () => await prisma.$disconnect());
