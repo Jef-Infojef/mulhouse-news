@@ -54,3 +54,10 @@ jobs:
           B2_PUBLIC_URL: ${{ secrets.B2_PUBLIC_URL }}
         run: |
           python scripts/scrape_content_full.py
+
+      - name: Log failure to DB
+        if: failure()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python scripts/log_github_failure.py
