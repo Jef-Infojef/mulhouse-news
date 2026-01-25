@@ -13,21 +13,26 @@ def load_config():
 def fetch_content(url, cookies_dict):
     print(f"[*] Fetching with curl_cffi: {url}")
     try:
+        # On limite les redirections pour voir le problème
         resp = requests.get(
             url, 
             cookies=cookies_dict,
             impersonate="chrome110",
-            timeout=30
+            timeout=30,
+            allow_redirects=True,
+            max_redirects=5
         )
         
+        print(f"[*] Final URL after redirects: {resp.url}")
+        print(f"[*] Status Code: {resp.status_code}")
+        
         page_text = resp.text
-        # Détection de connexion
         is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber"])
-        print(f"[*] État session sur GitHub : {'✅ CONNECTÉ' if is_connected else '❌ NON CONNECTÉ'}")
+        print(f"[*] État session : {'✅ CONNECTÉ' if is_connected else '❌ NON CONNECTÉ'}")
         
         if not is_connected:
-            print("[!] Marqueurs non trouvés. Vérifiez si vous voyez 'Se connecter' dans le texte suivant :")
-            print(page_text[:500].replace('\n', ' '))
+            print("[!] Marqueurs non trouvés. Extrait du texte :")
+            print(BeautifulSoup(page_text, 'html.parser').get_text(" ")[:500] + "...")
 
         soup = BeautifulSoup(page_text, 'html.parser')
         text_parts = []
@@ -45,45 +50,37 @@ def fetch_content(url, cookies_dict):
         return None
 
 def main():
-    print("=== TEST SCRAPER GITHUB AVEC SECRETS V4 ===")
+    print("=== TEST SCRAPER GITHUB AVEC SECRETS V5 ===")
     db_url, cookies_raw = load_config()
     if not db_url or not cookies_raw: 
         print("❌ Secrets manquants.")
         return
 
-    # NETTOYAGE SPÉCIFIQUE POUR LE FORMAT : .XCONNECT_SESSION : "2=..."
+    # NETTOYAGE ROBUSTE
     clean = cookies_raw.strip()
     print(f"[*] Raw secret reçu (longueur: {len(clean)})")
 
-    # 1. On enlève les guillemets au début et à la fin s'ils existent
+    # Enlever les guillemets et préfixes
     clean = re.sub(r'^["\']|["\']$', '', clean)
-    
-    # 2. Si le format est ".XCONNECT_SESSION : "2=...", on extrait la partie après les deux-points
-    if ':' in clean:
-        parts = clean.split(':', 1)
-        # On ne garde que la partie valeur et on enlève les guillemets intérieurs si présents
-        clean = parts[1].strip().replace('"', '').replace("'", "")
-    
-    # 3. Si le format était juste ".XCONNECT_SESSION = 2=...", on gère aussi
-    elif clean.startswith('.XCONNECT_SESSION='):
-        clean = clean.replace('.XCONNECT_SESSION=', '', 1).strip().replace('"', '').replace("'", "")
+    if ':' in clean: clean = clean.split(':', 1)[1].strip()
+    clean = clean.replace('"', '').replace("'", "").strip()
 
     cookies_dict = {
         ".XCONNECT_SESSION": clean,
         ".XCONNECTKeepAlive": "2=1",
-        ".XCONNECT": "2=1"
+        ".XCONNECT": "2=1",
+        "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
     }
 
-    print(f"[*] Session extraite (début) : {cookies_dict['.XCONNECT_SESSION'][:50]}...")
-    print(f"[*] Longueur finale de la session : {len(cookies_dict['.XCONNECT_SESSION'])} caractères")
+    # Debug sécurisé
+    val = cookies_dict['.XCONNECT_SESSION']
+    print(f"[*] Session extraite (début) : {val[:20]}...{val[-20:]} (Len: {len(val)})")
 
     test_link = "https://www.lalsace.fr/insolite/2026/01/25/course-d-orientation-quand-l-histoire-industrielle-se-decouvre-un-plan-et-une-boussole-a-la-main"
     content = fetch_content(test_link, cookies_dict)
     
     if content:
         print(f"✅ RÉSULTAT : {len(content)} caractères.")
-        if len(content) > 3000:
-            print("🚀 SUCCÈS : Le nettoyage du secret a fonctionné !")
     else:
         print("❌ ÉCHEC : Aucun contenu.")
 
