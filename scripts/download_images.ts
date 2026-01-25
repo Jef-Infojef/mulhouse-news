@@ -115,7 +115,10 @@ async function main() {
   const articles = await prisma.article.findMany({
     where: {
       imageUrl: { not: null, notIn: ['', 'null'] },
-      localImage: null
+      localImage: null,
+      publishedAt: {
+        gte: new Date(Date.now() - 48 * 60 * 60 * 1000) // 48h
+      }
     },
     select: {
       id: true,

@@ -115,7 +115,7 @@ def main():
             SELECT id, title, link 
             FROM \"Article\" 
             WHERE (content IS NULL OR LENGTH(content) < 150)
-              AND \"publishedAt\" > NOW() - INTERVAL '7 days'
+              AND \"publishedAt\" > NOW() - INTERVAL '24 hours'
             ORDER BY \"publishedAt\" DESC LIMIT 50
         """)
         articles = cur.fetchall()
