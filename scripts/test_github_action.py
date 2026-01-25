@@ -7,25 +7,34 @@ import json
 def load_config():
     db_url = os.environ.get("DATABASE_URL")
     cookies_raw = os.environ.get("ALSACE_COOKIES")
-    
     if cookies_raw:
         print(f"[*] Secret ALSACE_COOKIES détecté (longueur: {len(cookies_raw)})")
-    else:
-        print("❌ Secret ALSACE_COOKIES NON DÉTECTÉ dans l'environnement")
-        
     return db_url, cookies_raw
 
 def fetch_content(session, url):
     print(f"[*] Fetching: {url}")
     try:
         resp = session.get(url, timeout=20)
-        page_text = resp.text.lower()
+        page_text = resp.text
         
-        # Marqueurs de connexion
-        is_connected = any(x in page_text for x in ["se déconnecter", "mon compte", "premium", "suscriber"])
-        print(f"[*] État session : {'✅ CONNECTÉ' if is_connected else '❌ NON CONNECTÉ'}")
+        # Analyse fine des marqueurs
+        has_logout = "Se déconnecter" in page_text
+        has_account = "Mon compte" in page_text or "Mon profil" in page_text.lower()
+        has_premium = "premium" in page_text.lower() or "suscriber" in page_text.lower()
+        has_login_btn = "Se connecter" in page_text
+        has_subscribe_btn = "S'abonner" in page_text
         
-        soup = BeautifulSoup(resp.text, 'html.parser')
+        print(f"[*] Analyse des marqueurs :")
+        print(f"    - 'Se déconnecter' : {has_logout}")
+        print(f"    - 'Mon compte/profil' : {has_account}")
+        print(f"    - 'Premium/Subscriber' : {has_premium}")
+        print(f"    - 'Se connecter' (bouton) : {has_login_btn}")
+        print(f"    - 'S'abonner' (bouton) : {has_subscribe_btn}")
+
+        is_connected = has_logout or has_account
+        print(f"[*] État session final : {'✅ CONNECTÉ' if is_connected else '❌ NON CONNECTÉ'}")
+        
+        soup = BeautifulSoup(page_text, 'html.parser')
         text_parts = []
         
         # Chapô
@@ -56,7 +65,7 @@ def fetch_content(session, url):
         return None
 
 def main():
-    print("=== TEST SCRAPER GITHUB ACTIONS V6 ===")
+    print("=== TEST SCRAPER GITHUB ACTIONS V7 ===")
     db_url, cookies_raw = load_config()
     if not db_url: return
 
@@ -66,16 +75,20 @@ def main():
     })
     
     if cookies_raw:
-        # Nettoyage simple
         raw = cookies_raw.strip().replace('"', '').replace("'", "")
-        # On injecte la chaîne brute dans le header Cookie (plus fiable que session.cookies)
+        # Si le secret ne commence pas par .XCONNECT_SESSION, on l'ajoute pour aider le header
+        if not raw.startswith('.') and 'XCONNECT' not in raw[:20]:
+            raw = f".XCONNECT_SESSION={raw}"
+            print("[*] Préfixe .XCONNECT_SESSION ajouté automatiquement.")
+        
         session.headers['Cookie'] = raw
-        print("[*] Cookies injectés dans les headers.")
+        print("[*] Cookies injectés.")
 
     try:
         url = db_url.replace("?pgbouncer=true", "")
         conn = psycopg2.connect(url)
         cur = conn.cursor()
+        # On essaie de trouver un article qui a l'air "Premium" ou un long article
         cur.execute("""
             SELECT title, link FROM \"Article\" 
             WHERE source ILIKE '%Alsace%' AND link LIKE '%www.lalsace.fr%' AND content IS NULL 
@@ -87,7 +100,9 @@ def main():
             content = fetch_content(session, article[1])
             if content:
                 print(f"✅ RÉSULTAT : {len(content)} caractères.")
-                print(content[:500] + "...")
+                # Si on a plus de 1000 chars, c'est presque sûr que la session marche !
+                if len(content) > 1000:
+                    print("🚀 LA SESSION SEMBLE FONCTIONNER SUR GITHUB !")
             else:
                 print("❌ RÉSULTAT : Vide.")
         cur.close()
