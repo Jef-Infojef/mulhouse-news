@@ -3,6 +3,7 @@ import requests
 import psycopg2
 from bs4 import BeautifulSoup
 import json
+import re
 
 def load_config():
     db_url = os.environ.get("DATABASE_URL")
@@ -14,47 +15,53 @@ def fetch_content(session, url):
     try:
         resp = session.get(url, timeout=20)
         
-        # Debug Cookies envoyés
-        sent_cookies = session.cookies.get_dict()
-        print(f"[*] Cookies envoyés ({len(sent_cookies)}) : {', '.join(sent_cookies.keys())}")
+        # Debug Cookies réellement envoyés
+        sent = session.cookies.get_dict()
+        print(f"[*] Cookies en session ({len(sent)}) : {', '.join(sent.keys())}")
 
-        # Détection de la connexion
-        page_text = resp.text.lower()
-        is_connected = "se déconnecter" in page_text or "mon compte" in page_text or "connected" in page_text
-        print(f"[*] État session : {'✅ CONNECTÉ' if is_connected else '❌ NON CONNECTÉ'}")
+        # Détection de connexion plus fiable
+        page_text = resp.text
+        is_connected = "Se déconnecter" in page_text
+        has_login_btn = "Se connecter" in page_text
         
-        print("[!] Extrait du corps HTML (début) :")
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        body_text = soup.get_text(" ", strip=True)
-        print(body_text[:1000] + "...")
+        print(f"[*] Marqueur 'Se déconnecter' présent : {is_connected}")
+        print(f"[*] Marqueur 'Se connecter' présent : {has_login_btn}")
+        
+        if is_connected:
+            print("   ✅ Statut : RÉELLEMENT CONNECTÉ")
+        else:
+            print("   ❌ Statut : NON CONNECTÉ")
 
+        soup = BeautifulSoup(resp.text, 'html.parser')
         text_parts = []
+        
         # 1. Chapô
         chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
         if chapo: 
-            print("   ✅ Chapô trouvé")
+            print("   ✅ Chapô extrait")
             text_parts.append(chapo.get_text().strip())
         
-        # 2. Corps (textComponent)
+        # 2. Corps
         content_blocks = soup.find_all('div', class_='textComponent')
         if content_blocks:
-            print(f"   ✅ {len(content_blocks)} blocs textComponent trouvés")
+            print(f"   ✅ {len(content_blocks)} blocs texte extraits")
             for block in content_blocks:
                 txt = block.get_text("\n", strip=True)
                 if len(txt) > 10: text_parts.append(txt)
             
-        # 3. Vidéo (LD+JSON)
+        # 3. LD+JSON (Vidéo)
         scripts = soup.find_all('script', type='application/ld+json')
-        print(f"   🔍 Blocs LD+JSON trouvés : {len(scripts)}")
         for script in scripts:
             try:
                 data = json.loads(script.string)
                 items = data if isinstance(data, list) else [data]
                 for item in items:
-                    if item.get('@type') in ['VideoObject', 'NewsArticle'] and item.get('description'):
+                    t = item.get('@type')
+                    print(f"   🔍 LD+JSON type trouvé : {t}")
+                    if t in ['VideoObject', 'NewsArticle'] and item.get('description'):
                         desc = item['description'].strip()
                         if len(desc) > 100:
-                            print(f"   ✅ Description trouvée dans LD+JSON ({item.get('@type')})")
+                            print(f"   ✅ Description extraite du JSON ({t})")
                             text_parts.append(desc)
             except: pass
 
@@ -64,11 +71,9 @@ def fetch_content(session, url):
         return None
 
 def main():
-    print("=== TEST SCRAPER GITHUB ACTIONS V3 ===")
+    print("=== TEST SCRAPER GITHUB ACTIONS V4 ===")
     db_url, cookies_raw = load_config()
-    if not db_url: 
-        print("❌ DATABASE_URL manquante")
-        return
+    if not db_url: return
 
     session = requests.Session()
     session.headers.update({
@@ -78,13 +83,21 @@ def main():
     })
     
     if cookies_raw:
-        print("[*] Chargement des cookies depuis le secret...")
-        parts = [p.strip() for p in cookies_raw.split(';') if '=' in p]
+        # Nettoyage agressif des cookies (enlève guillemets, espaces, et préfixe si présent)
+        # On cherche des paires clé=valeur
+        raw = cookies_raw.replace('"', '').replace("'", "")
+        # Si l'utilisateur a collé ".XCONNECT_SESSION : 2=...", on enlève le préfixe
+        if ':' in raw and '=' in raw and raw.find(':') < raw.find('='):
+            raw = raw.split(':', 1)[1].strip()
+            
+        print(f"[*] Raw cookies après nettoyage (début) : {raw[:50]}...")
+        
+        parts = [p.strip() for p in raw.split(';') if '=' in p]
         for p in parts:
-            k, v = p.split('=', 1)
-            session.cookies.set(k, v, domain=".lalsace.fr")
-    else:
-        print("⚠️ ALSACE_COOKIES manquante dans les secrets")
+            try:
+                k, v = p.split('=', 1)
+                session.cookies.set(k.strip(), v.strip(), domain=".lalsace.fr")
+            except: pass
 
     try:
         url = db_url.replace("?pgbouncer=true", "")
@@ -101,7 +114,6 @@ def main():
             content = fetch_content(session, article[1])
             if content:
                 print(f"✅ RÉSULTAT : {len(content)} chars.")
-                print(content[:500] + "...")
             else:
                 print("❌ RÉSULTAT : Vide.")
         cur.close()
