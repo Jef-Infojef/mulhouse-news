@@ -4,8 +4,6 @@ import psycopg2
 from bs4 import BeautifulSoup
 import json
 
-# URL pour configurer les secrets : https://github.com/Jef-Infojef/mulhouse-news/settings/secrets/actions
-
 def load_config():
     db_url = os.environ.get("DATABASE_URL")
     cookies_raw = os.environ.get("ALSACE_COOKIES")
@@ -16,41 +14,49 @@ def fetch_content(session, url):
     try:
         resp = session.get(url, timeout=20)
         
+        # Debug Cookies envoyés
+        sent_cookies = session.cookies.get_dict()
+        print(f"[*] Cookies envoyés ({len(sent_cookies)}) : {', '.join(sent_cookies.keys())}")
+
         # Détection de la connexion
         page_text = resp.text.lower()
-        is_connected = "se déconnecter" in page_text or "mon compte" in page_text
+        is_connected = "se déconnecter" in page_text or "mon compte" in page_text or "connected" in page_text
         print(f"[*] État session : {'✅ CONNECTÉ' if is_connected else '❌ NON CONNECTÉ'}")
         
-        if not is_connected:
-            print("[!] Extrait du HTML (500 premiers chars) pour debug :")
-            print(resp.text[:500].replace('\n', ' '))
-
+        print("[!] Extrait du corps HTML (début) :")
         soup = BeautifulSoup(resp.text, 'html.parser')
+        body_text = soup.get_text(" ", strip=True)
+        print(body_text[:1000] + "...")
+
         text_parts = []
-        
         # 1. Chapô
         chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
-        if chapo: text_parts.append(chapo.get_text().strip())
+        if chapo: 
+            print("   ✅ Chapô trouvé")
+            text_parts.append(chapo.get_text().strip())
         
         # 2. Corps (textComponent)
         content_blocks = soup.find_all('div', class_='textComponent')
-        for block in content_blocks:
-            txt = block.get_text("\n", strip=True)
-            if len(txt) > 10: text_parts.append(txt)
+        if content_blocks:
+            print(f"   ✅ {len(content_blocks)} blocs textComponent trouvés")
+            for block in content_blocks:
+                txt = block.get_text("\n", strip=True)
+                if len(txt) > 10: text_parts.append(txt)
             
         # 3. Vidéo (LD+JSON)
-        if not text_parts or len("\n".join(text_parts)) < 200:
-            for script in soup.find_all('script', type='application/ld+json'):
-                try:
-                    data = json.loads(script.string)
-                    items = data if isinstance(data, list) else [data]
-                    for item in items:
-                        if item.get('@type') in ['VideoObject', 'NewsArticle'] and item.get('description'):
-                            # On ne prend la description que si elle est longue (pour éviter les doublons de chapô)
-                            desc = item['description'].strip()
-                            if len(desc) > 100:
-                                text_parts.append(desc)
-                except: pass
+        scripts = soup.find_all('script', type='application/ld+json')
+        print(f"   🔍 Blocs LD+JSON trouvés : {len(scripts)}")
+        for script in scripts:
+            try:
+                data = json.loads(script.string)
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    if item.get('@type') in ['VideoObject', 'NewsArticle'] and item.get('description'):
+                        desc = item['description'].strip()
+                        if len(desc) > 100:
+                            print(f"   ✅ Description trouvée dans LD+JSON ({item.get('@type')})")
+                            text_parts.append(desc)
+            except: pass
 
         return "\n\n".join(text_parts)
     except Exception as e:
@@ -58,9 +64,11 @@ def fetch_content(session, url):
         return None
 
 def main():
-    print("=== TEST SCRAPER GITHUB ACTIONS V2 ===")
+    print("=== TEST SCRAPER GITHUB ACTIONS V3 ===")
     db_url, cookies_raw = load_config()
-    if not db_url: return
+    if not db_url: 
+        print("❌ DATABASE_URL manquante")
+        return
 
     session = requests.Session()
     session.headers.update({
@@ -70,40 +78,32 @@ def main():
     })
     
     if cookies_raw:
-        # On nettoie et on applique les cookies sur tous les domaines possibles
+        print("[*] Chargement des cookies depuis le secret...")
         parts = [p.strip() for p in cookies_raw.split(';') if '=' in p]
         for p in parts:
             k, v = p.split('=', 1)
             session.cookies.set(k, v, domain=".lalsace.fr")
-            session.cookies.set(k, v, domain="www.lalsace.fr")
+    else:
+        print("⚠️ ALSACE_COOKIES manquante dans les secrets")
 
     try:
         url = db_url.replace("?pgbouncer=true", "")
         conn = psycopg2.connect(url)
         cur = conn.cursor()
-        
         cur.execute("""
             SELECT title, link FROM \"Article\" 
             WHERE source ILIKE '%Alsace%' AND link LIKE '%www.lalsace.fr%' AND content IS NULL 
             ORDER BY \"publishedAt\" DESC LIMIT 1
         """)
         article = cur.fetchone()
-        
         if article:
-            title, link = article
-            print(f"[*] Article de test : {title}")
-            content = fetch_content(session, link)
-            
+            print(f"[*] Article : {article[0]}")
+            content = fetch_content(session, article[1])
             if content:
-                print(f"✅ SUCCÈS : {len(content)} caractères récupérés.")
-                print("-" * 30)
-                print(content[:1000] + ("..." if len(content) > 1000 else ""))
-                print("-" * 30)
+                print(f"✅ RÉSULTAT : {len(content)} chars.")
+                print(content[:500] + "...")
             else:
-                print("❌ ÉCHEC : Aucun contenu.")
-        else:
-            print("ℹ️ Aucun article à tester.")
-            
+                print("❌ RÉSULTAT : Vide.")
         cur.close()
         conn.close()
     except Exception as e:
