@@ -86,6 +86,11 @@ def main():
         source = item.find("source").text or "Inconnu"
         if not google_link: continue
 
+        # Filtrage Météo Ouest-France (souvent inutile/redondant)
+        if "ouest-france" in source.lower() and "météo" in title.lower():
+            print(f"    [-] Ignoré (Météo Ouest-France): {title[:40]}...")
+            continue
+
         # 1. Décodage sécurisé
         real_url = extract_real_url(google_link)
         if "google.com" in real_url:
