@@ -19,11 +19,28 @@ interface ArticleProps {
 }
 
 export function ArticleCard({ article }: ArticleProps) {
-  // ... (reste du code identique)
+  // Fonction pour obtenir une couleur de badge selon la source
+  const getSourceColor = (source: string | null) => {
+    const s = source?.toLowerCase() || ''
+    if (s.includes('l\'alsace')) return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200'
+    if (s.includes('dna')) return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200'
+    if (s.includes('mplus') || s.includes('mulhouse')) return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200'
+    if (s.includes('france bleu')) return 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+    if (s.includes('france 3')) return 'bg-blue-600 text-white'
+    return 'bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-200'
+  }
+
+  const getDomain = (url: string) => {
+    try {
+      return new URL(url).hostname
+    } catch {
+      return 'google.com'
+    }
+  }
 
   const fallbackImageUrl = `https://www.google.com/s2/favicons?domain=${getDomain(article.link)}&sz=256`
   
-  // Priorité pour le web : Image distante originale > Backup R2 > Favicon
+  // Priorité : Image distante originale > Backup R2 > Favicon
   const displayImageUrl = article.imageUrl || article.r2Url || fallbackImageUrl
 
   return (
@@ -31,37 +48,38 @@ export function ArticleCard({ article }: ArticleProps) {
       href={article.link}
       target="_blank"
       rel="noopener noreferrer"
-      className="group flex flex-col h-full bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl overflow-hidden hover:shadow-lg dark:hover:shadow-xl dark:hover:shadow-blue-900/50 transition-all duration-300 hover:-translate-y-1"
+      className="group flex flex-col h-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl overflow-hidden hover:shadow-lg dark:hover:shadow-xl dark:hover:shadow-blue-900/50 transition-all duration-300 hover:-translate-y-1"
     >
-      <div className="relative h-48 w-full overflow-hidden bg-gray-100 dark:bg-slate-700">
+      <div className="relative h-48 w-full overflow-hidden bg-gray-100 dark:bg-slate-800">
         <Image
           src={displayImageUrl}
           alt={article.title}
           fill
           className="object-cover transition-transform duration-500 group-hover:scale-105"
           sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-          unoptimized={true} // On désactive l'optimisation pour les images externes et locales simples
+          unoptimized={true}
         />
         <div className="absolute top-3 right-3">
-          <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getSourceColor(article.source)}`}>
+          <span className={`px-3 py-1 text-[10px] font-bold uppercase rounded-full shadow-sm ${getSourceColor(article.source)}`}>
             {article.source || 'Autre'}
           </span>
         </div>
       </div>
 
       <div className="flex flex-col flex-grow p-5" title={article.description || ''}>
-        <h2 className="text-lg font-bold text-gray-900 dark:text-slate-50 line-clamp-4 mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-300 transition-colors">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-slate-50 line-clamp-3 mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-tight">
           {article.title}
         </h2>
+        
         {article.description && (
-          <p className="text-sm text-gray-600 dark:text-slate-300 line-clamp-3 group-hover:line-clamp-none mb-3 transition-all duration-300">
+          <p className="text-sm text-gray-600 dark:text-slate-400 line-clamp-3 mb-3 leading-relaxed">
             {article.description}
           </p>
         )}
 
-        <div className="mt-auto flex items-center justify-between text-sm text-gray-500 dark:text-slate-400 pt-4 border-t border-gray-100 dark:border-slate-700">
+        <div className="mt-auto flex items-center justify-between text-xs text-gray-500 dark:text-slate-500 pt-4 border-t border-gray-100 dark:border-slate-800">
           <div className="flex items-center gap-1.5">
-            <Calendar size={14} />
+            <Calendar size={14} className="text-blue-500" />
             <time dateTime={article.publishedAt.toISOString()}>
               {formatDistanceToNow(new Date(article.publishedAt), { addSuffix: true, locale: fr })
                 .replace('environ ', '')

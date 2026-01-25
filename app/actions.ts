@@ -20,24 +20,43 @@ export async function getLatestArticles(query?: string) {
       },
     })
 
-    // --- FILTRAGE DES DOUBLONS DNA/ALSACE PAR UUID IMAGE ---
+    // --- FILTRAGE DES DOUBLONS AVANCÉ ---
     const seenImageUuids = new Set<string>()
-    const filteredArticles = articles.filter(article => {
-      if (!article.imageUrl) return true // On garde si pas d'image
+    const seenTitles = new Set<string>()
+    const seenImageUrls = new Set<string>()
 
-      // Extraction de l'UUID image EBRA (ex: /images/XXXX-YYYY-ZZZZ/)
-      const match = article.imageUrl.match(/\/images\/([^\/]+)\//)
-      if (match) {
-        const uuid = match[1]
-        
-        // Si c'est du DNA et qu'on a déjà vu cet UUID (donc chez L'Alsace car trié par date/priorité)
-        if (article.source?.toLowerCase().includes('dna') && seenImageUuids.has(uuid)) {
-          console.log(`Filtrage doublon DNA ignoré: ${article.title}`)
+    const filteredArticles = articles.filter(article => {
+      // 1. Filtrage par Titre (nettoyé et minuscule)
+      const cleanTitle = article.title.trim().toLowerCase()
+      if (seenTitles.has(cleanTitle)) {
+        console.log(`Filtrage doublon TITRE ignoré: ${article.title}`)
+        return false
+      }
+
+      // 2. Filtrage par URL d'image identique (si présente)
+      if (article.imageUrl) {
+        if (seenImageUrls.has(article.imageUrl)) {
+          console.log(`Filtrage doublon IMAGE_URL ignoré: ${article.title}`)
           return false
         }
-        
-        seenImageUuids.add(uuid)
+        seenImageUrls.add(article.imageUrl)
       }
+
+      // 3. Filtrage par UUID image EBRA (L'Alsace, DNA, Est Républicain, Vosges Matin, etc.)
+      if (article.imageUrl) {
+        const match = article.imageUrl.match(/\/images\/([^\/]+)\//)
+        if (match) {
+          const uuid = match[1]
+          if (seenImageUuids.has(uuid)) {
+            console.log(`Filtrage doublon UUID EBRA ignoré: ${article.title}`)
+            return false
+          }
+          seenImageUuids.add(uuid)
+        }
+      }
+
+      // Marquer comme vu
+      seenTitles.add(cleanTitle)
       return true
     })
 
