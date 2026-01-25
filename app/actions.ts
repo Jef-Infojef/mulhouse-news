@@ -48,3 +48,18 @@ export async function getLatestArticles(query?: string) {
     return { articles: [], error: error.message || String(error) }
   }
 }
+
+export async function getScrapingLogs() {
+  try {
+    const logs = await prisma.scrapingLog.findMany({
+      orderBy: {
+        startedAt: 'desc',
+      },
+      take: 100,
+    })
+    return { logs, error: null }
+  } catch (error: any) {
+    console.error('Erreur récupération logs:', error)
+    return { logs: [], error: error.message || String(error) }
+  }
+}
