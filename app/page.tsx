@@ -93,6 +93,17 @@ export default function Home() {
     setDisplayCount((prev) => prev + pageSize)
   }
 
+  function getWeatherIcon(code: number) {
+    if (code === 0) return <Sun size={14} className="text-yellow-500 shrink-0" />
+    if (code >= 1 && code <= 3) return <Cloud size={14} className="text-blue-400 shrink-0" />
+    if (code >= 45 && code <= 48) return <Cloud size={14} className="text-gray-400 shrink-0" />
+    if (code >= 51 && code <= 67) return <CloudRain size={14} className="text-blue-500 shrink-0" />
+    if (code >= 71 && code <= 77) return <CloudSnow size={14} className="text-blue-200 shrink-0" />
+    if (code >= 80 && code <= 82) return <CloudRain size={14} className="text-blue-600 shrink-0" />
+    if (code >= 85 && code <= 86) return <CloudSnow size={14} className="text-blue-300 shrink-0" />
+    return <Sun size={14} className="text-yellow-500 shrink-0" />
+  }
+
   return (
     <main className="min-h-screen transition-colors">
       {/* Top Bar Info */}
