@@ -170,10 +170,10 @@ export default function AdminLogsPage() {
                 {expandedLog === log.id && (
                   <div className="border-t border-gray-700 p-6 bg-gray-900/50 rounded-b-2xl">
                     {!log.isConnected && (
-                      <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-4 rounded-xl mb-6 flex items-center gap-3">
+                      <div className="bg-orange-500/10 border border-orange-500/30 text-orange-400 p-4 rounded-xl mb-6 flex items-center gap-3">
                         <ShieldAlert className="shrink-0" />
                         <div className="text-sm">
-                          <strong>Scraping EBRA désactivé :</strong> La session abonné est expirée ou invalide. Les articles de L'Alsace, DNA et Est Républicain ont été ignorés pour éviter les contenus tronqués.
+                          <strong>Mode limité (EBRA) :</strong> La session abonné est expirée ou invalide. Seuls les chapôs et métadonnées sont récupérés pour L'Alsace, DNA et Est Républicain pour éviter les contenus tronqués.
                         </div>
                       </div>
                     )}
