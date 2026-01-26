@@ -32,38 +32,41 @@ def fetch_article_content(url, cookies_dict):
 
         page_text = resp.text
         # Détection de la session (logique validée)
-        is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber", "premium"])
-        if not is_connected:
-            return None, False
-
+        is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber", "premium", "Abonné"])
+        
         soup = BeautifulSoup(page_text, 'html.parser')
         text_parts = []
         
-        # 1. Chapô
+        # 1. Chapô (souvent visible même sans abonnement)
         chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
         if chapo: text_parts.append(chapo.get_text().strip())
         
-        # 2. Corps (textComponent)
-        for modal in soup.find_all(class_='GXCO_content'): modal.decompose()
-        content_blocks = soup.find_all('div', class_='textComponent')
-        for block in content_blocks:
-            txt = block.get_text("\n", strip=True)
-            if len(txt) > 10: text_parts.append(txt)
+        # 2. Corps (uniquement si connecté pour éviter le paywall/tronquage)
+        if is_connected:
+            for modal in soup.find_all(class_='GXCO_content'): modal.decompose()
+            content_blocks = soup.find_all('div', class_='textComponent')
+            for block in content_blocks:
+                txt = block.get_text("\n", strip=True)
+                if len(txt) > 10: text_parts.append(txt)
             
         # 3. Fallback Vidéo/LD+JSON
-        if not text_parts:
+        if not text_parts or not is_connected:
             for script in soup.find_all('script', type='application/ld+json'):
                 try:
-                    data = json.loads(script.string)
+                    raw_json = script.string.strip()
+                    # Nettoyage des clés bizarres comme " @type"
+                    raw_json = raw_json.replace('" @', '"@')
+                    data = json.loads(raw_json)
                     items = data if isinstance(data, list) else [data]
                     for item in items:
                         if item.get('@type') in ['VideoObject', 'NewsArticle'] and item.get('description'):
-                            text_parts.append(item['description'].strip())
+                            desc = item['description'].strip()
+                            if desc not in text_parts: text_parts.append(desc)
                 except: pass
 
         if text_parts:
-            return "\n\n".join(text_parts), True
-        return None, True
+            return "\n\n".join(text_parts), is_connected
+        return None, is_connected
 
     except Exception as e:
         print(f"   ❌ Erreur fetch: {e}")
@@ -118,9 +121,9 @@ def main():
             content, session_active = fetch_article_content(link, cookies_dict)
             
             if not session_active:
-                print(f"\n🛑 ARRÊT : Session perdue à l'article {i}. Mettez à jour le Secret.")
-                break
-
+                print(f"[{i}/{len(articles)}] ⚠️ Session perdue ou non connectée | {title[:50]}...")
+                # On ne break plus, on continue pour tenter de chopper ce qu'on peut sur les autres
+            
             if content:
                 try:
                     cur.execute('UPDATE "Article" SET content = %s WHERE id = %s', (content, art_id))
@@ -131,7 +134,7 @@ def main():
                     print(f"[{i}/{len(articles)}] ❌ Erreur DB: {e}")
                     conn.rollback()
             else:
-                print(f"[{i}/{len(articles)}] ⚠️ Vide | {link}")
+                print(f"[{i}/{len(articles)}] ⚠️ Vide ou Non Autorisé | {link}")
 
         print(f"\n[*] TERMINÉ. {success_count} articles mis à jour.")
         cur.close()

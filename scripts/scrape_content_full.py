@@ -50,13 +50,14 @@ def fetch_article_content(url, cookies_dict):
         
         # Si c'était un article L'Alsace (ou transformé en L'Alsace) et qu'on n'est pas connecté
         if not is_connected and ALSACE_COOKIES and "lalsace.fr" in target_url:
-            return None, False, "Session lost"
+            # On continue quand même pour tenter de choper le chapo ou LD+JSON
+            print(f"    [!] Mode non-abonné pour : {target_url[:40]}")
 
         soup = BeautifulSoup(page_text, 'html.parser')
         text_parts = []
 
         # Logique EBRA (L'Alsace, DNA...)
-        if any(x in url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"]):
+        if any(x in target_url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"]):
             chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
             if chapo: text_parts.append(chapo.get_text().strip())
             
@@ -64,9 +65,11 @@ def fetch_article_content(url, cookies_dict):
             inner = soup.find(class_='innerContent')
             if inner: text_parts.append(inner.get_text(strip=True))
 
-            for block in soup.find_all('div', class_='textComponent'):
-                txt = block.get_text("\n", strip=True)
-                if len(txt) > 10: text_parts.append(txt)
+            # On ne prend le corps que si on est connecté (pour éviter les contenus tronqués/paywall)
+            if is_connected:
+                for block in soup.find_all('div', class_='textComponent'):
+                    txt = block.get_text("\n", strip=True)
+                    if len(txt) > 10: text_parts.append(txt)
             
             if not text_parts or len("\n".join(text_parts)) < 100:
                 for script in soup.find_all('script', type='application/ld+json'):
@@ -131,8 +134,12 @@ def main():
         cur = conn.cursor()
 
         # Vérification connexion initiale
-        test_resp = requests.get("https://www.lalsace.fr/", cookies=cookies_dict, impersonate="chrome110", timeout=15)
-        stats["is_connected"] = any(x in test_resp.text for x in ["Se déconnecter", "Mon compte"])
+        try:
+            test_resp = requests.get("https://www.lalsace.fr/", cookies=cookies_dict, impersonate="chrome110", timeout=15)
+            stats["is_connected"] = any(x in test_resp.text for x in ["Se déconnecter", "Mon compte"])
+        except:
+            stats["is_connected"] = False
+            
         print(f"[*] État initial connexion : {'✅' if stats['is_connected'] else '❌'}")
 
         cur.execute("""
@@ -145,20 +152,13 @@ def main():
         articles = cur.fetchall()
         
         for i, (art_id, title, link) in enumerate(articles, 1):
-            # Si on n'est pas connecté, on saute les sites qui nécessitent un compte
-            is_ebra = any(x in link for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"])
-            if is_ebra and not stats["is_connected"]:
-                print(f"    [{i}/{len(articles)}] SKIP | {title[:40]}... (Non connecté)")
-                session_details.append({"title": title, "link": link, "status": "SKIPPED", "error": "Not connected"})
-                continue
-
+            # On ne saute plus les EBRA, on tente de chopper ce qu'on peut (chapo, etc.)
             content, active, err = fetch_article_content(link, cookies_dict)
             status = "SUCCESS" if content else "FAILED"
+            
+            # On ne break plus si la session est perdue, on continue pour les autres
             if not active:
                 status = "SESSION_LOST"
-                session_details.append({"title": title, "link": link, "status": status, "error": err})
-                print(f"🛑 Session perdue à l'article {i}")
-                break
             
             if content:
                 cur.execute('UPDATE "Article" SET content = %s WHERE id = %s', (content, art_id))
