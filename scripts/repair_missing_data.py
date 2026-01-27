@@ -7,6 +7,7 @@ import psycopg2
 from dotenv import load_dotenv
 import time
 import random
+from urllib.parse import urljoin
 
 # Charger les variables d'environnement
 load_dotenv(".envenv")
@@ -30,23 +31,59 @@ def fetch_og_data(url):
         # On simule un délai humain
         time.sleep(random.uniform(1, 3))
         
-        # Utilisation de curl_cffi pour contourner les protections (TLS, WAF)
-        resp = requests.get(url, impersonate="chrome110", timeout=15, allow_redirects=True)
+        # Tentative avec vérification SSL
+        try:
+            resp = requests.get(url, impersonate="chrome110", timeout=15, allow_redirects=True)
+        except Exception as ssl_err:
+            # Si erreur SSL, on retente sans vérification (pour les sites type uha.fr)
+            if "CertificateVerifyError" in str(ssl_err) or "SSL" in str(ssl_err):
+                resp = requests.get(url, impersonate="chrome110", timeout=15, allow_redirects=True, verify=False)
+            else:
+                raise ssl_err
         
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             
-            # 1. Extraction Image (og:image)
+            # 1. Extraction Image
             img = None
+            
+            # A. Meta OG Image
             og_image = soup.find("meta", property="og:image")
             if og_image and og_image.get("content"):
                 img = html.unescape(og_image["content"])
             
-            # Fallback Twitter Image
+            # B. Fallback Twitter Image
             if not img:
                 tw_image = soup.find("meta", attrs={"name": "twitter:image"})
                 if tw_image and tw_image.get("content"):
                     img = html.unescape(tw_image["content"])
+
+            # C. Fallback Body Image (Balises <picture>, <figure> ou <img> dans le contenu)
+            if not img:
+                # Chercher dans picture ou figure (souvent l'image principale)
+                pic = soup.find("picture") or soup.find("figure")
+                if pic:
+                    potential_img = pic.find("img")
+                    if potential_img and potential_img.get("src"):
+                        img = potential_img["src"]
+                
+                if not img:
+                    # Recherche générique des images .jpg/.png significatives
+                    for potential in soup.find_all("img"):
+                        src = potential.get("src")
+                        if src and any(ext in src.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp', '.avif']):
+                            if not any(p in src.lower() for p in ['logo', 'icon', 'ads', 'pub', 'pixel', 'banner']):
+                                if 'avatar' not in src.lower():
+                                    img = src
+                                    break
+
+            # Nettoyage et reconstruction de l'URL de l'image (si relative)
+            if img:
+                img = html.unescape(img).strip()
+                if img.startswith("//"):
+                    img = "https:" + img
+                elif not img.startswith("http"):
+                    img = urljoin(url, img)
 
             # 2. Extraction Description
             desc = None
@@ -90,11 +127,9 @@ def main():
     print(f"[*] {len(articles)} articles à tenter de réparer.")
     
     success_count = 0
+    total_to_repair = len(articles)
     
-    for art_id, title, link, source in articles:
-        print(f"\nTentative pour: {title[:60]}...")
-        print(f"  -> Source: {source} | URL: {link[:50]}...")
-        
+    for i, (art_id, title, link, source) in enumerate(articles, 1):
         new_img, new_desc = fetch_og_data(link)
         
         if new_img or new_desc:
@@ -108,12 +143,18 @@ def main():
                 
                 conn.commit()
                 success_count += 1
-                print(f"  -> ✅ SUCCÈS ! Image: {bool(new_img)}, Desc: {bool(new_desc)}")
+                
+                if not new_img:
+                    print(f"[{i}/{total_to_repair}] ✅ (Pas d'image) {title[:50]}...")
+                    print(f"    URL: {link}")
+                else:
+                    print(f"[{i}/{total_to_repair}] ✅ {title[:60]}... (Img: OK)")
             except Exception as e:
                 conn.rollback()
-                print(f"  -> ❌ Erreur DB: {e}")
+                print(f"[{i}/{total_to_repair}] ❌ Erreur DB: {e}")
         else:
-            print("  -> ❌ Échec (bloqué ou non trouvé)")
+            print(f"[{i}/{total_to_repair}] ❌ Échec : {title[:50]}...")
+            print(f"    URL: {link}")
 
     print(f"\n[*] Travail terminé. {success_count} articles ont été réparés.")
     cur.close()

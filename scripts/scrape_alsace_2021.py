@@ -26,7 +26,7 @@ load_env()
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Nouveau cookie fourni le 25/01/2026
-COOKIES_RAW = ".XCONNECT_SESSION=2=42F647DB9B788CF4E0AFFF1DD52DE98D61E04266014358F8D5CEEC0A98C9154AC0E9FE63D6A073F43F29D117C58F183AC9C16474B604D38ACE590BCACBED29E2416ACDD4239CBE58CAD4AC3000535BD0DBA83729F0A40EC368C47A39B10282E7BCD193A47FDB854878F60911EC373FD6F65D9C15543158561DD3425A7B5CAB0DC5E4F3A707826178AD6E4B729A897548ECF22EF0B0B57D5E80E44F3761444728EDA573B65D138677117A07756EB9D2F01F350B268F6E29526412BD9826E655EBCD17E77FDA5BA787EADB87619D27896DA6A4F144081B021C19646B0C7270185353B2BE94480F1AE522D87E032200D15E; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7; domain=lalsace.fr; path=/; secure; HttpOnly; SameSite=Lax"
+COOKIES_RAW = ".XCONNECT_SESSION=2=42F647DB9B788CF4E0AFFF1DD52DE98D13D5BEAE4D0A7548CB51419BA062EAE71D99523ACD1B12EFA647F09355124D3C9B80D02280FCB30CDBBFB57D159E1343BA829705D2D36D99EF603631BE2DE11A9DC7946BAE377A21B69489F56207EB0AD9015AEBE1EF36616DB621DE6B0B335E8C9044C3C9975C3BB6750CC6E382D1922EFD7DAA2D846F75F761E4F4E5370352C6110B8C46AED633FA44DA2B35DFDE0D09F83B8CAF574CFC09B7E9788678AB700BC89DA804B559BE1FE9CFAE44775CC7BE6370D829B6A402D0945181A2FCD0B322A9411AFBC0DA047DE7F55EEB7379F7C92D46905E86A58E8EB557C8994B153B; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7; domain=lalsace.fr; path=/; secure; HttpOnly; SameSite=Lax"
 
 cookies = {}
 for part in COOKIES_RAW.split(';'):
@@ -56,35 +56,48 @@ def fetch_article_content(session, url):
         if response.status_code != 200:
             return None, True
         
-        is_still_connected = "Se déconnecter" in response.text or "mon compte" in response.text.lower()
-        if not is_still_connected:
+        # Vérification de session plus souple
+        is_still_connected = any(x in response.text for x in ["Se déconnecter", "mon compte", "mon profil", "Abonné"])
+        
+        # Sur les pages vidéo/diaporama, la mention "Se déconnecter" est parfois cachée dans le JS ou absente
+        is_special_page = any(x in url.lower() for x in ["video", "diaporama", "grand-format"])
+        
+        if not is_still_connected and not is_special_page:
             return None, False
 
         soup = BeautifulSoup(response.text, 'html.parser')
         text_parts = []
         
+        # 1. Chapo
         chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
         if chapo: text_parts.append(chapo.get_text().strip())
 
-        for modal in soup.find_all(class_='GXCO_content'): modal.decompose()
-            
+        # 2. Corps de texte principal
         content_blocks = soup.find_all('div', class_='textComponent')
-        if content_blocks:
-            for block in content_blocks:
-                block_text = block.get_text("\n", strip=True)
-                if block_text and len(block_text) > 10:
-                    text_parts.append(block_text)
-        
+        for block in content_blocks:
+            txt = block.get_text("\n", strip=True)
+            if len(txt) > 10: text_parts.append(txt)
+            
+        # 3. Fallback pour vidéos/diaporamas (JSON-LD ou description)
+        if not text_parts or len("\n".join(text_parts)) < 150:
+            import json
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    raw_json = script.string.strip().replace('" @', '"@')
+                    data = json.loads(raw_json)
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if item.get('@type') in ['VideoObject', 'NewsArticle'] and item.get('description'):
+                            text_parts.append(item['description'].strip())
+                except: pass
+
+        # 4. Fallback ultime (innerContent pour vidéos récentes)
         if not text_parts:
-            content_div = soup.find('div', class_='c-article-content') or \
-                          soup.find('div', itemprop='articleBody') or \
-                          soup.find(class_='article__body')
-            if content_div:
-                paragraphs = [p.get_text().strip() for p in content_div.find_all(['p', 'h2']) if p.get_text().strip()]
-                text_parts.extend(paragraphs)
+            inner = soup.find(class_='innerContent')
+            if inner: text_parts.append(inner.get_text(strip=True))
 
         if text_parts:
-            full_text = "\n\n".join(text_parts)
+            full_text = "\n\n".join(dict.fromkeys(text_parts)) # déduplication
             return full_text, True
         return None, True
     except Exception as e:
@@ -120,15 +133,15 @@ def main():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Ciblage spécifique de 2021
+    # Ciblage spécifique de 2021 (uniquement L'Alsace pour le cookie)
     cur.execute("""
-        SELECT id, title, link, \"publishedAt\" 
-        FROM \"Article\" 
-        WHERE (source ILIKE '%Alsace%' OR link LIKE '%lalsace.fr%')
+        SELECT id, title, link, "publishedAt"
+        FROM "Article" 
+        WHERE link LIKE '%lalsace.fr%'
           AND content IS NULL
-          AND \"publishedAt\" >= '2021-01-01'
-          AND \"publishedAt\" <= '2021-12-31'
-        ORDER BY \"publishedAt\" DESC
+          AND "publishedAt" >= '2021-01-01'
+          AND "publishedAt" <= '2021-12-31'
+        ORDER BY "publishedAt" DESC
     """)
     articles = cur.fetchall()
     
