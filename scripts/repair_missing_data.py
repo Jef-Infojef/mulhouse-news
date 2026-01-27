@@ -1,5 +1,6 @@
 import os
-import requests
+from curl_cffi import requests
+from bs4 import BeautifulSoup
 import re
 import html
 import psycopg2
@@ -15,45 +16,45 @@ def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
 def fetch_og_data(url):
-    """Tente de récupérer og:image et description avec un User-Agent robuste"""
+    """Tente de récupérer og:image et description avec curl_cffi et BeautifulSoup"""
     if not url or "google.com" in url:
         return None, None
         
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-    }
-    
     try:
         # On simule un délai humain
         time.sleep(random.uniform(1, 3))
-        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        
+        # Utilisation de curl_cffi pour contourner les protections (TLS, WAF)
+        resp = requests.get(url, impersonate="chrome110", timeout=15, allow_redirects=True)
         
         if resp.status_code == 200:
-            html_content = resp.text
+            soup = BeautifulSoup(resp.text, 'html.parser')
             
-            # 1. Extraction Image
+            # 1. Extraction Image (og:image)
             img = None
-            # Pattern standard
-            m_img = re.search(r'property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', html_content)
-            if not m_img:
-                m_img = re.search(r'content=["\']([^"\']+)["\'][^>]*property=["\']og:image["\']', html_content)
+            og_image = soup.find("meta", property="og:image")
+            if og_image and og_image.get("content"):
+                img = html.unescape(og_image["content"])
             
-            if m_img:
-                img = html.unescape(m_img.group(1))
-            
+            # Fallback Twitter Image
+            if not img:
+                tw_image = soup.find("meta", attrs={"name": "twitter:image"})
+                if tw_image and tw_image.get("content"):
+                    img = html.unescape(tw_image["content"])
+
             # 2. Extraction Description
             desc = None
-            m_desc = re.search(r'property=["\']og:description["\'][^>]*content=["\']([^"\']+)["\']', html_content)
-            if not m_desc:
-                m_desc = re.search(r'name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', html_content)
+            og_desc = soup.find("meta", property="og:description")
+            if og_desc and og_desc.get("content"):
+                desc = html.unescape(og_desc["content"])
             
-            if m_desc:
-                desc = html.unescape(m_desc.group(1))
-                if len(desc) > 250: desc = desc[:247] + "..."
+            if not desc:
+                meta_desc = soup.find("meta", attrs={"name": "description"})
+                if meta_desc and meta_desc.get("content"):
+                    desc = html.unescape(meta_desc["content"])
+
+            if desc and len(desc) > 250: 
+                desc = desc[:247] + "..."
                 
             return img, desc
         else:
