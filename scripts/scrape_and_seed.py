@@ -1,5 +1,6 @@
 import os
-import requests
+from curl_cffi import requests
+from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 import re
 import html
@@ -38,25 +39,29 @@ def extract_real_url(google_url):
     return google_url
 
 def fetch_content_data(url):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-    }
     img, desc = None, None
     try:
-        resp = requests.get(url, headers=headers, timeout=12, allow_redirects=True)
+        # Utilisation de impersonate pour passer outre les protections (TLS fingerprinting, etc.)
+        resp = requests.get(url, timeout=20, allow_redirects=True, impersonate="chrome110")
         if resp.status_code == 200:
-            html_c = resp.text
-            # Image
-            m_img = re.search(r'property=["\"]og:image["\"][^>]*content=["\"]([^"\"]+)["\"]', html_c)
-            if not m_img: m_img = re.search(r'content=["\"]([^"\"]+)["\"][^>]*property=["\"]og:image["\"]', html_c)
-            if m_img: img = html.unescape(m_img.group(1))
-            # Description
-            m_desc = re.search(r'property=["\"]og:description["\"][^>]*content=["\"]([^"\"]+)["\"]', html_c)
-            if not m_desc: m_desc = re.search(r'name=["\"]description["\"][^>]*content=["\"]([^"\"]+)["\"]', html_c)
-            if m_desc: desc = html.unescape(m_desc.group(1))
-    except Exception: pass
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            
+            # Extraction Image (og:image)
+            og_image = soup.find("meta", property="og:image")
+            if og_image and og_image.get("content"):
+                img = html.unescape(og_image["content"])
+            
+            # Extraction Description (og:description > description)
+            og_desc = soup.find("meta", property="og:description")
+            if og_desc and og_desc.get("content"):
+                desc = html.unescape(og_desc["content"])
+            else:
+                meta_desc = soup.find("meta", attrs={"name": "description"})
+                if meta_desc and meta_desc.get("content"):
+                    desc = html.unescape(meta_desc["content"])
+    except Exception as e:
+        # print(f"Warning fetch: {e}")
+        pass
     return img, desc
 
 def main():
