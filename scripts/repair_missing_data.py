@@ -9,11 +9,17 @@ import time
 import random
 
 # Charger les variables d'environnement
+load_dotenv(".envenv")
 load_dotenv(".env.local")
-DATABASE_URL = os.environ.get("NEWS_DATABASE_URL")
+load_dotenv(".env")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL)
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL non trouvée")
+    # Nettoyage pour psycopg2
+    clean_url = DATABASE_URL.replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+    return psycopg2.connect(clean_url)
 
 def fetch_og_data(url):
     """Tente de récupérer og:image et description avec curl_cffi et BeautifulSoup"""
