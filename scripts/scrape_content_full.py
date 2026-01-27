@@ -36,11 +36,24 @@ def fetch_article_content(url, cookies_dict):
                 print(f"    [🔄] Test Fallback L'Alsace pour : {url[:40]}...")
 
         time.sleep(random.uniform(1.0, 2.0))
-        resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome110", timeout=30, allow_redirects=True)
+        
+        try:
+            resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome110", timeout=30, allow_redirects=True)
+        except Exception as ssl_err:
+            if "CertificateVerifyError" in str(ssl_err) or "SSL" in str(ssl_err):
+                resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome110", timeout=30, allow_redirects=True, verify=False)
+            else:
+                raise ssl_err
         
         # Si le fallback L'Alsace échoue (404), on tente l'URL originale sans cookies (pour les gratuits)
         if resp.status_code == 404 and target_url != url:
-            resp = requests.get(url, impersonate="chrome110", timeout=20, allow_redirects=True)
+            try:
+                resp = requests.get(url, impersonate="chrome110", timeout=20, allow_redirects=True)
+            except Exception as ssl_err:
+                if "CertificateVerifyError" in str(ssl_err) or "SSL" in str(ssl_err):
+                    resp = requests.get(url, impersonate="chrome110", timeout=20, allow_redirects=True, verify=False)
+                else:
+                    raise ssl_err
             
         if resp.status_code != 200:
             return None, True, f"HTTP {resp.status_code}"
@@ -58,6 +71,11 @@ def fetch_article_content(url, cookies_dict):
 
         # Logique EBRA (L'Alsace, DNA...)
         if any(x in target_url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"]):
+            # Si on n'est PAS connecté pour L'Alsace, on refuse le contenu partiel
+            if "lalsace.fr" in target_url and not is_connected:
+                print(f"    [⛔] Contenu partiel refusé (Non connecté) pour : {target_url[:40]}")
+                return None, False, "Not Connected (Partial content refused)"
+
             chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
             if chapo: text_parts.append(chapo.get_text().strip())
             

@@ -12,6 +12,7 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 import time
 import random
+from urllib.parse import urljoin
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -41,17 +42,59 @@ def extract_real_url(google_url):
 def fetch_content_data(url):
     img, desc = None, None
     try:
-        # Utilisation de impersonate pour passer outre les protections (TLS fingerprinting, etc.)
-        resp = requests.get(url, timeout=20, allow_redirects=True, impersonate="chrome110")
+        # On simule un délai humain
+        time.sleep(random.uniform(0.5, 1.5))
+        
+        # Tentative avec vérification SSL, fallback sans si erreur
+        try:
+            resp = requests.get(url, timeout=20, allow_redirects=True, impersonate="chrome110")
+        except Exception as ssl_err:
+            if "CertificateVerifyError" in str(ssl_err) or "SSL" in str(ssl_err):
+                resp = requests.get(url, timeout=20, allow_redirects=True, impersonate="chrome110", verify=False)
+            else:
+                raise ssl_err
+
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             
-            # Extraction Image (og:image)
+            # 1. Extraction Image
+            # A. Meta OG Image
             og_image = soup.find("meta", property="og:image")
             if og_image and og_image.get("content"):
                 img = html.unescape(og_image["content"])
             
-            # Extraction Description (og:description > description)
+            # B. Fallback Twitter Image
+            if not img:
+                tw_image = soup.find("meta", attrs={"name": "twitter:image"})
+                if tw_image and tw_image.get("content"):
+                    img = html.unescape(tw_image["content"])
+
+            # C. Fallback Body Image (Balises <picture>, <figure> ou <img> dans le contenu)
+            if not img:
+                pic = soup.find("picture") or soup.find("figure")
+                if pic:
+                    potential_img = pic.find("img")
+                    if potential_img and potential_img.get("src"):
+                        img = potential_img["src"]
+                
+                if not img:
+                    for potential in soup.find_all("img"):
+                        src = potential.get("src")
+                        if src and any(ext in src.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp', '.avif']):
+                            if not any(p in src.lower() for p in ['logo', 'icon', 'ads', 'pub', 'pixel', 'banner']):
+                                if 'avatar' not in src.lower():
+                                    img = src
+                                    break
+
+            # Nettoyage et reconstruction de l'URL de l'image (si relative)
+            if img:
+                img = html.unescape(img).strip()
+                if img.startswith("//"):
+                    img = "https:" + img
+                elif not img.startswith("http"):
+                    img = urljoin(url, img)
+
+            # 2. Extraction Description (og:description > description)
             og_desc = soup.find("meta", property="og:description")
             if og_desc and og_desc.get("content"):
                 desc = html.unescape(og_desc["content"])
