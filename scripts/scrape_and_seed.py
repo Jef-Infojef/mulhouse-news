@@ -13,13 +13,18 @@ from dotenv import load_dotenv
 import time
 import random
 from urllib.parse import urljoin
+import unicodedata
 
 # Charger les variables d'environnement
 load_dotenv()
 
 # Configuration
 DATABASE_URL = os.environ.get("DATABASE_URL")
-RSS_URL = "https://news.google.com/rss/search?q=Mulhouse&hl=fr&gl=FR&ceid=FR:fr"
+FEEDS = [
+    {"name": "L'Alsace", "url": "https://www.lalsace.fr/rss", "is_google": False},
+    {"name": "DNA", "url": "https://www.dna.fr/rss", "is_google": False},
+    {"name": "Google News", "url": "https://news.google.com/rss/search?q=Mulhouse&hl=fr&gl=FR&ceid=FR:fr", "is_google": True}
+]
 MAX_CONSECUTIVE_DECODE_ERRORS = 3
 
 def get_db_connection():
@@ -108,16 +113,8 @@ def fetch_content_data(url):
     return img, desc
 
 def main():
-    print(f"[*] Démarrage Mulhouse Actu Scraper - {datetime.now().strftime('%H:%M:%S')}")
-    try:
-        resp = requests.get(RSS_URL, timeout=15)
-        root = ET.fromstring(resp.content)
-        items = root.findall(".//item")
-    except Exception as e:
-        print(f"[!] Erreur RSS: {e}")
-        return
-
-    print(f"[+] {len(items)} articles trouvés dans le RSS.")
+    print(f"[*] Démarrage Mulhouse Actu Multi-Scraper - {datetime.now().strftime('%H:%M:%S')}")
+    
     conn = None
     try:
         conn = get_db_connection()
@@ -127,74 +124,120 @@ def main():
         return
 
     new_count = 0
-    consecutive_decode_errors = 0
-    for item in items[:100]:
-        title = item.find("title").text or "Sans titre"
-        google_link = item.find("link").text or ""
-        pub_date_str = item.find("pubDate").text or ""
-        source = item.find("source").text or "Inconnu"
-        if not google_link: continue
+    titles_seen_this_run = set()
 
-        # Filtrage Météo Ouest-France (souvent inutile/redondant)
-        if "ouest-france" in source.lower() and "météo" in title.lower():
-            print(f"    [-] Ignoré (Météo Ouest-France): {title[:40]}...")
-            continue
-
-        # 1. Décodage sécurisé
-        real_url = extract_real_url(google_link)
-        if "google.com" in real_url:
-            consecutive_decode_errors += 1
-            print(f"    [!] REJET : Lien non décodé pour '{title[:40]}...' ({consecutive_decode_errors}/{MAX_CONSECUTIVE_DECODE_ERRORS})")
-            if consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
-                print("[!!!] ARRÊT D'URGENCE : Trop d'échecs de décodage.")
-                break
-            continue
-        consecutive_decode_errors = 0
-
-        # 2. Vérifier doublon (Lien OU Titre récent)
-        cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
-        if cur.fetchone(): continue
-
-        # Vérification par titre sur les 48 dernières heures (pour éviter les doublons multisources)
-        cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (title,))
-        if cur.fetchone():
-            # print(f"    [-] Doublon titre détecté: {title[:40]}...")
-            continue
-
-        print(f"\nNouveau: {title[:70]}")
-        time.sleep(random.uniform(0.5, 1.5))
-        img, desc = fetch_content_data(real_url)
-        
-        # Vérification doublon par image (si image présente et non générique)
-        if img:
-            placeholders = ['logo', 'placeholder', 'header', 'facebook-share', 'default', 'image.png']
-            is_generic = any(p in img.lower() for p in placeholders)
+    for feed in FEEDS:
+        print(f"\n--- Scraping Flux: {feed['name']} ---")
+        try:
+            resp = requests.get(feed['url'], timeout=15, impersonate="chrome110")
             
-            if not is_generic:
-                # On ne bloque que si la même image a été utilisée AUJOURD'HUI
-                cur.execute("""
-                    SELECT id FROM \"Article\" 
-                    WHERE \"imageUrl\" = %s 
-                      AND \"publishedAt\"::date = %s::date
-                """, (img, parsedate_to_datetime(pub_date_str)))
+            # Nettoyage rapide du XML pour éviter les erreurs de tokens invalides
+            xml_content = resp.content.decode('utf-8', errors='ignore')
+            # Remplacement des entités courantes qui font planter le parseur XML
+            xml_content = xml_content.replace('&nbsp;', ' ')
+            
+            soup_rss = BeautifulSoup(xml_content, 'xml')
+            items = soup_rss.find_all("item")
+        except Exception as e:
+            print(f"[!] Erreur sur le flux {feed['name']}: {e}")
+            continue
+
+        print(f"[+] {len(items)} articles trouvés.")
+        consecutive_decode_errors = 0
+        
+        for item in items[:100]:
+            title_tag = item.find("title")
+            raw_title = title_tag.text if title_tag else "Sans titre"
+            # Nettoyage profond du titre (enlève les \n, \r, \t et espaces multiples)
+            title = " ".join(raw_title.split()).strip()
+            
+            # Normalisation du titre pour la déduplication (enlève " - Source")
+            normalized_title = re.sub(r' - [a-zA-Z0-9\.]+$', '', title).strip()
+            
+            # Filtre de sécurité
+            if "$" in title: continue
+
+            desc_tag = item.find("description")
+            raw_desc = desc_tag.text if desc_tag else ""
+            desc_text = " ".join(raw_desc.split()).lower()
+            
+            # Normalisation Unicode pour les comparaisons (enlève les accents et caractères spéciaux)
+            def clean_text(t):
+                return "".join(c for c in unicodedata.normalize('NFKD', t) if not unicodedata.combining(c)).lower()
+
+            clean_title = clean_text(title)
+            clean_desc = clean_text(desc_text)
+            
+            is_mulhouse = "mulhous" in clean_title or "mulhous" in clean_desc
+            
+            if not feed['is_google'] and not is_mulhouse:
+                continue
+
+            if normalized_title in titles_seen_this_run:
+                continue
+            
+            link_tag = item.find("link")
+            raw_link = link_tag.text.strip() if link_tag else ""
+            
+            pub_date_tag = item.find("pubDate") or item.find("pubdate")
+            pub_date_str = pub_date_tag.text.strip() if pub_date_tag else ""
+            
+            if feed['is_google']:
+                source_tag = item.find("source")
+                source = source_tag.text if source_tag else "Inconnu"
+            else:
+                source = feed['name']
+
+            if not raw_link: continue
+
+            # 1. Décodage (uniquement pour Google)
+            if feed['is_google']:
+                real_url = extract_real_url(raw_link)
+                if "google.com" in real_url:
+                    consecutive_decode_errors += 1
+                    if consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
+                        break
+                    continue
+                consecutive_decode_errors = 0
+            else:
+                real_url = raw_link
+
+            # 2. Vérifier doublon (Lien OU Titre récent)
+            cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
+            if cur.fetchone():
+                titles_seen_this_run.add(normalized_title)
+                continue
+
+            cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (title,))
+            if cur.fetchone():
+                titles_seen_this_run.add(normalized_title)
+                continue
+
+            # 3. Récupération Meta et Insertion
+            print(f"    [+] Nouveau ({feed['name']}): {title[:60]}...")
+            titles_seen_this_run.add(normalized_title)
+            
+            time.sleep(random.uniform(0.3, 0.8))
+            img, desc = fetch_content_data(real_url)
+            
+            # Doublon image
+            if img:
+                cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\"::date = %s::date", (img, parsedate_to_datetime(pub_date_str).date()))
                 if cur.fetchone():
-                    print(f"    [-] Doublon image détecté pour aujourd'hui. Ignoré.")
                     continue
 
-        # 3. Insertion
-        try:
-            cur.execute("""
-                INSERT INTO \"Article\" (id, title, link, \"imageUrl\", source, description, \"publishedAt\", \"updatedAt\")
-                VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW())
-            """, (title, real_url, img, source, desc, parsedate_to_datetime(pub_date_str)))
-            conn.commit()
-            new_count += 1
-            print(f"  -> [+] Inséré (Img: {bool(img)}, Desc: {bool(desc)})")
-        except Exception as e:
-            conn.rollback()
-            print(f"  -> [!] Erreur insertion: {e}")
+            try:
+                cur.execute("""
+                    INSERT INTO \"Article\" (id, title, link, \"imageUrl\", source, description, \"publishedAt\", \"updatedAt\")
+                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW())
+                """, (title, real_url, img, source, desc, parsedate_to_datetime(pub_date_str)))
+                conn.commit()
+                new_count += 1
+            except Exception as e:
+                conn.rollback()
+                print(f"      [!] Erreur insertion: {e}")
 
-    print(f"\n[*] Terminé. {new_count} articles ajoutés.")
+    print(f"\n[*] Terminé. {new_count} articles ajoutés au total.")
     cur.close()
     conn.close()
 
