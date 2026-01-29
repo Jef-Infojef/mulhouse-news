@@ -29,36 +29,37 @@ def test_session():
 
     try:
         conn = psycopg2.connect(DATABASE_URL.replace("?pgbouncer=true", ""))
-        cookie_value = get_app_config(conn, "EBRA_COOKIE")
         
-        if not cookie_value:
-            print("❌ Aucun cookie EBRA_COOKIE trouvé dans la table AppConfig.")
+        db_session = get_app_config(conn, "EBRA_SESSION")
+        db_poool = get_app_config(conn, "EBRA_POOOL")
+        
+        if not db_session:
+            print("⚠️ EBRA_SESSION non trouvé, tentative avec l'ancien EBRA_COOKIE...")
+            db_session = get_app_config(conn, "EBRA_COOKIE")
+        
+        if not db_session:
+            print("❌ Aucune session trouvée.")
             return
 
-        # Nettoyage simplifié (recherche le 2= ou prend tout si c'est une chaîne complexe)
-        clean = cookie_value.strip().replace('"', '').replace("'", "")
+        # Nettoyage session
+        s_val = db_session.strip().replace('"', '').replace("'", "")
+        if "2=" in s_val:
+            s_val = s_val[s_val.find("2="):].split(";")[0]
         
-        cookies_dict = {}
-        if ";" in clean and "=" in clean:
-            print("[*] Détection d'une chaîne de cookies complète.")
-            for item in clean.split(";"):
-                if "=" in item:
-                    k, v = item.split("=", 1)
-                    cookies_dict[k.strip()] = v.strip()
-        else:
-            session_val = clean
-            if "2=" in clean:
-                session_val = clean[clean.find("2="):]
-                if ";" in session_val:
-                    session_val = session_val.split(";")[0]
-            
-            print(f"[*] Cookie session extrait: {session_val[:25]}...")
-            cookies_dict = {
-                ".XCONNECT_SESSION": session_val,
-                ".XCONNECTKeepAlive": "2=1",
-                ".XCONNECT": "2=1",
-                "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
-            }
+        # Nettoyage poool
+        p_val = db_poool.strip().replace('"', '').replace("'", "") if db_poool else "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
+        if "_poool=" in p_val:
+            p_val = p_val.split("_poool=")[1].split(";")[0]
+
+        print(f"[*] Session: {s_val[:20]}...")
+        print(f"[*] Poool:   {p_val[:20]}...")
+        
+        cookies_dict = {
+            ".XCONNECT_SESSION": s_val,
+            ".XCONNECTKeepAlive": "2=1",
+            ".XCONNECT": "2=1",
+            "_poool": p_val
+        }
 
         # 1. Test de connexion
         print("[*] Test de connexion sur la home...")

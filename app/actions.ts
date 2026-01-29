@@ -107,26 +107,27 @@ export async function updateAppConfig(key: string, value: string) {
   }
 }
 
-export async function testEbraConnection(cookieValue: string) {
+export async function testEbraConnection(sessionValue: string, pooolValue?: string) {
   try {
-    const clean = String(cookieValue).trim()
-    let finalCookie = ''
-
-    // Si ça ressemble à une chaîne de cookies complète (plusieurs paires clé=valeur)
-    if (clean.includes(';') && clean.includes('=')) {
-      finalCookie = clean
-    } else {
-      // Sinon on extrait juste la session et on complète
-      let sessionValue = clean
-      if (clean.includes('2=')) {
-        sessionValue = clean.substring(clean.indexOf('2='))
-        if (sessionValue.includes(';')) sessionValue = sessionValue.split(';')[0]
-      }
-      sessionValue = sessionValue.replace(/['"]/g, '').trim()
-      finalCookie = `.XCONNECT_SESSION=${sessionValue}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7`
+    const cleanSession = String(sessionValue).trim()
+    const cleanPoool = pooolValue ? String(pooolValue).trim() : '9aab6ee3-fda6-43fc-a90e-29de3c73d8f7'
+    
+    let finalSession = cleanSession
+    if (cleanSession.includes('2=')) {
+      finalSession = cleanSession.substring(cleanSession.indexOf('2='))
+      if (finalSession.includes(';')) finalSession = finalSession.split(';')[0]
     }
+    finalSession = finalSession.replace(/['"]/g, '').trim()
 
-    console.log(`[TEST EBRA] Cookie final utilisé: ${finalCookie.substring(0, 80)}...`)
+    let finalPoool = cleanPoool
+    if (cleanPoool.includes('_poool=')) {
+      finalPoool = cleanPoool.split('_poool=')[1].split(';')[0]
+    }
+    finalPoool = finalPoool.replace(/['"]/g, '').trim()
+
+    const finalCookie = `.XCONNECT_SESSION=${finalSession}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=${finalPoool}`
+
+    console.log(`[TEST EBRA] Cookie final: ${finalCookie.substring(0, 80)}...`)
 
     const homeResponse = await fetch('https://www.lalsace.fr/', {
       headers: {

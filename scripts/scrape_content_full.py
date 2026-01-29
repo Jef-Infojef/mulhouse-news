@@ -152,39 +152,48 @@ def main():
     try:
         conn = get_db_connection()
         
-        # Récupération des cookies EBRA depuis la base de données (Priorité 1)
-        alsace_cookies = get_app_config(conn, "EBRA_COOKIE")
+        # Récupération des nouveaux champs séparés (Priorité 1)
+        db_session = get_app_config(conn, "EBRA_SESSION")
+        db_poool = get_app_config(conn, "EBRA_POOOL")
         
-        # Fallback sur l'environnement / Secret GitHub (Priorité 2)
-        if not alsace_cookies:
-            alsace_cookies = os.environ.get("ALSACE_COOKIES")
-            if alsace_cookies:
-                print("[*] Utilisation du cookie fallback (Secret GitHub)")
-
+        alsace_cookies = None
         cookies_dict = {}
-        if alsace_cookies:
-            clean = alsace_cookies.strip().replace('"', '').replace("'", "")
+
+        if db_session:
+            # Nettoyage session
+            s_val = db_session.strip().replace('"', '').replace("'", "")
+            if "2=" in s_val:
+                s_val = s_val[s_val.find("2="):].split(";")[0]
             
-            # Si c'est une chaîne complète (ex: clé1=val1; clé2=val2)
-            if ";" in clean and "=" in clean:
-                for item in clean.split(";"):
-                    if "=" in item:
-                        k, v = item.split("=", 1)
-                        cookies_dict[k.strip()] = v.strip()
-            else:
-                # Sinon on cherche juste la partie qui commence par "2="
-                session_val = clean
-                if "2=" in clean:
-                    session_val = clean[clean.find("2="):]
-                    if ";" in session_val:
-                        session_val = session_val.split(";")[0]
-                
-                cookies_dict = {
-                    ".XCONNECT_SESSION": session_val, 
-                    ".XCONNECTKeepAlive": "2=1", 
-                    ".XCONNECT": "2=1", 
-                    "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
-                }
+            # Nettoyage poool
+            p_val = db_poool.strip().replace('"', '').replace("'", "") if db_poool else "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
+            if "_poool=" in p_val:
+                p_val = p_val.split("_poool=")[1].split(";")[0]
+            
+            cookies_dict = {
+                ".XCONNECT_SESSION": s_val,
+                ".XCONNECTKeepAlive": "2=1",
+                ".XCONNECT": "2=1",
+                "_poool": p_val
+            }
+            alsace_cookies = "DB_ACTIVE"
+            print(f"[*] Session active via DB (Poool: {p_val[:8]}...)")
+
+        # Fallback sur l'ancien champ EBRA_COOKIE ou Secret GitHub (Priorité 2)
+        if not alsace_cookies:
+            fallback = get_app_config(conn, "EBRA_COOKIE") or os.environ.get("ALSACE_COOKIES")
+            if fallback:
+                print("[*] Utilisation du cookie fallback")
+                clean = fallback.strip().replace('"', '').replace("'", "")
+                if ";" in clean and "=" in clean:
+                    for item in clean.split(";"):
+                        if "=" in item:
+                            k, v = item.split("=", 1)
+                            cookies_dict[k.strip()] = v.strip()
+                else:
+                    session_val = clean[clean.find("2="):].split(";")[0] if "2=" in clean else clean
+                    cookies_dict = {".XCONNECT_SESSION": session_val, ".XCONNECTKeepAlive": "2=1", ".XCONNECT": "2=1", "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"}
+                alsace_cookies = "FALLBACK_ACTIVE"
 
         cur = conn.cursor()
 

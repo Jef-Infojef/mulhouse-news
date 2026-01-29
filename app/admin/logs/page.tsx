@@ -34,7 +34,8 @@ export default function AdminLogsPage() {
   
   // Modal state
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false)
-  const [ebraCookie, setEbraCookie] = useState('')
+  const [ebraSession, setEbraSession] = useState('')
+  const [ebraPoool, setEbraPoool] = useState('')
   const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [isTestingConnection, setIsTestingConnection] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
@@ -69,27 +70,26 @@ export default function AdminLogsPage() {
   const openConfigModal = async () => {
     setIsConfigModalOpen(true)
     setTestResult(null)
-    const { value } = await getAppConfig('EBRA_COOKIE')
-    if (value) setEbraCookie(value)
+    const resSession = await getAppConfig('EBRA_SESSION')
+    const resPoool = await getAppConfig('EBRA_POOOL')
+    if (resSession.value) setEbraSession(resSession.value)
+    if (resPoool.value) setEbraPoool(resPoool.value)
   }
 
   const handleSaveConfig = async () => {
     setIsSavingConfig(true)
-    const { success, error } = await updateAppConfig('EBRA_COOKIE', ebraCookie)
-    if (success) {
-      alert('Cookie EBRA mis à jour avec succès')
-      setIsConfigModalOpen(false)
-    } else {
-      alert('Erreur: ' + error)
-    }
+    await updateAppConfig('EBRA_SESSION', ebraSession)
+    await updateAppConfig('EBRA_POOOL', ebraPoool)
+    alert('Configuration EBRA mise à jour avec succès')
+    setIsConfigModalOpen(false)
     setIsSavingConfig(false)
   }
 
   const handleTestConnection = async () => {
-    if (!ebraCookie) return alert('Veuillez saisir un cookie avant de tester')
+    if (!ebraSession) return alert('Veuillez saisir la session avant de tester')
     setIsTestingConnection(true)
     setTestResult(null)
-    const result = await testEbraConnection(ebraCookie)
+    const result = await testEbraConnection(ebraSession, ebraPoool)
     setTestResult(result)
     setIsTestingConnection(false)
   }
@@ -343,17 +343,28 @@ export default function AdminLogsPage() {
             
             <div className="p-6 space-y-4">
               <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm text-blue-200 leading-relaxed">
-                Collez ici la valeur du cookie <strong>ebra_session</strong> (ou le header Cookie complet) récupéré depuis votre navigateur. Cette valeur sera utilisée par le scraper pour accéder aux articles complets de l'Alsace, DNA et Est Républicain.
+                Configurez ici les deux paramètres clés de la session Premium. Vous les trouverez dans l'onglet <strong>Application &gt; Cookies</strong> de votre navigateur sur le site de l'Alsace.
               </div>
               
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Valeur du Cookie</label>
-                <textarea 
-                  value={ebraCookie}
-                  onChange={(e) => setEbraCookie(e.target.value)}
-                  placeholder="exemple: ebra_session=xxxxxx; ..."
-                  className="w-full bg-gray-900 border border-gray-700 rounded-xl p-4 text-gray-100 font-mono text-xs h-40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Session (.XCONNECT_SESSION)</label>
+                  <textarea 
+                    value={ebraSession}
+                    onChange={(e) => setEbraSession(e.target.value)}
+                    placeholder="2=42F64..."
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-gray-100 font-mono text-xs h-32 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Paywall (_poool)</label>
+                  <textarea 
+                    value={ebraPoool}
+                    onChange={(e) => setEbraPoool(e.target.value)}
+                    placeholder="9aab6ee3..."
+                    className="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-gray-100 font-mono text-xs h-32 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                  />
+                </div>
               </div>
 
               {testResult && (
