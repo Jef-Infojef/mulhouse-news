@@ -167,12 +167,19 @@ export async function testEbraConnection(cookieValue: string) {
     }
     console.log('[TEST EBRA] Résultats détection:', checks)
     
-    // Si tous les tests échouent mais qu'on a un gros HTML, on vérifie si un article premium est accessible
-    let isConnected = Object.values(checks).some(v => v === true)
+    // Détection plus large
+    const isConnected = Object.values(checks).some(v => v === true)
     
-    if (!isConnected && html.length > 500000) {
-      console.log('[TEST EBRA] Aucune clé trouvée mais HTML volumineux, test sur article premium direct...')
-      isConnected = true // On force pour passer au test de l'article
+    // Si tous les tests échouent mais qu'on a un gros HTML (comme vu dans les logs ~840ko), 
+    // on considère que la session est probablement active car le paywall réduit drastiquement la taille.
+    if (!isConnected && html.length > 300000) {
+      console.log(`[TEST EBRA] Aucune clé explicite trouvée mais HTML volumineux (${html.length}), passage au test d'article.`)
+      // On continue pour voir si l'article est complet
+    } else if (!isConnected) {
+      if (html.includes('Ray ID:') || html.includes('cloudflare')) {
+        return { success: false, message: 'Bloqué par Cloudflare (le serveur ne peut pas simuler le navigateur)' }
+      }
+      return { success: false, message: 'Session non reconnue sur la home. Vérifiez la valeur du cookie.' }
     }
 
     if (!isConnected) {
