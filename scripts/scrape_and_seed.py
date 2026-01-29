@@ -1,3 +1,5 @@
+import sys
+print(f"DEBUG: Starting script with Python {sys.version}")
 import os
 import json
 from curl_cffi import requests
@@ -21,6 +23,11 @@ load_dotenv()
 
 # Configuration
 DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    print("DEBUG: DATABASE_URL is missing!")
+else:
+    print(f"DEBUG: DATABASE_URL found (length: {len(DATABASE_URL)})")
+
 FEEDS = [
     {"name": "L'Alsace", "url": "https://www.lalsace.fr/rss", "is_google": False},
     {"name": "DNA", "url": "https://www.dna.fr/rss", "is_google": False},
