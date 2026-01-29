@@ -83,3 +83,27 @@ export async function getScrapingLogs() {
   }
 }
 
+export async function getAppConfig(key: string) {
+  try {
+    const config = await prisma.appConfig.findUnique({
+      where: { key }
+    })
+    return { value: config?.value || null, error: null }
+  } catch (error: any) {
+    return { value: null, error: error.message }
+  }
+}
+
+export async function updateAppConfig(key: string, value: string) {
+  try {
+    await prisma.appConfig.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value }
+    })
+    return { success: true, error: null }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+

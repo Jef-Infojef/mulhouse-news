@@ -16,7 +16,6 @@ load_dotenv(".env.local")
 load_dotenv(".env")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-ALSACE_COOKIES = os.environ.get("ALSACE_COOKIES")
 
 def get_db_connection():
     if not DATABASE_URL:
@@ -24,13 +23,22 @@ def get_db_connection():
     clean_url = DATABASE_URL.replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
     return psycopg2.connect(clean_url)
 
-def fetch_article_content(url, cookies_dict):
+def get_app_config(conn, key):
+    try:
+        with conn.cursor() as cur:
+            cur.execute('SELECT value FROM "AppConfig" WHERE key = %s', (key,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except:
+        return None
+
+def fetch_article_content(url, cookies_dict, alsace_cookies_active):
     """Récupère le contenu complet selon la source."""
     try:
         # Fallback intelligent pour le groupe EBRA (DNA, Est Républicain, etc.)
         # Si on a des cookies L'Alsace, on tente de transformer l'URL DNA/EstRep en L'Alsace
         target_url = url
-        if ALSACE_COOKIES and ("dna.fr" in url or "estrepublicain.fr" in url or "vosgesmatin.fr" in url):
+        if alsace_cookies_active and ("dna.fr" in url or "estrepublicain.fr" in url or "vosgesmatin.fr" in url):
             target_url = url.replace("www.dna.fr", "www.lalsace.fr").replace("www.estrepublicain.fr", "www.lalsace.fr").replace("www.vosgesmatin.fr", "www.lalsace.fr")
             if target_url != url:
                 print(f"    [🔄] Test Fallback L'Alsace pour : {url[:40]}...")
@@ -62,7 +70,7 @@ def fetch_article_content(url, cookies_dict):
         is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber", "premium", "Abonné"])
         
         # Si c'était un article L'Alsace (ou transformé en L'Alsace) et qu'on n'est pas connecté
-        if not is_connected and ALSACE_COOKIES and "lalsace.fr" in target_url:
+        if not is_connected and alsace_cookies_active and "lalsace.fr" in target_url:
             # On continue quand même pour tenter de choper le chapo ou LD+JSON
             print(f"    [!] Mode non-abonné pour : {target_url[:40]}")
 
@@ -137,18 +145,21 @@ def main():
     start_time = datetime.now()
     print(f"=== SCRAPER PRODUCTION V2 (WITH LOGS) - {start_time.strftime('%H:%M:%S')} ===")
     
-    cookies_dict = {}
-    if ALSACE_COOKIES:
-        clean = ALSACE_COOKIES.strip().replace('"', '').replace("'", "")
-        if ':' in clean: clean = clean.split(':', 1)[1].strip()
-        cookies_dict = {".XCONNECT_SESSION": clean, ".XCONNECTKeepAlive": "2=1", ".XCONNECT": "2=1", "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"}
-
     conn = None
     session_details = []
     stats = {"success": 0, "error": 0, "is_connected": False}
 
     try:
         conn = get_db_connection()
+        
+        # Récupération des cookies EBRA depuis la base de données
+        alsace_cookies = get_app_config(conn, "EBRA_COOKIE")
+        cookies_dict = {}
+        if alsace_cookies:
+            clean = alsace_cookies.strip().replace('"', '').replace("'", "")
+            if ':' in clean: clean = clean.split(':', 1)[1].strip()
+            cookies_dict = {".XCONNECT_SESSION": clean, ".XCONNECTKeepAlive": "2=1", ".XCONNECT": "2=1", "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"}
+
         cur = conn.cursor()
 
         # Vérification connexion initiale
@@ -171,7 +182,7 @@ def main():
         
         for i, (art_id, title, link) in enumerate(articles, 1):
             # On ne saute plus les EBRA, on tente de chopper ce qu'on peut (chapo, etc.)
-            content, active, err = fetch_article_content(link, cookies_dict)
+            content, active, err = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
             status = "SUCCESS" if content else "FAILED"
             
             # On ne break plus si la session est perdue, on continue pour les autres

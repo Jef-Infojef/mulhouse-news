@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getScrapingLogs } from '@/app/actions'
+import { getScrapingLogs, getAppConfig, updateAppConfig } from '@/app/actions'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { 
@@ -15,7 +15,11 @@ import {
   ChevronUp,
   Link as LinkIcon,
   Search,
-  Lock
+  Lock,
+  Settings,
+  Key,
+  Save,
+  X
 } from 'lucide-react'
 
 export default function AdminLogsPage() {
@@ -25,6 +29,11 @@ export default function AdminLogsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expandedLog, setExpandedLog] = useState<string | null>(null)
+  
+  // Modal state
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false)
+  const [ebraCookie, setEbraCookie] = useState('')
+  const [isSavingConfig, setIsSavingConfig] = useState(false)
 
   useEffect(() => {
     const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
@@ -51,6 +60,24 @@ export default function AdminLogsPage() {
     if (error) setError(error)
     else setLogs(logs)
     setLoading(false)
+  }
+
+  const openConfigModal = async () => {
+    setIsConfigModalOpen(true)
+    const { value } = await getAppConfig('EBRA_COOKIE')
+    if (value) setEbraCookie(value)
+  }
+
+  const handleSaveConfig = async () => {
+    setIsSavingConfig(true)
+    const { success, error } = await updateAppConfig('EBRA_COOKIE', ebraCookie)
+    if (success) {
+      alert('Cookie EBRA mis à jour avec succès')
+      setIsConfigModalOpen(false)
+    } else {
+      alert('Erreur: ' + error)
+    }
+    setIsSavingConfig(false)
   }
 
   if (!isAuthenticated) {
@@ -97,12 +124,20 @@ export default function AdminLogsPage() {
             </h1>
             <p className="text-gray-400 mt-1">Suivi en temps réel de l'enrichissement des articles</p>
           </div>
-          <button 
-            onClick={fetchLogs}
-            className="bg-gray-800 hover:bg-gray-700 text-sm font-medium py-2 px-4 rounded-lg border border-gray-700 transition-colors"
-          >
-            Actualiser
-          </button>
+          <div className="flex gap-2">
+            <button 
+              onClick={openConfigModal}
+              className="bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-sm font-medium py-2 px-4 rounded-lg border border-blue-500/30 transition-colors flex items-center gap-2"
+            >
+              <Settings className="w-4 h-4" /> Configuration EBRA
+            </button>
+            <button 
+              onClick={fetchLogs}
+              className="bg-gray-800 hover:bg-gray-700 text-sm font-medium py-2 px-4 rounded-lg border border-gray-700 transition-colors"
+            >
+              Actualiser
+            </button>
+          </div>
         </header>
 
         {error && (
@@ -278,6 +313,56 @@ export default function AdminLogsPage() {
           )}
         </div>
       </div>
+
+      {/* Modal Configuration EBRA */}
+      {isConfigModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-gray-700 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Key className="text-blue-500" /> Configuration Session Premium
+              </h2>
+              <button onClick={() => setIsConfigModalOpen(false)} className="text-gray-400 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm text-blue-200 leading-relaxed">
+                Collez ici la valeur du cookie <strong>ebra_session</strong> (ou le header Cookie complet) récupéré depuis votre navigateur. Cette valeur sera utilisée par le scraper pour accéder aux articles complets de l'Alsace, DNA et Est Républicain.
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Valeur du Cookie</label>
+                <textarea 
+                  value={ebraCookie}
+                  onChange={(e) => setEbraCookie(e.target.value)}
+                  placeholder="exemple: ebra_session=xxxxxx; ..."
+                  className="w-full bg-gray-900 border border-gray-700 rounded-xl p-4 text-gray-100 font-mono text-xs h-40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                />
+              </div>
+            </div>
+            
+            <div className="p-6 bg-gray-900/50 border-t border-gray-700 flex justify-end gap-3">
+              <button 
+                onClick={() => setIsConfigModalOpen(false)}
+                className="px-6 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors"
+              >
+                Annuler
+              </button>
+              <button 
+                onClick={handleSaveConfig}
+                disabled={isSavingConfig}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2 px-6 rounded-lg transition-all flex items-center gap-2"
+              >
+                {isSavingConfig ? <Clock className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Sauvegarder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
