@@ -116,18 +116,20 @@ export async function testEbraConnection(cookieValue: string) {
     if (clean.includes('=') && clean.includes(';') && clean.length > 50) {
       finalCookie = clean
     } else {
-      // Nettoyage agressif pour ne garder que la valeur hexadécimale si possible
+      // Nettoyage agressif pour ne garder que la valeur hexadécimale
       let sessionValue = clean
       if (sessionValue.includes('ebra_session=')) sessionValue = sessionValue.split('ebra_session=')[1].split(';')[0]
       if (sessionValue.includes('.XCONNECT_SESSION=')) sessionValue = sessionValue.split('.XCONNECT_SESSION=')[1].split(';')[0]
-      if (sessionValue.includes(':')) sessionValue = sessionValue.split(':')[1] // Cas ".XCONNECT_SESSION :valeur"
+      if (sessionValue.includes(':')) sessionValue = sessionValue.split(':')[1] 
       
       sessionValue = sessionValue.replace(/['"]/g, '').trim()
       
-      finalCookie = `.XCONNECT_SESSION=2=${sessionValue}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7`
+      // Si la valeur contient déjà "2=", on ne le rajoute pas
+      const prefix = sessionValue.startsWith('2=') ? '' : '2='
+      finalCookie = `.XCONNECT_SESSION=${prefix}${sessionValue}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7`
     }
 
-    console.log(`[TEST EBRA] Tentative avec cookie: ${finalCookie.substring(0, 60)}...`)
+    console.log(`[TEST EBRA] Tentative avec cookie: ${finalCookie.substring(0, 80)}...`)
 
     const homeResponse = await fetch('https://www.lalsace.fr/', {
       headers: {
@@ -144,6 +146,7 @@ export async function testEbraConnection(cookieValue: string) {
     // Debug dans les logs serveur
     console.log(`[TEST EBRA] Status: ${homeResponse.status}`)
     console.log(`[TEST EBRA] Taille HTML: ${html.length}`)
+    console.log(`[TEST EBRA] Aperçu HTML (500 chars): ${html.substring(0, 500).replace(/\s+/g, ' ')}`)
     
     // Détection plus large
     const isConnected = html.includes('Se déconnecter') || 
@@ -152,7 +155,8 @@ export async function testEbraConnection(cookieValue: string) {
                         html.includes('subscriber') ||
                         html.includes('Abonné') ||
                         html.includes('premium') ||
-                        html.includes('pro-item')
+                        html.includes('pro-item') ||
+                        html.includes('AccountCircle') // Souvent utilisé pour le profil
 
     if (!isConnected) {
       if (html.includes('Ray ID:') || html.includes('cloudflare')) {
