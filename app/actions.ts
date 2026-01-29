@@ -146,17 +146,24 @@ export async function testEbraConnection(cookieValue: string) {
     // Debug dans les logs serveur
     console.log(`[TEST EBRA] Status: ${homeResponse.status}`)
     console.log(`[TEST EBRA] Taille HTML: ${html.length}`)
-    console.log(`[TEST EBRA] Aperçu HTML (500 chars): ${html.substring(0, 500).replace(/\s+/g, ' ')}`)
+    
+    const checks = {
+      'Se déconnecter': html.includes('Se déconnecter'),
+      'Mon compte': html.includes('Mon compte'),
+      'Mon profil': html.includes('Mon profil'),
+      'subscriber': html.includes('subscriber'),
+      'Abonné': html.includes('Abonné'),
+      'premium': html.includes('premium'),
+      'pro-item': html.includes('pro-item'),
+      'AccountCircle': html.includes('AccountCircle'),
+      'connected': html.includes('connected'),
+      'logged-in': html.includes('logged-in'),
+      'auth': html.includes('auth'),
+    }
+    console.log('[TEST EBRA] Résultats détection:', checks)
     
     // Détection plus large
-    const isConnected = html.includes('Se déconnecter') || 
-                        html.includes('Mon compte') || 
-                        html.includes('Mon profil') ||
-                        html.includes('subscriber') ||
-                        html.includes('Abonné') ||
-                        html.includes('premium') ||
-                        html.includes('pro-item') ||
-                        html.includes('AccountCircle') // Souvent utilisé pour le profil
+    const isConnected = Object.values(checks).some(v => v === true)
 
     if (!isConnected) {
       if (html.includes('Ray ID:') || html.includes('cloudflare')) {
