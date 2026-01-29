@@ -113,17 +113,21 @@ export async function testEbraConnection(cookieValue: string) {
     let finalCookie = ''
 
     // Si l'utilisateur a collé un header Cookie complet, on l'utilise tel quel
-    if (clean.includes('=') && clean.includes(';')) {
+    if (clean.includes('=') && clean.includes(';') && clean.length > 50) {
       finalCookie = clean
     } else {
-      // Sinon on essaie d'extraire la session
-      const sessionValue = clean.includes('ebra_session=') 
-        ? clean.split('ebra_session=')[1].split(';')[0] 
-        : clean.replace(/['"]/g, '')
-      finalCookie = `.XCONNECT_SESSION=${sessionValue}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7`
+      // Nettoyage agressif pour ne garder que la valeur hexadécimale si possible
+      let sessionValue = clean
+      if (sessionValue.includes('ebra_session=')) sessionValue = sessionValue.split('ebra_session=')[1].split(';')[0]
+      if (sessionValue.includes('.XCONNECT_SESSION=')) sessionValue = sessionValue.split('.XCONNECT_SESSION=')[1].split(';')[0]
+      if (sessionValue.includes(':')) sessionValue = sessionValue.split(':')[1] // Cas ".XCONNECT_SESSION :valeur"
+      
+      sessionValue = sessionValue.replace(/['"]/g, '').trim()
+      
+      finalCookie = `.XCONNECT_SESSION=2=${sessionValue}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7`
     }
 
-    console.log(`[TEST EBRA] Tentative avec cookie: ${finalCookie.substring(0, 50)}...`)
+    console.log(`[TEST EBRA] Tentative avec cookie: ${finalCookie.substring(0, 60)}...`)
 
     const homeResponse = await fetch('https://www.lalsace.fr/', {
       headers: {
@@ -146,6 +150,8 @@ export async function testEbraConnection(cookieValue: string) {
                         html.includes('Mon compte') || 
                         html.includes('Mon profil') ||
                         html.includes('subscriber') ||
+                        html.includes('Abonné') ||
+                        html.includes('premium') ||
                         html.includes('pro-item')
 
     if (!isConnected) {
