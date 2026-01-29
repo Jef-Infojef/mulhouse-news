@@ -148,6 +148,7 @@ def main():
         print(f"\n--- Scraping Flux: {feed['name']} ---")
         try:
             resp = requests.get(feed['url'], timeout=15, impersonate="chrome110")
+            print(f"DEBUG: Feed {feed['name']} status: {resp.status_code}")
             
             # Nettoyage rapide du XML pour éviter les erreurs de tokens invalides
             xml_content = resp.content.decode('utf-8', errors='ignore')
