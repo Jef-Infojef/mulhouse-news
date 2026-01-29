@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getScrapingLogs, getAppConfig, updateAppConfig } from '@/app/actions'
+import { getScrapingLogs, getAppConfig, updateAppConfig, testEbraConnection } from '@/app/actions'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { 
@@ -19,7 +19,9 @@ import {
   Settings,
   Key,
   Save,
-  X
+  X,
+  Play,
+  Activity
 } from 'lucide-react'
 
 export default function AdminLogsPage() {
@@ -34,6 +36,8 @@ export default function AdminLogsPage() {
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false)
   const [ebraCookie, setEbraCookie] = useState('')
   const [isSavingConfig, setIsSavingConfig] = useState(false)
+  const [isTestingConnection, setIsTestingConnection] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
   useEffect(() => {
     const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
@@ -64,6 +68,7 @@ export default function AdminLogsPage() {
 
   const openConfigModal = async () => {
     setIsConfigModalOpen(true)
+    setTestResult(null)
     const { value } = await getAppConfig('EBRA_COOKIE')
     if (value) setEbraCookie(value)
   }
@@ -78,6 +83,15 @@ export default function AdminLogsPage() {
       alert('Erreur: ' + error)
     }
     setIsSavingConfig(false)
+  }
+
+  const handleTestConnection = async () => {
+    if (!ebraCookie) return alert('Veuillez saisir un cookie avant de tester')
+    setIsTestingConnection(true)
+    setTestResult(null)
+    const result = await testEbraConnection(ebraCookie)
+    setTestResult(result)
+    setIsTestingConnection(false)
   }
 
   if (!isAuthenticated) {
@@ -341,23 +355,43 @@ export default function AdminLogsPage() {
                   className="w-full bg-gray-900 border border-gray-700 rounded-xl p-4 text-gray-100 font-mono text-xs h-40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
                 />
               </div>
+
+              {testResult && (
+                <div className={`p-4 rounded-xl text-sm flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200 ${
+                  testResult.success ? 'bg-green-500/10 border border-green-500/20 text-green-400' : 'bg-red-500/10 border border-red-500/20 text-red-400'
+                }`}>
+                  {testResult.success ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+                  {testResult.message}
+                </div>
+              )}
             </div>
             
-            <div className="p-6 bg-gray-900/50 border-t border-gray-700 flex justify-end gap-3">
+            <div className="p-6 bg-gray-900/50 border-t border-gray-700 flex justify-between items-center">
               <button 
-                onClick={() => setIsConfigModalOpen(false)}
-                className="px-6 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors"
+                onClick={handleTestConnection}
+                disabled={isTestingConnection || !ebraCookie}
+                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all flex items-center gap-2"
               >
-                Annuler
+                {isTestingConnection ? <Activity className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                Tester la connexion
               </button>
-              <button 
-                onClick={handleSaveConfig}
-                disabled={isSavingConfig}
-                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2 px-6 rounded-lg transition-all flex items-center gap-2"
-              >
-                {isSavingConfig ? <Clock className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Sauvegarder
-              </button>
+              
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setIsConfigModalOpen(false)}
+                  className="px-6 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors"
+                >
+                  Annuler
+                </button>
+                <button 
+                  onClick={handleSaveConfig}
+                  disabled={isSavingConfig}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2 px-6 rounded-lg transition-all flex items-center gap-2"
+                >
+                  {isSavingConfig ? <Clock className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Sauvegarder
+                </button>
+              </div>
             </div>
           </div>
         </div>

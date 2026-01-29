@@ -107,3 +107,59 @@ export async function updateAppConfig(key: string, value: string) {
   }
 }
 
+export async function testEbraConnection(cookieValue: string) {
+  try {
+    const clean = cookieValue.strip ? cookieValue.trim() : String(cookieValue).trim()
+    const sessionCookie = clean.includes('ebra_session=') 
+      ? clean.split('ebra_session=')[1].split(';')[0] 
+      : clean.replace(/['"]/g, '')
+
+    // 1. Test de connexion simple sur la home
+    const homeResponse = await fetch('https://www.lalsace.fr/', {
+      headers: {
+        'Cookie': `.XCONNECT_SESSION=${sessionCookie}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
+      },
+      cache: 'no-store'
+    })
+
+    const html = await homeResponse.text()
+    const isConnected = html.includes('Se déconnecter') || html.includes('Mon compte') || html.includes('Mon profil')
+
+    if (!isConnected) {
+      return { success: false, message: 'Session invalide ou expirée (non reconnu par le site)' }
+    }
+
+    // 2. Test sur un article premium (on cherche un lien récent en base ou on en prend un connu)
+    const lastPremium = await prisma.article.findFirst({
+      where: {
+        source: { contains: 'Alsace', mode: 'insensitive' },
+        link: { contains: 'lalsace.fr' }
+      },
+      orderBy: { publishedAt: 'desc' }
+    })
+
+    if (lastPremium) {
+      const artResponse = await fetch(lastPremium.link, {
+        headers: {
+          'Cookie': `.XCONNECT_SESSION=${sessionCookie}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1`,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
+        },
+        cache: 'no-store'
+      })
+      const artHtml = await artResponse.text()
+      const hasContent = artHtml.includes('textComponent') || artHtml.length > 50000 // Un article complet est lourd
+      
+      if (hasContent) {
+        return { success: true, message: 'Connexion Premium validée ! Accès au contenu complet confirmé.' }
+      } else {
+        return { success: true, message: 'Connecté, mais le contenu complet semble bloqué ou protégé.' }
+      }
+    }
+
+    return { success: true, message: 'Connecté avec succès (aucun article récent pour test complet).' }
+  } catch (error: any) {
+    return { success: false, message: 'Erreur technique : ' + error.message }
+  }
+}
+
