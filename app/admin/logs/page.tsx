@@ -169,7 +169,7 @@ export default function AdminLogsPage() {
 
                 {expandedLog === log.id && (
                   <div className="border-t border-gray-700 p-6 bg-gray-900/50 rounded-b-2xl">
-                    {!log.isConnected && (
+                    {!log.isConnected && log.status !== 'TEST_LOG' && (
                       <div className="bg-orange-500/10 border border-orange-500/30 text-orange-400 p-4 rounded-xl mb-6 flex items-center gap-3">
                         <ShieldAlert className="shrink-0" />
                         <div className="text-sm">
@@ -184,36 +184,77 @@ export default function AdminLogsPage() {
                       </div>
                     )}
                     
-                    <h3 className="text-sm font-bold uppercase tracking-widest text-gray-500 mb-4">Détails des articles</h3>
-                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                      {(log.details ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : []).map((detail: any, idx: number) => (
-                        <div key={idx} className="flex items-start justify-between gap-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 group">
-                          <div className="flex-1 min-w-0">
-                            <div className="text-white font-medium truncate">{detail.title}</div>
-                            <div className="flex items-center gap-2 mt-1">
-                              <a 
-                                href={detail.link} 
-                                target="_blank" 
-                                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 truncate max-w-md"
-                              >
-                                <LinkIcon className="w-3 h-3" /> {detail.link}
-                              </a>
+                    {(() => {
+                      const detailsObj = log.details ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : null;
+                      const isDiscovery = detailsObj && !Array.isArray(detailsObj) && detailsObj.total_rss_items !== undefined;
+                      const articles = isDiscovery ? detailsObj.inserted_articles : (Array.isArray(detailsObj) ? detailsObj : []);
+
+                      return (
+                        <>
+                          {isDiscovery && (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                              <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
+                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Items RSS</div>
+                                <div className="text-xl font-bold text-white">{detailsObj.total_rss_items}</div>
+                              </div>
+                              <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
+                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Doublons Titre</div>
+                                <div className="text-xl font-bold text-gray-400">{detailsObj.duplicates_title}</div>
+                              </div>
+                              <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
+                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Doublons Lien</div>
+                                <div className="text-xl font-bold text-gray-400">{detailsObj.duplicates_link}</div>
+                              </div>
+                              <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
+                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1 text-red-400">Erreurs Google</div>
+                                <div className={`text-xl font-bold ${detailsObj.google_decode_errors > 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                  {detailsObj.google_decode_errors}
+                                </div>
+                              </div>
                             </div>
+                          )}
+
+                          <h3 className="text-sm font-bold uppercase tracking-widest text-gray-500 mb-4">
+                            {isDiscovery ? `Articles découverts (${articles.length})` : `Détails du traitement (${articles.length})`}
+                          </h3>
+                          
+                          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                            {articles.map((detail: any, idx: number) => (
+                              <div key={idx} className="flex items-start justify-between gap-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 group">
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-white font-medium truncate">{detail.title}</div>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <a 
+                                      href={detail.link} 
+                                      target="_blank" 
+                                      className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 truncate max-w-md"
+                                    >
+                                      <LinkIcon className="w-3 h-3" /> {detail.link}
+                                    </a>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  {detail.chars > 0 && <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded font-mono">{detail.chars} chars</span>}
+                                  <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${
+                                    (detail.status === 'SUCCESS' || isDiscovery) ? 'bg-green-500/20 text-green-400' :
+                                    detail.status === 'SESSION_LOST' ? 'bg-orange-500/10 text-orange-400' :
+                                    detail.status === 'SKIPPED' ? 'bg-gray-700 text-gray-400' :
+                                    'bg-red-500/20 text-red-400'
+                                  }`}>
+                                    {isDiscovery ? 'NOUVEAU' : (detail.status === 'SKIPPED' ? 'IGNORÉ' : detail.status)}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                            {articles.length === 0 && (
+                              <div className="text-center py-4 text-gray-500 italic">
+                                Aucun article traité dans ce log.
+                              </div>
+                            )}
                           </div>
-                          <div className="flex items-center gap-3">
-                            {detail.chars > 0 && <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded font-mono">{detail.chars} chars</span>}
-                            <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${
-                              detail.status === 'SUCCESS' ? 'bg-green-500/20 text-green-400' :
-                              detail.status === 'SESSION_LOST' ? 'bg-orange-500/20 text-orange-400' :
-                              detail.status === 'SKIPPED' ? 'bg-gray-700 text-gray-400' :
-                              'bg-red-500/20 text-red-400'
-                            }`}>
-                              {detail.status === 'SKIPPED' ? 'IGNORÉ' : detail.status}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                        </>
+                      )
+                    })()}
                   </div>
                 )}
               </div>
