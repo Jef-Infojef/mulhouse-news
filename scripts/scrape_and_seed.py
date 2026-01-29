@@ -190,30 +190,29 @@ def main():
 
             if not raw_link: continue
 
-            # 1. Décodage (uniquement pour Google)
-            if feed['is_google']:
-                real_url = extract_real_url(raw_link)
-                if "google.com" in real_url:
-                    consecutive_decode_errors += 1
-                    if consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
-                        break
-                    continue
-                consecutive_decode_errors = 0
-            else:
-                real_url = raw_link
-
-            # 2. Vérifier doublon (Lien OU Titre récent)
-            cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
-            if cur.fetchone():
-                titles_seen_this_run.add(normalized_title)
-                continue
-
+            # 1. Vérification rapide par titre AVANT décodage (pour économiser les requêtes Google)
             cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (title,))
             if cur.fetchone():
                 titles_seen_this_run.add(normalized_title)
                 continue
 
-            # 3. Récupération Meta et Insertion
+            # 2. Décodage (uniquement pour Google)
+            if feed['is_google']:
+                real_url = extract_real_url(raw_link)
+                # Si le décodage échoue, on saute l'article pour ne pas polluer la DB avec des liens inexploitables
+                if "google.com" in real_url:
+                    print(f"    [!] Saut : Échec décodage Google pour {title[:40]}...")
+                    continue
+            else:
+                real_url = raw_link
+
+            # 3. Vérifier doublon final (Lien)
+            cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
+            if cur.fetchone():
+                titles_seen_this_run.add(normalized_title)
+                continue
+
+            # 4. Récupération Meta et Insertion
             print(f"    [+] Nouveau ({feed['name']}): {title[:60]}...")
             titles_seen_this_run.add(normalized_title)
             

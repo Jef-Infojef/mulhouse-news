@@ -22,13 +22,16 @@ try:
 except ImportError:
     gnewsdecoder = None
 
-# Charger les variables depuis .env.local
+# Charger les variables depuis .env ou .env.local
 script_dir = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.join(script_dir, ".env.local")
+env_local_path = os.path.join(script_dir, ".env.local")
+env_path = os.path.join(script_dir, ".env")
+
+load_dotenv(env_local_path)
 load_dotenv(env_path)
 
 # Récupération de l'URL Supabase
-NEWS_DB_URL = os.environ.get("NEWS_DATABASE_URL")
+NEWS_DB_URL = os.environ.get("NEWS_DATABASE_URL") or os.environ.get("DATABASE_URL")
 CITY = "Mulhouse"
 HISTORY_FILE = os.path.join(script_dir, "scraped_days.json")
 MAX_CONSECUTIVE_DECODE_ERRORS = 5
@@ -243,13 +246,9 @@ class NewsScraperApp:
                 # 1. Décodage sécurisé
                 real_url = self.decode_url(art['link'])
                 if "google.com" in real_url:
-                    self.consecutive_decode_errors += 1
-                    self.log(f"   ⚠️ Échec décodage Google ({self.consecutive_decode_errors}/{MAX_CONSECUTIVE_DECODE_ERRORS})")
-                    if self.consecutive_decode_errors >= MAX_CONSECUTIVE_DECODE_ERRORS:
-                        self.log("⛔ ARRÊT D'URGENCE : IP probablement bloquée par Google.")
-                        return False
-                    continue
-                self.consecutive_decode_errors = 0
+                    self.log(f"   ⚠️ Lien Google conservé (décodage échoué)")
+                    # On continue avec le lien google
+                
                 img, desc = self.fetch_content_data(real_url)
                 try:
                     cur.execute("INSERT INTO \"Article\" (id, title, link, \"imageUrl\", source, description, \"publishedAt\", \"updatedAt\") VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW())", (art['title'], real_url, img, art['source'], desc, art['date']))

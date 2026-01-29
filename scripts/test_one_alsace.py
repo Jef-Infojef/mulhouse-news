@@ -1,75 +1,42 @@
 import os
-import requests
+from curl_cffi import requests
 import psycopg2
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 # Configuration
-def load_env():
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for f in [".envenv", ".env.local", ".env"]:
-        path = os.path.join(root_dir, f)
-        if os.path.exists(path):
-            load_dotenv(path)
-            if os.environ.get("DATABASE_URL"): return True
-    return False
+load_dotenv(".envenv")
+load_dotenv(".env.local")
+load_dotenv(".env")
 
-load_env()
 DATABASE_URL = os.environ.get("DATABASE_URL")
-
-COOKIES_RAW = ".XCONNECT_SESSION=2=42F647DB9B788CF4E0AFFF1DD52DE98DAC09560B7B8173B6AE707DE13249B5D3D98E26C37209690D989A05961C1E93CBDDF2909ED6FF95194BEA6AE2C1E5A62F519DB83384CA795ACE1E2824AA4C1D00C904F51699D03E6489E9A4B4C8211E0D25B9B66E68555AA3B098E18D1CFB0D8E55CD162A101CF8E23306F0A225ABBE4E6AA1480CEA97DAEF016F99185FECA69B74DCE53DE2A59FB8889A43374A7891008D274391E153481FAF94E8CF51E25A9872DE0D0AA146142A059E319D5BEC9708926A8C25B1A97FBA849A2B64CC973B6CE3700E3E16AB420B9135DE775FE8D9E4AF4D143969441F03400814963FB3C265; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
-
-cookies = {}
-for part in COOKIES_RAW.split(';'):
-    if '=' in part:
-        key, value = part.strip().split('=', 1)
-        cookies[key] = value
-
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'fr-FR,fr;q=0.9',
-    'Referer': 'https://www.lalsace.fr/',
-}
+ALSACE_COOKIES = os.environ.get("ALSACE_COOKIES")
 
 def get_db_connection():
     url = DATABASE_URL
-    if url and "?pgbouncer=true" in url: url = url.replace("?pgbouncer=true", "")
+    if url and "?pgbouncer=true" in url: url = url.replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
     return psycopg2.connect(url)
 
 def test_one():
-    session = requests.Session()
-    session.headers.update(headers)
-    for key, value in cookies.items():
-        session.cookies.set(key, value, domain=".lalsace.fr")
+    # Cookie dict preparation
+    cookies_dict = {}
+    if ALSACE_COOKIES:
+        clean = ALSACE_COOKIES.strip().replace('"', '').replace("'", "")
+        if ':' in clean: clean = clean.split(':', 1)[1].strip()
+        cookies_dict = {".XCONNECT_SESSION": clean, ".XCONNECTKeepAlive": "2=1", ".XCONNECT": "2=1", "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"}
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    # Target URL (un article payant récent)
+    link = "https://www.lalsace.fr/faits-divers-justice/2026/01/27/le-procureur-dresse-le-bilan-de-sa-premiere-annee-a-mulhouse"
     
-    cur.execute("""
-        SELECT id, title, link 
-        FROM \"Article\" 
-        WHERE source ILIKE '%Alsace%' AND content IS NULL
-          AND \"publishedAt\" >= '2025-10-01' AND \"publishedAt\" < '2025-11-01'
-        LIMIT 1
-    """)
-    article = cur.fetchone()
-    if not article:
-        print("Aucun article trouvé.")
-        return
-
-    art_id, title, link = article
-    print(f"[*] Test sur : {title}")
-    print(f"[*] Lien : {link}")
+    print(f"[*] Test sur : {link}")
     
     try:
-        response = session.get(link, timeout=15)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        response = requests.get(link, cookies=cookies_dict, impersonate="chrome110", timeout=15)
         
-        # Suppression de la modale de connexion bruyante
-        for modal in soup.find_all(class_='GXCO_content'):
-            modal.decompose()
+        is_connected = any(x in response.text for x in ["Se déconnecter", "Mon compte", "Mon profil", "premium"])
+        print(f"Connexion active : {'✅ OUI' if is_connected else '❌ NON'}")
 
+        soup = BeautifulSoup(response.text, 'html.parser')
         text_parts = []
         
         # Chapô
@@ -86,15 +53,12 @@ def test_one():
 
         full_text = "\n\n".join(text_parts)
         print("\n=== CONTENU RÉCUPÉRÉ ===\n")
-        print(full_text[:2000] + ("..." if len(full_text) > 2000 else ""))
+        print(full_text[:1000] + ("..." if len(full_text) > 1000 else ""))
         print("\n========================\n")
         print(f"Longueur : {len(full_text)} caractères")
 
     except Exception as e:
         print(f"Erreur : {e}")
-    finally:
-        cur.close()
-        conn.close()
 
 if __name__ == "__main__":
     test_one()
