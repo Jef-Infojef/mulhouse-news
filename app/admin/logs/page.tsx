@@ -78,10 +78,15 @@ export default function AdminLogsPage() {
 
   const handleSaveConfig = async () => {
     setIsSavingConfig(true)
-    await updateAppConfig('EBRA_SESSION', ebraSession)
-    await updateAppConfig('EBRA_POOOL', ebraPoool)
-    alert('Configuration EBRA mise à jour avec succès')
-    setIsConfigModalOpen(false)
+    const res1 = await updateAppConfig('EBRA_SESSION', ebraSession)
+    const res2 = await updateAppConfig('EBRA_POOOL', ebraPoool)
+    
+    if (res1.success && res2.success) {
+      setTestResult({ success: true, message: 'Configuration sauvegardée ! Vous pouvez maintenant tester la connexion.' })
+      // On ne ferme plus la modale : setIsConfigModalOpen(false)
+    } else {
+      alert('Erreur lors de la sauvegarde')
+    }
     setIsSavingConfig(false)
   }
 
