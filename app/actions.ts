@@ -109,28 +109,53 @@ export async function updateAppConfig(key: string, value: string) {
 
 export async function testEbraConnection(cookieValue: string) {
   try {
-    const clean = cookieValue.strip ? cookieValue.trim() : String(cookieValue).trim()
-    const sessionCookie = clean.includes('ebra_session=') 
-      ? clean.split('ebra_session=')[1].split(';')[0] 
-      : clean.replace(/['"]/g, '')
+    const clean = String(cookieValue).trim()
+    let finalCookie = ''
 
-    // 1. Test de connexion simple sur la home
+    // Si l'utilisateur a collé un header Cookie complet, on l'utilise tel quel
+    if (clean.includes('=') && clean.includes(';')) {
+      finalCookie = clean
+    } else {
+      // Sinon on essaie d'extraire la session
+      const sessionValue = clean.includes('ebra_session=') 
+        ? clean.split('ebra_session=')[1].split(';')[0] 
+        : clean.replace(/['"]/g, '')
+      finalCookie = `.XCONNECT_SESSION=${sessionValue}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=9aab6ee3-fda6-43fc-a90e-29de3c73d8f7`
+    }
+
+    console.log(`[TEST EBRA] Tentative avec cookie: ${finalCookie.substring(0, 50)}...`)
+
     const homeResponse = await fetch('https://www.lalsace.fr/', {
       headers: {
-        'Cookie': `.XCONNECT_SESSION=${sessionCookie}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
-      },
-      cache: 'no-store'
+        'Cookie': finalCookie,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,application/apng,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cache-Control': 'no-store'
+      }
     })
 
     const html = await homeResponse.text()
-    const isConnected = html.includes('Se déconnecter') || html.includes('Mon compte') || html.includes('Mon profil')
+    
+    // Debug dans les logs serveur
+    console.log(`[TEST EBRA] Status: ${homeResponse.status}`)
+    console.log(`[TEST EBRA] Taille HTML: ${html.length}`)
+    
+    // Détection plus large
+    const isConnected = html.includes('Se déconnecter') || 
+                        html.includes('Mon compte') || 
+                        html.includes('Mon profil') ||
+                        html.includes('subscriber') ||
+                        html.includes('pro-item')
 
     if (!isConnected) {
-      return { success: false, message: 'Session invalide ou expirée (non reconnu par le site)' }
+      if (html.includes('Ray ID:') || html.includes('cloudflare')) {
+        return { success: false, message: 'Bloqué par Cloudflare (le serveur ne peut pas simuler le navigateur)' }
+      }
+      return { success: false, message: 'Session non reconnue. Vérifiez que vous avez bien copié la valeur de ebra_session.' }
     }
 
-    // 2. Test sur un article premium (on cherche un lien récent en base ou on en prend un connu)
+    // Test sur un article pour confirmer l'accès
     const lastPremium = await prisma.article.findFirst({
       where: {
         source: { contains: 'Alsace', mode: 'insensitive' },
@@ -142,23 +167,23 @@ export async function testEbraConnection(cookieValue: string) {
     if (lastPremium) {
       const artResponse = await fetch(lastPremium.link, {
         headers: {
-          'Cookie': `.XCONNECT_SESSION=${sessionCookie}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1`,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
-        },
-        cache: 'no-store'
+          'Cookie': finalCookie,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
       })
       const artHtml = await artResponse.text()
-      const hasContent = artHtml.includes('textComponent') || artHtml.length > 50000 // Un article complet est lourd
+      const hasContent = artHtml.includes('textComponent') || artHtml.includes('article__body') || artHtml.length > 60000
       
       if (hasContent) {
-        return { success: true, message: 'Connexion Premium validée ! Accès au contenu complet confirmé.' }
+        return { success: true, message: 'Succès ! Vous êtes bien connecté en Premium.' }
       } else {
-        return { success: true, message: 'Connecté, mais le contenu complet semble bloqué ou protégé.' }
+        return { success: true, message: 'Connecté, mais le contenu de l\'article semble quand même limité.' }
       }
     }
 
-    return { success: true, message: 'Connecté avec succès (aucun article récent pour test complet).' }
+    return { success: true, message: 'Connecté avec succès !' }
   } catch (error: any) {
+    console.error('[TEST EBRA] Erreur:', error)
     return { success: false, message: 'Erreur technique : ' + error.message }
   }
 }
