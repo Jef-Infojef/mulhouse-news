@@ -125,6 +125,16 @@ def main():
 
     new_count = 0
     titles_seen_this_run = set()
+    
+    # Statistiques pour le log
+    stats = {
+        "total_rss_items": 0,
+        "duplicates_title": 0,
+        "duplicates_link": 0,
+        "google_decode_errors": 0,
+        "inserted_articles": []
+    }
+    start_time = datetime.now()
 
     for feed in FEEDS:
         print(f"\n--- Scraping Flux: {feed['name']} ---")
@@ -143,6 +153,7 @@ def main():
             continue
 
         print(f"[+] {len(items)} articles trouvés.")
+        stats["total_rss_items"] += len(items)
         consecutive_decode_errors = 0
         
         for item in items[:100]:
@@ -194,6 +205,7 @@ def main():
             cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (title,))
             if cur.fetchone():
                 titles_seen_this_run.add(normalized_title)
+                stats["duplicates_title"] += 1
                 continue
 
             # 2. Décodage (uniquement pour Google)
@@ -202,6 +214,7 @@ def main():
                 # Si le décodage échoue, on saute l'article pour ne pas polluer la DB avec des liens inexploitables
                 if "google.com" in real_url:
                     print(f"    [!] Saut : Échec décodage Google pour {title[:40]}...")
+                    stats["google_decode_errors"] += 1
                     continue
             else:
                 real_url = raw_link
@@ -210,6 +223,7 @@ def main():
             cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
             if cur.fetchone():
                 titles_seen_this_run.add(normalized_title)
+                stats["duplicates_link"] += 1
                 continue
 
             # 4. Récupération Meta et Insertion
@@ -232,11 +246,31 @@ def main():
                 """, (title, real_url, img, source, desc, parsedate_to_datetime(pub_date_str)))
                 conn.commit()
                 new_count += 1
+                stats["inserted_articles"].append({"title": title, "link": real_url, "source": source})
             except Exception as e:
                 conn.rollback()
                 print(f"      [!] Erreur insertion: {e}")
 
     print(f"\n[*] Terminé. {new_count} articles ajoutés au total.")
+    
+    # Enregistrement du log en base de données
+    try:
+        finished_at = datetime.now()
+        status = "SUCCESS" if stats["google_decode_errors"] == 0 else "WARNING"
+        if new_count == 0 and stats["total_rss_items"] == 0: status = "ERROR" # Si aucun item RSS trouvé (problème réseau ?)
+
+        details = json.dumps(stats)
+        
+        cur.execute("""
+            INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "articlesCount", "successCount", "errorCount", details)
+            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s::jsonb)
+        """, (start_time, finished_at, status, stats["total_rss_items"], new_count, stats["google_decode_errors"], details))
+        conn.commit()
+        print("[*] Log sauvegardé en DB.")
+    except Exception as e:
+        print(f"[!] Erreur sauvegarde log: {e}")
+        conn.rollback()
+
     cur.close()
     conn.close()
 
