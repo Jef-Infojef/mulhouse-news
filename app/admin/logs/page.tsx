@@ -193,15 +193,28 @@ export default function AdminLogsPage() {
                        <XCircle className="w-6 h-6" />}
                     </div>
                     <div>
-                      <div className="font-bold text-white text-lg">
-                        {new Intl.DateTimeFormat('fr-FR', {
-                          day: '2-digit',
-                          month: 'long',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          timeZone: 'Europe/Paris'
-                        }).format(new Date(log.startedAt))}
+                      <div className="flex items-center gap-2">
+                        <div className="font-bold text-white text-lg">
+                          {new Intl.DateTimeFormat('fr-FR', {
+                            day: '2-digit',
+                            month: 'long',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            timeZone: 'Europe/Paris'
+                          }).format(new Date(log.startedAt))}
+                        </div>
+                        {(() => {
+                          const detailsObj = log.details ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : null;
+                          const isDiscovery = detailsObj && !Array.isArray(detailsObj) && detailsObj.total_rss_items !== undefined;
+                          return (
+                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
+                              isDiscovery ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                            }`}>
+                              {isDiscovery ? 'Découverte' : 'Enrichissement'}
+                            </span>
+                          )
+                        })()}
                       </div>
                       <div className="flex items-center gap-3 text-sm text-gray-400 mt-1">
                         <span className="flex items-center gap-1">
@@ -306,7 +319,7 @@ export default function AdminLogsPage() {
                                     detail.status === 'SKIPPED' ? 'bg-gray-700 text-gray-400' :
                                     'bg-red-500/20 text-red-400'
                                   }`}>
-                                    {isDiscovery ? 'NOUVEAU' : (detail.status === 'SKIPPED' ? 'IGNORÉ' : detail.status)}
+                                    {isDiscovery ? 'INSÉRÉ' : (detail.status === 'SUCCESS' ? 'COMPLET' : (detail.status === 'SKIPPED' ? 'IGNORÉ' : detail.status))}
                                   </span>
                                 </div>
                               </div>
