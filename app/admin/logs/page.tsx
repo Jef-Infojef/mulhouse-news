@@ -380,7 +380,7 @@ export default function AdminLogsPage() {
             <div className="p-6 bg-gray-900/50 border-t border-gray-700 flex justify-between items-center">
               <button 
                 onClick={handleTestConnection}
-                disabled={isTestingConnection || !ebraCookie}
+                disabled={isTestingConnection || !ebraSession}
                 className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all flex items-center gap-2"
               >
                 {isTestingConnection ? <Activity className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
