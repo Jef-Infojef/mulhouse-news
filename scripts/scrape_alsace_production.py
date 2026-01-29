@@ -29,9 +29,17 @@ def main():
         url = db_url.replace("?pgbouncer=true", "")
         conn = psycopg2.connect(url)
         
+        # Priorité 1 : Base de données
         cookies_raw = get_app_config(conn, "EBRA_COOKIE")
+        
+        # Priorité 2 : Fallback Secret GitHub
         if not cookies_raw:
-            print("❌ Cookie EBRA manquant en base de données.")
+            cookies_raw = os.environ.get("ALSACE_COOKIES")
+            if cookies_raw:
+                print("[*] Utilisation du cookie fallback (Secret GitHub)")
+
+        if not cookies_raw:
+            print("❌ Aucun cookie trouvé (ni en base, ni en secret).")
             conn.close()
             return
 

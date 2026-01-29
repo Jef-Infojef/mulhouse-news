@@ -152,8 +152,15 @@ def main():
     try:
         conn = get_db_connection()
         
-        # Récupération des cookies EBRA depuis la base de données
+        # Récupération des cookies EBRA depuis la base de données (Priorité 1)
         alsace_cookies = get_app_config(conn, "EBRA_COOKIE")
+        
+        # Fallback sur l'environnement / Secret GitHub (Priorité 2)
+        if not alsace_cookies:
+            alsace_cookies = os.environ.get("ALSACE_COOKIES")
+            if alsace_cookies:
+                print("[*] Utilisation du cookie fallback (Secret GitHub)")
+
         cookies_dict = {}
         if alsace_cookies:
             clean = alsace_cookies.strip().replace('"', '').replace("'", "")
