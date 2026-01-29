@@ -26,9 +26,18 @@ export default function AdminLogsPage() {
   const [error, setError] = useState<string | null>(null)
   const [expandedLog, setExpandedLog] = useState<string | null>(null)
 
+  useEffect(() => {
+    const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
+    if (auth === 'true') {
+      setIsConnected(true)
+      fetchLogs()
+    }
+  }, [])
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
     if (password === '1122') {
+      document.cookie = "admin_auth=true; path=/; max-age=" + (30 * 24 * 60 * 60) // 30 jours
       setIsConnected(true)
       fetchLogs()
     } else {
@@ -136,7 +145,14 @@ export default function AdminLogsPage() {
                     </div>
                     <div>
                       <div className="font-bold text-white text-lg">
-                        {format(new Date(log.startedAt), 'dd MMMM yyyy à HH:mm', { locale: fr })}
+                        {new Intl.DateTimeFormat('fr-FR', {
+                          day: '2-digit',
+                          month: 'long',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          timeZone: 'Europe/Paris'
+                        }).format(new Date(log.startedAt))}
                       </div>
                       <div className="flex items-center gap-3 text-sm text-gray-400 mt-1">
                         <span className="flex items-center gap-1">

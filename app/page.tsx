@@ -120,13 +120,23 @@ export default function Home() {
           <div className="flex items-center gap-1.5 capitalize">
             <Calendar size={14} className="text-blue-600 shrink-0" />
             <span className="whitespace-nowrap">
-              {mounted ? currentTime.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : '...'}
+              {mounted ? currentTime.toLocaleDateString('fr-FR', { 
+                weekday: 'long', 
+                day: 'numeric', 
+                month: 'long', 
+                year: 'numeric',
+                timeZone: 'Europe/Paris'
+              }) : '...'}
             </span>
           </div>
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="flex items-center gap-1.5 sm:border-l border-gray-300 dark:border-gray-700 sm:pl-4">
               <Clock size={14} className="text-blue-600 shrink-0" />
-              <span>{mounted ? currentTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '...'}</span>
+              <span>{mounted ? currentTime.toLocaleTimeString('fr-FR', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                timeZone: 'Europe/Paris'
+              }) : '...'}</span>
             </div>
 
             {weather && (
