@@ -37,7 +37,7 @@ export default function AdminLogsPage() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
     if (password === '1122') {
-      document.cookie = "admin_auth=true; path=/; max-age=" + (30 * 24 * 60 * 60) // 30 jours
+      document.cookie = "admin_auth=true; path=/; max-age=" + (30 * 24 * 60 * 60) + "; SameSite=Strict" // 30 jours
       setIsConnected(true)
       fetchLogs()
     } else {
@@ -161,9 +161,9 @@ export default function AdminLogsPage() {
                         </span>
                         <span className="flex items-center gap-1">
                           {log.isConnected ? (
-                            <><ShieldCheck className="w-3 h-3 text-green-500" /> <span className="text-green-500">Connecté</span></>
+                            <><ShieldCheck className="w-3 h-3 text-green-500" /> <span className="text-green-500">Premium L'Alsace</span></>
                           ) : (
-                            <><ShieldAlert className="w-3 h-3 text-red-500" /> <span className="text-red-500">Non connecté</span></>
+                            <><ShieldAlert className="w-3 h-3 text-red-500" /> <span className="text-red-500">Non connecté (L'Alsace Premium)</span></>
                           )}
                         </span>
                       </div>
