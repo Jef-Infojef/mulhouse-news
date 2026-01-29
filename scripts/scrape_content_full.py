@@ -165,19 +165,26 @@ def main():
         if alsace_cookies:
             clean = alsace_cookies.strip().replace('"', '').replace("'", "")
             
-            # On cherche simplement la partie qui commence par "2="
-            session_val = clean
-            if "2=" in clean:
-                session_val = clean[clean.find("2="):]
-                if ";" in session_val:
-                    session_val = session_val.split(";")[0]
-            
-            cookies_dict = {
-                ".XCONNECT_SESSION": session_val, 
-                ".XCONNECTKeepAlive": "2=1", 
-                ".XCONNECT": "2=1", 
-                "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
-            }
+            # Si c'est une chaîne complète (ex: clé1=val1; clé2=val2)
+            if ";" in clean and "=" in clean:
+                for item in clean.split(";"):
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        cookies_dict[k.strip()] = v.strip()
+            else:
+                # Sinon on cherche juste la partie qui commence par "2="
+                session_val = clean
+                if "2=" in clean:
+                    session_val = clean[clean.find("2="):]
+                    if ";" in session_val:
+                        session_val = session_val.split(";")[0]
+                
+                cookies_dict = {
+                    ".XCONNECT_SESSION": session_val, 
+                    ".XCONNECTKeepAlive": "2=1", 
+                    ".XCONNECT": "2=1", 
+                    "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
+                }
 
         cur = conn.cursor()
 
