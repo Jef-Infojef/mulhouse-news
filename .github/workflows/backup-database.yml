@@ -34,11 +34,13 @@ jobs:
           set -e
           echo "📦 Création du dump PostgreSQL..."
           
-          # Extraction de l'host pour éviter les erreurs de certificat SSL avec pg_dump parfois
-          # Mais Supabase requiert souvent sslmode=require
-          
-          # Utilisation de pg_dump via l'URL
-          # On ajoute ?sslmode=require si pas présent pour forcer la connexion sécurisée
+          # Vérification de l'URL
+          if [ -z "$DATABASE_URL" ]; then
+            echo "❌ Erreur: DATABASE_URL est vide!"
+            exit 1
+          fi
+
+          # Ajout de sslmode=require si manquant
           DB_URL="${DATABASE_URL}"
           if [[ "$DB_URL" != *"?sslmode="* ]] && [[ "$DB_URL" != *"&sslmode="* ]]; then
              if [[ "$DB_URL" == *"?"* ]]; then
@@ -48,10 +50,29 @@ jobs:
              fi
           fi
 
-          pg_dump "$DB_URL" --no-owner --no-privileges | gzip > ${{ steps.backup-file.outputs.filename }}
+          # Exécution de pg_dump d'abord (sans pipe gzip immédiat pour voir les erreurs)
+          echo "⏳ Exécution de pg_dump..."
+          pg_dump "$DB_URL" --no-owner --no-privileges --clean --if-exists --file=backup.sql
+
+          # Vérification de la taille du fichier SQL
+          FILE_SIZE=$(stat -c%s backup.sql 2>/dev/null || echo 0)
+          echo "📏 Taille du fichier SQL brut : $FILE_SIZE octets"
           
-          echo "✅ Sauvegarde créée"
+          if [ "$FILE_SIZE" -lt 100 ]; then
+             echo "❌ Erreur: Le fichier SQL est trop petit ou vide. Échec probable de pg_dump."
+             cat backup.sql # Affiche le contenu si c'est un message d'erreur texte
+             exit 1
+          fi
+
+          # Compression
+          echo "🗜️ Compression..."
+          gzip -c backup.sql > ${{ steps.backup-file.outputs.filename }}
+          
+          echo "✅ Sauvegarde compressée créée"
           ls -lh ${{ steps.backup-file.outputs.filename }}
+          
+          # Nettoyage fichier temporaire
+          rm backup.sql
 
       - name: Configurer les credentials B2
         run: |
