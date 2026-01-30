@@ -120,6 +120,11 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     if item.get('@type') == 'NewsArticle' and 'articleBody' in item:
                         return item['articleBody'], True, None
                 except: pass
+        # Logique M+ (Mulhouse Alsace Agglomération)
+        elif "mag.mulhouse-alsace.fr" in url:
+            content_div = soup.find('div', class_='interne')
+            if content_div:
+                text_parts.append(content_div.get_text(separator="\n\n", strip=True))
         # Fallback générique
         if not text_parts:
             body = soup.find('div', itemprop='articleBody') or soup.find('article')
