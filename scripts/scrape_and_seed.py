@@ -52,54 +52,64 @@ def extract_real_url(google_url):
         print(f"    [!] Exception décodage: {e}")
     return google_url
 
-def fetch_content_data(url):
-    img, desc = None, None
+def fetch_content_data(url, fetch_title=False):
+    img, desc, title = None, None, None
     try:
-        # On simule un délai humain
         time.sleep(random.uniform(0.5, 1.5))
         
-        # Tentative avec vérification SSL, fallback sans si erreur
+        # Tentative avec impersonation chrome pour contourner les protections
         try:
             resp = requests.get(url, timeout=20, allow_redirects=True, impersonate="chrome110")
-        except Exception as ssl_err:
-            if "CertificateVerifyError" in str(ssl_err) or "SSL" in str(ssl_err):
-                resp = requests.get(url, timeout=20, allow_redirects=True, impersonate="chrome110", verify=False)
-            else:
-                raise ssl_err
+        except Exception:
+            # Fallback sans vérification SSL pour les sites avec certificats mal configurés
+            resp = requests.get(url, timeout=20, allow_redirects=True, impersonate="chrome110", verify=False)
 
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, 'html.parser')
             
-            # 1. Extraction Image
-            # A. Meta OG Image
+            # 1. Extraction Titre (si demandé ou si titre RSS corrompu)
+            if fetch_title:
+                og_title = soup.find("meta", property="og:title")
+                if og_title and og_title.get("content"):
+                    title = html.unescape(og_title["content"])
+                else:
+                    h1 = soup.find("h1")
+                    if h1:
+                        title = h1.get_text().strip()
+
+            # 2. Extraction Image
             og_image = soup.find("meta", property="og:image")
             if og_image and og_image.get("content"):
-                img = html.unescape(og_image["content"])
+                candidate = html.unescape(og_image["content"])
+                # FIX: Ignorer les logos Yahoo génériques
+                if "yahoo" in url.lower() and ("yahoo_frontpage" in candidate.lower() or "yahoo-logo" in candidate.lower()):
+                    img = None 
+                else:
+                    img = candidate
             
-            # B. Fallback Twitter Image
+            # Fallback Twitter Image
             if not img:
                 tw_image = soup.find("meta", attrs={"name": "twitter:image"})
                 if tw_image and tw_image.get("content"):
                     img = html.unescape(tw_image["content"])
 
-            # C. Fallback Body Image (Balises <picture>, <figure> ou <img> dans le contenu)
+            # Fallback Body Image
             if not img:
-                pic = soup.find("picture") or soup.find("figure")
-                if pic:
-                    potential_img = pic.find("img")
-                    if potential_img and potential_img.get("src"):
-                        img = potential_img["src"]
+                # On cherche d'abord dans les classes spécifiques aux articles (ex: caas-img pour Yahoo)
+                caas_img = soup.find("img", class_="caas-img")
+                if caas_img and caas_img.get("src"):
+                    img = caas_img["src"]
                 
                 if not img:
                     for potential in soup.find_all("img"):
                         src = potential.get("src")
                         if src and any(ext in src.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp', '.avif']):
-                            if not any(p in src.lower() for p in ['logo', 'icon', 'ads', 'pub', 'pixel', 'banner']):
-                                if 'avatar' not in src.lower():
-                                    img = src
-                                    break
+                            # Filtres plus stricts pour les logos
+                            if not any(p in src.lower() for p in ['logo', 'icon', 'ads', 'pub', 'pixel', 'banner', 'loader']):
+                                img = src
+                                break
 
-            # Nettoyage et reconstruction de l'URL de l'image (si relative)
+            # Nettoyage URL image
             if img:
                 img = html.unescape(img).strip()
                 if img.startswith("//"):
@@ -107,7 +117,7 @@ def fetch_content_data(url):
                 elif not img.startswith("http"):
                     img = urljoin(url, img)
 
-            # 2. Extraction Description (og:description > description)
+            # 3. Extraction Description
             og_desc = soup.find("meta", property="og:description")
             if og_desc and og_desc.get("content"):
                 desc = html.unescape(og_desc["content"])
@@ -115,10 +125,9 @@ def fetch_content_data(url):
                 meta_desc = soup.find("meta", attrs={"name": "description"})
                 if meta_desc and meta_desc.get("content"):
                     desc = html.unescape(meta_desc["content"])
-    except Exception as e:
-        # print(f"Warning fetch: {e}")
+    except Exception:
         pass
-    return img, desc
+    return img, desc, title
 
 def main():
     print(f"[*] Démarrage Mulhouse Actu Multi-Scraper - {datetime.now().strftime('%H:%M:%S')}")
@@ -240,8 +249,15 @@ def main():
             titles_seen_this_run.add(normalized_title)
             
             time.sleep(random.uniform(0.3, 0.8))
-            img, desc = fetch_content_data(real_url)
             
+            # Si le titre semble corrompu (cas DNA), on demande à fetch_content_data de le récupérer
+            needs_title_fix = title.startswith('$') or "TitleNoTags" in title
+            img, desc, fetched_title = fetch_content_data(real_url, fetch_title=needs_title_fix)
+            
+            if needs_title_fix and fetched_title:
+                print(f"      [ℹ️] Titre corrigé: {fetched_title[:50]}...")
+                title = fetched_title
+
             # Doublon image
             if img:
                 cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\"::date = %s::date", (img, parsedate_to_datetime(pub_date_str).date()))

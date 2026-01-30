@@ -1,17 +1,17 @@
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
-async function findMissingDescriptions() {
-  console.log("Recherche des articles sans description...");
+async function findArticleByKeyword() {
+  console.log("Recherche d'articles contenant 'sculpture' ou 'police'...");
   const articles = await prisma.article.findMany({
     where: {
       OR: [
-        { description: null },
-        { description: "" }
+        { title: { contains: 'sculpture', mode: 'insensitive' } },
+        { title: { contains: 'police', mode: 'insensitive' } }
       ]
     },
     orderBy: { createdAt: 'desc' },
-    take: 10
+    take: 5
   });
 
   if (articles.length > 0) {
@@ -20,12 +20,13 @@ async function findMissingDescriptions() {
       console.log("- Titre :", article.title);
       console.log("- Source :", article.source);
       console.log("- Link :", article.link);
-      console.log("- Description :", article.description);
       console.log("- Image URL :", article.imageUrl);
+      console.log("- Local Image :", article.localImage);
+      console.log("- R2 URL :", article.r2Url);
     });
   } else {
-    console.log("Aucun article avec description manquante trouvé.");
+    console.log("Aucun article correspondant trouvé.");
   }
 }
 
-findMissingDescriptions().catch(console.error).finally(() => prisma.$disconnect());
+findArticleByKeyword().catch(console.error).finally(() => prisma.$disconnect());
