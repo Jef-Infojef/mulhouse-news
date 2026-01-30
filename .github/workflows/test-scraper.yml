@@ -1,0 +1,25 @@
+name: Test Scraper Connection
+on: 
+  workflow_dispatch: # Permet le lancement manuel
+
+jobs:
+  test-connection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install requests psycopg2-binary beautifulsoup4 curl_cffi
+
+      - name: Run Test Script
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ALSACE_COOKIES: ${{ secrets.ALSACE_COOKIES }}
+        run: python scripts/test_github_action.py

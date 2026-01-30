@@ -1,0 +1,31 @@
+name: Scrape Mulhouse News
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' # Exécution toutes les 15 minutes
+  workflow_dispatch: # Permet le déclenchement manuel
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests googlenewsdecoder psycopg2-binary python-dotenv
+
+      - name: Run Scraper Script
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          # Le chemin est maintenant relatif à la racine du repo mulhouse-news
+          python scripts/scrape_and_seed.py

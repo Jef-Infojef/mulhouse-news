@@ -1,0 +1,71 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+*.log
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Logs & Debug
+nextjs-logs.txt
+error_log.txt
+final_error.txt
+startup_error.txt
+*.log
+
+# Scripts d'analyse locale & temporaires (contenant potentiellement des secrets)
+scripts/eval_*.ts
+scripts/check_*.py
+scripts/check_*.ts
+scripts/migrate_*.py
+scripts/count_*.ts
+scripts/count_*.py
+scripts/debug_*.py
+scripts/list_*.py
+scripts/list_*.ts
+scripts/download_*.py
+scripts/download_*.ts
+scripts/analyze_*.ts
+scripts/analyze_*.py
+scripts/clean_*.ts
+scripts/balance_*.ts
+scripts/final_*.ts
+scripts/final_*.py
+scripts/find_*.py
+scripts/fix_*.ts
+scripts/force_*.py
+scripts/get_*.ts
+scripts/insert_*.ts
+scripts/search_*.py
+scripts/test_*.py
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+/app/generated/prisma

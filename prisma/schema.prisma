@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Article {
+  id          String   @id @default(cuid())
+  title       String
+  link        String   @unique
+  imageUrl    String?
+  source      String?
+  description String?
+  publishedAt DateTime
+  scrapedAt   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  content     String?
+  localImage  String?
+  r2Url       String?
+
+  @@index([publishedAt])
+  @@index([source])
+}
+
+model ScrapingLog {
+  id            String   @id @default(cuid())
+  startedAt     DateTime @default(now())
+  finishedAt    DateTime?
+  status        String   // "SUCCESS", "PARTIAL", "FAILED", "SESSION_LOST"
+  isConnected   Boolean  @default(false)
+  articlesCount Int      @default(0)
+  successCount  Int      @default(0)
+  errorCount    Int      @default(0)
+  details       Json?    // Pour stocker la liste des liens et erreurs
+  errorMessage  String?
+}
+
+model AppConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model WeatherHistory {
+  id          String   @id @default(cuid())
+  location    String
+  day         Int
+  month       Int
+  year        Int
+  tempMax     Float
+  tempMin     Float
+  weatherCode Int
+  createdAt   DateTime @default(now())
+
+  @@unique([location, day, month, year])
+  @@index([location])
+  @@index([day, month])
+}
