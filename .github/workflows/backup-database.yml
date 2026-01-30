@@ -62,9 +62,11 @@ jobs:
              fi
           fi
 
-          # Exécution de pg_dump d'abord (sans pipe gzip immédiat pour voir les erreurs)
-          echo "⏳ Exécution de pg_dump..."
-          pg_dump "$DB_URL" --no-owner --no-privileges --clean --if-exists --file=backup.sql
+          # Forcer l'utilisation de pg_dump 17
+          PG_DUMP_17="/usr/lib/postgresql/17/bin/pg_dump"
+          echo "⏳ Exécution de $($PG_DUMP_17 --version)..."
+          
+          $PG_DUMP_17 "$DB_URL" --no-owner --no-privileges --clean --if-exists --file=backup.sql
 
           # Vérification de la taille du fichier SQL
           FILE_SIZE=$(stat -c%s backup.sql 2>/dev/null || echo 0)
@@ -72,7 +74,7 @@ jobs:
           
           if [ "$FILE_SIZE" -lt 100 ]; then
              echo "❌ Erreur: Le fichier SQL est trop petit ou vide. Échec probable de pg_dump."
-             cat backup.sql # Affiche le contenu si c'est un message d'erreur texte
+             cat backup.sql
              exit 1
           fi
 
