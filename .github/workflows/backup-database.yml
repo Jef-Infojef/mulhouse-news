@@ -97,16 +97,18 @@ jobs:
       - name: Uploader vers B2 Cloud Storage
         env:
           B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+          B2_BACKUP_BUCKET: mulhouse-news-backups-private
         run: |
           aws s3 cp ${{ steps.backup-file.outputs.filename }} \
-            s3://${{ secrets.B2_BUCKET_NAME }}/database-backups/${{ steps.backup-file.outputs.filename }} \
+            s3://$B2_BACKUP_BUCKET/database-backups/${{ steps.backup-file.outputs.filename }} \
             --endpoint-url=https://$B2_ENDPOINT
 
       - name: Nettoyer les anciennes sauvegardes (garder 30 jours)
         env:
           B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+          B2_BACKUP_BUCKET: mulhouse-news-backups-private
         run: |
-          aws s3 ls s3://${{ secrets.B2_BUCKET_NAME }}/database-backups/ \
+          aws s3 ls s3://$B2_BACKUP_BUCKET/database-backups/ \
             --endpoint-url=https://$B2_ENDPOINT > backup-list.txt || true
 
           # Supprimer les sauvegardes de plus de 30 jours
@@ -121,7 +123,7 @@ jobs:
 
             if [ ! -z "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
               echo "Suppression de l'ancienne sauvegarde : $FILE_NAME"
-              aws s3 rm s3://${{ secrets.B2_BUCKET_NAME }}/database-backups/$FILE_NAME \
+              aws s3 rm s3://$B2_BACKUP_BUCKET/database-backups/$FILE_NAME \
                 --endpoint-url=https://$B2_ENDPOINT || true
             fi
           done < backup-list.txt
