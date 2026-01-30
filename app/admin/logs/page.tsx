@@ -100,6 +100,12 @@ export default function AdminLogsPage() {
     setIsTestingConnection(false)
   }
 
+  useEffect(() => {
+    if (logs.length > 0) {
+      console.log('Date reçue (exemple):', logs[0].startedAt);
+    }
+  }, [logs]);
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
@@ -207,14 +213,14 @@ export default function AdminLogsPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <div className="font-bold text-white text-lg">
-                          {new Intl.DateTimeFormat('fr-FR', {
+                          {new Date(log.startedAt).toLocaleString('fr-FR', {
+                            timeZone: 'Europe/Paris',
                             day: '2-digit',
                             month: 'long',
                             year: 'numeric',
                             hour: '2-digit',
-                            minute: '2-digit',
-                            timeZone: 'Europe/Paris'
-                          }).format(new Date(log.startedAt))}
+                            minute: '2-digit'
+                          })}
                         </div>
                         {(() => {
                           const detailsObj = log.details ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : null;
