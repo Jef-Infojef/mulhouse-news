@@ -220,3 +220,15 @@ export async function testEbraConnection(sessionValue: string, pooolValue?: stri
   }
 }
 
+export async function deleteArticle(id: string) {
+  try {
+    await prisma.article.delete({
+      where: { id }
+    })
+    return { success: true, error: null }
+  } catch (error: any) {
+    console.error('Erreur suppression article:', error)
+    return { success: false, error: error.message || String(error) }
+  }
+}
+

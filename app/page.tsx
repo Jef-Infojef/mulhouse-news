@@ -18,7 +18,11 @@ interface Article {
   r2Url: string | null
   source: string | null
   description: string | null
+  content: string | null
   publishedAt: Date
+  scrapedAt: Date
+  createdAt: Date
+  updatedAt: Date
 }
 
 export default function Home() {
@@ -35,12 +39,19 @@ export default function Home() {
   const [weather, setWeather] = useState<{ temp: number; code: number } | null>(null)
   const { resolvedTheme, setTheme } = useTheme()
   const [showSplash, setShowSplash] = useState(true)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const pageSize = 24
 
   useEffect(() => {
     setMounted(true)
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
+
+    // Check Admin status
+    const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
+    if (auth === 'true') {
+      setIsAdmin(true)
+    }
 
     const fetchWeather = async () => {
       try {
@@ -103,6 +114,11 @@ export default function Home() {
 
   const loadMore = () => {
     setDisplayCount((prev) => prev + pageSize)
+  }
+
+  const handleArticleDeleted = (id: string) => {
+    setAllArticles(prev => prev.filter(a => a.id !== id))
+    setFilteredCount(prev => prev - 1)
   }
 
   function getWeatherIcon(code: number) {
@@ -245,7 +261,12 @@ export default function Home() {
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 {displayedArticles.map((article) => (
-                  <ArticleCard key={article.id} article={article} />
+                  <ArticleCard 
+                    key={article.id} 
+                    article={article} 
+                    isAdmin={isAdmin}
+                    onDelete={handleArticleDeleted}
+                  />
                 ))}
               </div>
 

@@ -4,7 +4,9 @@ import Link from 'next/link'
 import { useState, useMemo, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { ExternalLink, Calendar } from 'lucide-react'
+import { ExternalLink, Calendar, Trash2, Info, X } from 'lucide-react'
+import { deleteArticle } from '@/app/actions'
+import { createPortal } from 'react-dom'
 
 interface ArticleProps {
   article: {
@@ -16,20 +18,49 @@ interface ArticleProps {
     r2Url: string | null
     source: string | null
     description: string | null
+    content: string | null
     publishedAt: Date
+    scrapedAt: Date
+    createdAt: Date
+    updatedAt: Date
   }
+  isAdmin?: boolean
+  onDelete?: (id: string) => void
 }
 
-export function ArticleCard({ article }: ArticleProps) {
+export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
   const [imgUrl, setImgUrl] = useState<string | null>(article.imageUrl || article.r2Url || article.localImage)
   const [isUsingFallback, setIsUsingFallback] = useState(false)
   const [isUsingFavicon, setIsUsingFavicon] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
 
   const getDomain = (url: string) => {
     try {
       return new URL(url).hostname
     } catch {
       return 'google.com'
+    }
+  }
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    if (!window.confirm('Voulez-vous vraiment supprimer cet article ?')) return
+
+    setIsDeleting(true)
+    try {
+      const res = await deleteArticle(article.id)
+      if (res.success) {
+        onDelete?.(article.id)
+      } else {
+        alert('Erreur lors de la suppression : ' + res.error)
+        setIsDeleting(false)
+      }
+    } catch (err) {
+      alert('Erreur technique')
+      setIsDeleting(false)
     }
   }
 
@@ -67,11 +98,9 @@ export function ArticleCard({ article }: ArticleProps) {
   }
 
   return (
-    <Link
-      href={article.link}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group flex flex-col h-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl overflow-hidden hover:shadow-lg dark:hover:shadow-xl dark:hover:shadow-blue-900/50 transition-all duration-300 hover:-translate-y-1"
+    <div
+      onClick={() => window.open(article.link, '_blank', 'noopener,noreferrer')}
+      className="group flex flex-col h-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl overflow-hidden hover:shadow-lg dark:hover:shadow-xl dark:hover:shadow-blue-900/50 transition-all duration-300 hover:-translate-y-1 cursor-pointer"
     >
       <div className="relative h-48 w-full overflow-hidden bg-gray-100 dark:bg-slate-800">
         {imgUrl && (
@@ -81,6 +110,25 @@ export function ArticleCard({ article }: ArticleProps) {
             className={'w-full h-full transition-transform duration-500 group-hover:scale-105 ' + (isUsingFavicon ? 'object-contain p-12' : 'object-cover')}
             onError={handleImageError}
           />
+        )}
+        {isAdmin && (
+          <div className="absolute top-3 left-3 flex flex-col gap-2 z-10">
+            <button
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="p-2 bg-white/90 hover:bg-red-500 text-red-600 hover:text-white rounded-full shadow-lg transition-all duration-200 disabled:opacity-50"
+              title="Supprimer l'article"
+            >
+              <Trash2 size={16} className={isDeleting ? 'animate-pulse' : ''} />
+            </button>
+            <button
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowDetails(true); }}
+              className="p-2 bg-white/90 hover:bg-blue-500 text-blue-600 hover:text-white rounded-full shadow-lg transition-all duration-200"
+              title="Voir les détails BDD"
+            >
+              <Info size={16} />
+            </button>
+          </div>
         )}
         <div className="absolute top-3 right-3">
           <span className={'px-3 py-1 text-[10px] font-bold uppercase rounded-full shadow-sm ' + getSourceColor(article.source)}>
@@ -112,7 +160,76 @@ export function ArticleCard({ article }: ArticleProps) {
           </div>
           <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
-      </div>
-    </Link>
-  )
-}
+                  </div>
+                  
+                  {showDetails && typeof document !== 'undefined' && createPortal(
+                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-hidden" onClick={(e) => { e.stopPropagation(); setShowDetails(false); }}>
+                      <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center shrink-0">
+                          <h3 className="font-bold text-lg">Détails de l'article (BDD)</h3>
+                          <button onClick={() => setShowDetails(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full">
+                            <X size={20} />
+                          </button>
+                        </div>
+                        
+                        <div className="p-6 space-y-6 overflow-y-auto flex-1 custom-scrollbar">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+                            {[
+                              { label: 'ID', value: article.id },
+                              { label: 'Source', value: article.source },
+                              { label: 'Publié le', value: new Date(article.publishedAt).toLocaleString('fr-FR') },
+                              { label: 'Scrapé le', value: new Date(article.scrapedAt).toLocaleString('fr-FR') },
+                              { label: 'Créé le', value: new Date(article.createdAt).toLocaleString('fr-FR') },
+                              { label: 'Mis à jour le', value: new Date(article.updatedAt).toLocaleString('fr-FR') },
+                            ].map(field => (
+                              <div key={field.label} className="p-3 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-100 dark:border-slate-800">
+                                <span className="text-gray-400 block mb-1 uppercase tracking-wider text-[10px]">{field.label}</span>
+                                <span className="break-all font-semibold text-gray-700 dark:text-slate-300">{field.value || 'N/A'}</span>
+                              </div>
+                            ))}
+                          </div>
+            
+                          <div className="space-y-4">
+                            {[
+                              { label: 'Titre', value: article.title },
+                              { label: 'Lien Original', value: article.link, isLink: true },
+                              { label: 'Image URL', value: article.imageUrl, isLink: true },
+                              { label: 'R2 URL', value: article.r2Url, isLink: true },
+                              { label: 'Local Image', value: article.localImage },
+                            ].map(field => (
+                              <div key={field.label} className="text-xs font-mono p-3 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-100 dark:border-slate-800">
+                                <span className="text-gray-400 block mb-1 uppercase tracking-wider text-[10px]">{field.label}</span>
+                                {field.isLink && field.value ? (
+                                  <a href={field.value} target="_blank" className="text-blue-500 hover:underline break-all">{field.value}</a>
+                                ) : (
+                                  <span className="break-all text-gray-700 dark:text-slate-300">{field.value || 'N/A'}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+            
+                          <div className="space-y-4">
+                            <div className="text-xs font-mono p-3 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-100 dark:border-slate-800">
+                              <span className="text-gray-400 block mb-1 uppercase tracking-wider text-[10px]">Description (Résumé)</span>
+                              <p className="text-gray-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">{article.description || 'N/A'}</p>
+                            </div>
+                            
+                            <div className="text-xs font-mono p-3 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-100 dark:border-slate-800">
+                              <span className="text-gray-400 block mb-1 uppercase tracking-wider text-[10px]">Contenu Complet (Raw)</span>
+                              <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                                <p className="text-gray-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed text-[11px]">
+                                  {article.content || 'AUCUN CONTENU RÉCUPÉRÉ'}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>,
+                    document.body
+                  )}
+            
+                </div>
+              )
+            }
+            
