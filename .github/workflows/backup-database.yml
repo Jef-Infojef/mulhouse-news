@@ -1,0 +1,92 @@
+name: Sauvegarde Base de Données (Supabase)
+
+on:
+  schedule:
+    # Exécution 4 fois par jour : 0h, 6h, 12h et 18h UTC
+    - cron: '0 0,6,12,18 * * *'
+  workflow_dispatch: # Permet de lancer manuellement
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Créer le nom du fichier de sauvegarde
+        id: backup-file
+        run: |
+          BACKUP_DATE=$(date +%Y-%m-%d_%H-%M-%S)
+          BACKUP_FILE="backup-supabase-${BACKUP_DATE}.sql.gz"
+          echo "filename=${BACKUP_FILE}" >> $GITHUB_OUTPUT
+          echo "date=${BACKUP_DATE}" >> $GITHUB_OUTPUT
+
+      - name: Installer PostgreSQL Client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Sauvegarder la base PostgreSQL Supabase
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          echo "📦 Création du dump PostgreSQL..."
+          
+          # Extraction de l'host pour éviter les erreurs de certificat SSL avec pg_dump parfois
+          # Mais Supabase requiert souvent sslmode=require
+          
+          # Utilisation de pg_dump via l'URL
+          # On ajoute ?sslmode=require si pas présent pour forcer la connexion sécurisée
+          DB_URL="${DATABASE_URL}"
+          if [[ "$DB_URL" != *"?sslmode="* ]] && [[ "$DB_URL" != *"&sslmode="* ]]; then
+             if [[ "$DB_URL" == *"?"* ]]; then
+                DB_URL="${DB_URL}&sslmode=require"
+             else
+                DB_URL="${DB_URL}?sslmode=require"
+             fi
+          fi
+
+          pg_dump "$DB_URL" --no-owner --no-privileges | gzip > ${{ steps.backup-file.outputs.filename }}
+          
+          echo "✅ Sauvegarde créée"
+          ls -lh ${{ steps.backup-file.outputs.filename }}
+
+      - name: Configurer les credentials B2
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.B2_APPLICATION_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.B2_APPLICATION_KEY }}
+          aws configure set default.region us-west-002
+
+      - name: Uploader vers B2 Cloud Storage
+        env:
+          B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+        run: |
+          aws s3 cp ${{ steps.backup-file.outputs.filename }} \
+            s3://${{ secrets.B2_BUCKET_NAME }}/database-backups/${{ steps.backup-file.outputs.filename }} \
+            --endpoint-url=https://$B2_ENDPOINT
+
+      - name: Nettoyer les anciennes sauvegardes (garder 30 jours)
+        env:
+          B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+        run: |
+          aws s3 ls s3://${{ secrets.B2_BUCKET_NAME }}/database-backups/ \
+            --endpoint-url=https://$B2_ENDPOINT > backup-list.txt || true
+
+          # Supprimer les sauvegardes de plus de 30 jours
+          CUTOFF_DATE=$(date -d '30 days ago' +%Y-%m-%d)
+
+          while IFS= read -r line; do
+            # Format: 2024-01-22 14:00:00 123456 backup-supabase-2024-01-22_14-00-00.sql.gz
+            FILE_NAME=$(echo "$line" | awk '{print $4}')
+            
+            # Extraire date du nom de fichier (backup-supabase-YYYY-MM-DD_*.sql.gz)
+            FILE_DATE=$(echo "$FILE_NAME" | grep -oP 'backup-supabase-\K[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+
+            if [ ! -z "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
+              echo "Suppression de l'ancienne sauvegarde : $FILE_NAME"
+              aws s3 rm s3://${{ secrets.B2_BUCKET_NAME }}/database-backups/$FILE_NAME \
+                --endpoint-url=https://$B2_ENDPOINT || true
+            fi
+          done < backup-list.txt
