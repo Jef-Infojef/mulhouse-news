@@ -132,7 +132,9 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                 text_parts.extend([p.get_text().strip() for p in body.find_all('p') if len(p.get_text().strip()) > 40])
 
         if text_parts:
-            return "\n\n".join(dict.fromkeys(text_parts)), True, None # déduplication simple
+            # Nettoyage des caractères NULL (PostgreSQL n'aime pas ça)
+            clean_parts = [p.replace('\x00', '') for p in text_parts if p]
+            return "\n\n".join(dict.fromkeys(clean_parts)), True, None # déduplication simple
         return None, True, "No content found"
     except Exception as e:
         return None, True, str(e)
@@ -215,10 +217,10 @@ def main():
 
         cur.execute("""
             SELECT id, title, link 
-            FROM \"Article\" 
+            FROM "Article" 
             WHERE (content IS NULL OR LENGTH(content) < 150)
-              AND \"publishedAt\" > NOW() - INTERVAL '24 hours'
-            ORDER BY \"publishedAt\" DESC LIMIT 50
+              AND "publishedAt" > NOW() - INTERVAL '24 hours'
+            ORDER BY "publishedAt" DESC LIMIT 50
         """)
         articles = cur.fetchall()
         
