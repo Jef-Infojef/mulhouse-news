@@ -7,7 +7,10 @@ export function Logo({ className = "w-10 h-10" }: { className?: string }) {
       fill="none" 
       xmlns="http://www.w3.org/2000/svg" 
       className={className}
+      role="img"
+      aria-labelledby="logo-title"
     >
+      <title id="logo-title">Mulhouse Actu Logo</title>
       {/* Cercle Extérieur FIXÉ EN ROUGE (#a91101) */}
       <circle cx="50" cy="50" r="32" stroke="#a91101" strokeWidth="6" strokeDasharray="2 1" />
       
