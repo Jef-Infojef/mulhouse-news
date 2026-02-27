@@ -164,23 +164,23 @@ def load_tags(cur):
         ],
         'sorties': [
             'sortie', 'exposition', 'concert', 'spectacle', 'festival', 'théâtre', 'cinéma',
-            'musée', 'agenda', 'événement', 'soirée', 'fête', 'carnaval', 'marché',
+            'musée', 'agenda', 'événement', 'soirée', 'fête', 'carnaval',
             'animation', 'culture', 'culturel', 'vernissage', 'conférence', 'atelier',
             'librairie', 'livre', 'lecture', 'visite', 'balade', 'randonnée',
             'zoo', 'parc', 'piscine', 'patinoire', 'curling', 'nuit du',
         ],
         'economie': [
             'économie', 'entreprise', 'emploi', 'chômage', 'investissement', 'budget',
-            'finances', 'bilan', 'croissance', 'industrie', 'usine', 'fermeture',
-            'ouverture', 'création', 'startup', 'innovation', 'technologie', 'psa',
+            'finances', 'bilan', 'croissance', 'industrie', 'usine',
+            'startup', 'innovation', 'technologie', 'psa',
             'stellantis', 'aéroport', 'bâtiment', 'construction', 'logement',
             'immobilier', 'loyer', 'fiscalité', 'taxe', 'subvention',
         ],
         'commerce': [
             'commerce', 'magasin', 'boutique', 'enseigne', 'centre commercial',
-            'galerie marchande', 'marché', 'boulangerie', 'restaurant', 'café',
-            'ouverture', 'fermeture', 'braderie', 'vente', 'soldes', 'promotion',
-            'agence', 'immobilier', 'franchise', 'grande surface', 'supermarché',
+            'galerie marchande', 'boulangerie', 'restaurant', 'café',
+            'braderie', 'vente', 'soldes', 'promotion',
+            'franchise', 'grande surface', 'supermarché',
         ],
     }
     
