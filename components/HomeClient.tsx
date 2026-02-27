@@ -222,9 +222,41 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
                   <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight truncate">
                     Mulhouse Actu
                   </h1>
-                  <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400">
+                  <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400 mb-3">
                     Toute l'actu de Mulhouse en temps réel
                   </p>
+                  {allTags.length > 0 && (
+                    <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                      <button
+                        onClick={() => { setActiveTag(null); setDisplayCount(24) }}
+                        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                          activeTag === null
+                            ? 'bg-blue-600 text-white border-blue-600 shadow'
+                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-blue-400 hover:text-blue-600'
+                        }`}
+                      >
+                        Tous
+                      </button>
+                      {allTags.map(tag => (
+                        <button
+                          key={tag.id}
+                          onClick={() => { setActiveTag(tag.id); setDisplayCount(24) }}
+                          className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                            activeTag === tag.id ? 'shadow' : 'hover:border-opacity-80'
+                          }`}
+                          style={
+                            activeTag === tag.id
+                              ? { backgroundColor: tag.color || '#3b82f6', color: '#fff', borderColor: tag.color || '#3b82f6' }
+                              : tag.color
+                                ? { backgroundColor: tag.color + '22', color: tag.color, borderColor: tag.color + '55' }
+                                : undefined
+                          }
+                        >
+                          #{tag.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="hidden lg:flex shrink-0">
@@ -239,43 +271,6 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
           </div>
         </header>
 
-        {/* Tags filter bar */}
-        {allTags.length > 0 && (
-          <div className="w-full bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-                <button
-                  onClick={() => { setActiveTag(null); setDisplayCount(24) }}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
-                    activeTag === null
-                      ? 'bg-blue-600 text-white border-blue-600 shadow'
-                      : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-blue-400 hover:text-blue-600'
-                  }`}
-                >
-                  Tous
-                </button>
-                {allTags.map(tag => (
-                  <button
-                    key={tag.id}
-                    onClick={() => { setActiveTag(tag.id); setDisplayCount(24) }}
-                    className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
-                      activeTag === tag.id ? 'shadow' : 'hover:border-opacity-80'
-                    }`}
-                    style={
-                      activeTag === tag.id
-                        ? { backgroundColor: tag.color || '#3b82f6', color: '#fff', borderColor: tag.color || '#3b82f6' }
-                        : tag.color
-                          ? { backgroundColor: tag.color + '22', color: tag.color, borderColor: tag.color + '55' }
-                          : undefined
-                    }
-                  >
-                    #{tag.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
 
         <div className="max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
           <div className="mb-8">
