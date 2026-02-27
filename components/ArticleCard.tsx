@@ -8,6 +8,13 @@ import { ExternalLink, Calendar, Trash2, Info, X } from 'lucide-react'
 import { deleteArticle } from '@/app/actions'
 import { createPortal } from 'react-dom'
 
+interface NewsTag {
+  id: string
+  name: string
+  slug: string
+  color: string | null
+}
+
 interface ArticleProps {
   article: {
     id: string
@@ -23,6 +30,7 @@ interface ArticleProps {
     scrapedAt: Date
     createdAt: Date
     updatedAt: Date
+    ArticleGoogleTag: { NewsTag: NewsTag }[]
   }
   isAdmin?: boolean
   onDelete?: (id: string) => void
@@ -146,6 +154,29 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
           <p className="text-sm text-gray-600 dark:text-slate-400 line-clamp-3 mb-3 leading-relaxed">
             {article.description}
           </p>
+        )}
+
+        {article.ArticleGoogleTag && article.ArticleGoogleTag.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {article.ArticleGoogleTag.map(({ NewsTag: tag }) => (
+              <span
+                key={tag.id}
+                onClick={(e) => e.stopPropagation()}
+                className={
+                  tag.color
+                    ? 'px-2 py-0.5 text-[10px] font-semibold rounded-full border'
+                    : 'px-2 py-0.5 text-[10px] font-semibold rounded-full border bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-400 border-gray-200 dark:border-slate-700'
+                }
+                style={
+                  tag.color
+                    ? { backgroundColor: tag.color + '22', color: tag.color, borderColor: tag.color + '55' }
+                    : undefined
+                }
+              >
+                #{tag.name}
+              </span>
+            ))}
+          </div>
         )}
 
         <div className="mt-auto flex items-center justify-between text-xs text-gray-500 dark:text-slate-500 pt-4 border-t border-gray-100 dark:border-slate-800">

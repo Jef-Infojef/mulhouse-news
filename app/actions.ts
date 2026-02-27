@@ -18,6 +18,13 @@ export async function getLatestArticles(query?: string) {
       orderBy: {
         publishedAt: 'desc',
       },
+      include: {
+        ArticleGoogleTag: {
+          include: {
+            NewsTag: true,
+          },
+        },
+      },
     })
 
     // --- FILTRAGE DES DOUBLONS AVANCÉ ---
