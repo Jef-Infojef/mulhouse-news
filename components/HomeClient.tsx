@@ -1,12 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getLatestArticles } from '@/app/actions'
 import { ArticleCard } from '@/components/ArticleCard'
 import { Logo } from '@/components/Logo'
 import { SplashScreen } from '@/components/SplashScreen'
 import { AlertTriangle, Search, Loader2, Moon, Sun, Calendar, Clock, Cloud, CloudRain, CloudSnow } from 'lucide-react'
 import { useTheme } from 'next-themes'
+
+interface NewsTag {
+  id: string
+  name: string
+  slug: string
+  color: string | null
+}
 
 interface Article {
   id: string
@@ -22,6 +29,7 @@ interface Article {
   scrapedAt: Date
   createdAt: Date
   updatedAt: Date
+  ArticleGoogleTag: { NewsTag: NewsTag }[]
 }
 
 interface HomeClientProps {
@@ -44,6 +52,7 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
   const { resolvedTheme, setTheme } = useTheme()
   const [showSplash, setShowSplash] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [activeTag, setActiveTag] = useState<string | null>(null)
 
   const pageSize = 24
 
@@ -108,9 +117,6 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
     loadArticles('')
   }
 
-  useEffect(() => {
-    setDisplayedArticles(allArticles.slice(0, displayCount))
-  }, [allArticles, displayCount])
 
   const loadMore = () => {
     setDisplayCount((prev) => prev + pageSize)
@@ -120,6 +126,30 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
     setAllArticles(prev => prev.filter(a => a.id !== id))
     setFilteredCount(prev => prev - 1)
   }
+
+  // Collect all unique tags from all articles
+  const allTags = useMemo(() => {
+    const tagMap = new Map<string, NewsTag>()
+    allArticles.forEach(article => {
+      article.ArticleGoogleTag?.forEach(({ NewsTag: tag }) => {
+        if (!tagMap.has(tag.id)) tagMap.set(tag.id, tag)
+      })
+    })
+    return Array.from(tagMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+  }, [allArticles])
+
+  // Filter displayed articles by active tag
+  const tagFilteredArticles = useMemo(() => {
+    if (!activeTag) return allArticles
+    return allArticles.filter(article =>
+      article.ArticleGoogleTag?.some(({ NewsTag: tag }) => tag.id === activeTag)
+    )
+  }, [allArticles, activeTag])
+
+  useEffect(() => {
+    setFilteredCount(tagFilteredArticles.length)
+    setDisplayedArticles(tagFilteredArticles.slice(0, displayCount))
+  }, [tagFilteredArticles, displayCount])
 
   function getWeatherIcon(code: number) {
     if (code === 0) return <Sun size={14} className="text-yellow-500 shrink-0" />
@@ -208,6 +238,44 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
             </div>
           </div>
         </header>
+
+        {/* Tags filter bar */}
+        {allTags.length > 0 && (
+          <div className="w-full bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <button
+                  onClick={() => { setActiveTag(null); setDisplayCount(24) }}
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                    activeTag === null
+                      ? 'bg-blue-600 text-white border-blue-600 shadow'
+                      : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-blue-400 hover:text-blue-600'
+                  }`}
+                >
+                  Tous
+                </button>
+                {allTags.map(tag => (
+                  <button
+                    key={tag.id}
+                    onClick={() => { setActiveTag(tag.id); setDisplayCount(24) }}
+                    className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                      activeTag === tag.id ? 'shadow' : 'hover:border-opacity-80'
+                    }`}
+                    style={
+                      activeTag === tag.id
+                        ? { backgroundColor: tag.color || '#3b82f6', color: '#fff', borderColor: tag.color || '#3b82f6' }
+                        : tag.color
+                          ? { backgroundColor: tag.color + '22', color: tag.color, borderColor: tag.color + '55' }
+                          : undefined
+                    }
+                  >
+                    #{tag.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
           <div className="mb-8">
