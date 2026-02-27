@@ -81,9 +81,12 @@ def fetch_content_data(url, fetch_title=False):
             og_image = soup.find("meta", property="og:image")
             if og_image and og_image.get("content"):
                 candidate = html.unescape(og_image["content"])
-                # FIX: Ignorer les logos Yahoo génériques
-                if "yahoo" in url.lower() and ("yahoo_frontpage" in candidate.lower() or "yahoo-logo" in candidate.lower()):
+                # FIX: Ignorer les logos Yahoo génériques et les placeholders de protection (Radware, etc.)
+                candidate_lower = candidate.lower()
+                if "yahoo" in url.lower() and ("yahoo_frontpage" in candidate_lower or "yahoo-logo" in candidate_lower):
                     img = None 
+                elif any(p in candidate_lower for p in ["image.png", "placeholder", "radware", "default-og", "facebook-share", "fb-logo", "generic-article"]):
+                    img = None
                 else:
                     img = candidate
             
@@ -120,14 +123,109 @@ def fetch_content_data(url, fetch_title=False):
             # 3. Extraction Description
             og_desc = soup.find("meta", property="og:description")
             if og_desc and og_desc.get("content"):
-                desc = html.unescape(og_desc["content"])
+                candidate_desc = html.unescape(og_desc["content"])
+                if "loader page" in candidate_desc.lower() or "javascript" in candidate_desc.lower():
+                    desc = None
+                else:
+                    desc = candidate_desc
             else:
                 meta_desc = soup.find("meta", attrs={"name": "description"})
                 if meta_desc and meta_desc.get("content"):
                     desc = html.unescape(meta_desc["content"])
     except Exception:
         pass
+    
+    # Sécurité finale : si le titre récupéré est un message de blocage, on l'annule
+    if title and ("radware" in title.lower() or "bot" in title.lower() or "page de chargement" in title.lower()):
+        title = None
+
     return img, desc, title
+
+def load_tags(cur):
+    """Charge tous les tags depuis la DB et retourne une liste de (id, name, slug, keywords)."""
+    cur.execute('SELECT id, name, slug FROM "NewsTag"')
+    rows = cur.fetchall()
+    
+    # Mapping tag slug -> mots-clés pour la détection automatique
+    TAG_KEYWORDS = {
+        'municipales-2026': [
+            'municipales', 'élection', 'elections', 'mairie', 'maire', 'conseil municipal',
+            'liste', 'candidat', 'vote', 'scrutin', 'campagne', 'coalition', 'parti',
+            'restaurer mulhouse', 'lutte ouvrière', 'rassemblement', 'gauche', 'droite',
+            'taffarelli', 'michèle lutz', 'lutz', 'estanguet',
+        ],
+        'sports': [
+            'sport', 'foot', 'football', 'rugby', 'basket', 'handball', 'volley', 'natation',
+            'tennis', 'cyclisme', 'athlétisme', 'hockey', 'badminton', 'boxe', 'judo',
+            'match', 'championnat', 'ligue', 'coupe', 'tournoi', 'club', 'équipe',
+            'fc mulhouse', 'ash', 'mhsc', 'racing', 'mulhouse volley', 'score', 'stade',
+            'victoire', 'défaite', 'classement', 'play-off', 'division',
+            'national 3', 'régional', 'top 12', 'cev', 'pro a',
+        ],
+        'sorties': [
+            'sortie', 'exposition', 'concert', 'spectacle', 'festival', 'théâtre', 'cinéma',
+            'musée', 'agenda', 'événement', 'soirée', 'fête', 'carnaval', 'marché',
+            'animation', 'culture', 'culturel', 'vernissage', 'conférence', 'atelier',
+            'librairie', 'livre', 'lecture', 'visite', 'balade', 'randonnée',
+            'zoo', 'parc', 'piscine', 'patinoire', 'curling', 'nuit du',
+        ],
+        'economie': [
+            'économie', 'entreprise', 'emploi', 'chômage', 'investissement', 'budget',
+            'finances', 'bilan', 'croissance', 'industrie', 'usine', 'fermeture',
+            'ouverture', 'création', 'startup', 'innovation', 'technologie', 'psa',
+            'stellantis', 'aéroport', 'bâtiment', 'construction', 'logement',
+            'immobilier', 'loyer', 'fiscalité', 'taxe', 'subvention',
+        ],
+        'commerce': [
+            'commerce', 'magasin', 'boutique', 'enseigne', 'centre commercial',
+            'galerie marchande', 'marché', 'boulangerie', 'restaurant', 'café',
+            'ouverture', 'fermeture', 'braderie', 'vente', 'soldes', 'promotion',
+            'agence', 'immobilier', 'franchise', 'grande surface', 'supermarché',
+        ],
+    }
+    
+    tags = []
+    for tag_id, name, slug in rows:
+        keywords = TAG_KEYWORDS.get(slug, [name.lower()])
+        tags.append({'id': tag_id, 'name': name, 'slug': slug, 'keywords': keywords})
+    
+    return tags
+
+
+def detect_tags(title, description, tags):
+    """Retourne la liste des tag IDs correspondant au contenu de l'article."""
+    import unicodedata
+    def normalize(text):
+        if not text:
+            return ''
+        text = text.lower()
+        text = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+        return text
+    
+    haystack = normalize(f"{title} {description or ''}")
+    matched = []
+    
+    for tag in tags:
+        for kw in tag['keywords']:
+            if normalize(kw) in haystack:
+                matched.append(tag['id'])
+                break
+    
+    return matched
+
+
+def assign_tags_to_article(cur, article_id, tag_ids):
+    """Insère les liens article <-> tag dans ArticleGoogleTag."""
+    for tag_id in tag_ids:
+        try:
+            cur.execute("""
+                INSERT INTO "ArticleGoogleTag" ("articleId", "tagId")
+                VALUES (%s, %s)
+                ON CONFLICT DO NOTHING
+            """, (article_id, tag_id))
+        except Exception as e:
+            print(f"      [!] Erreur assignation tag: {e}")
+
 
 def main():
     print(f"[*] Démarrage Mulhouse Actu Multi-Scraper - {datetime.now().strftime('%H:%M:%S')}")
@@ -139,6 +237,10 @@ def main():
     except Exception as e:
         print(f"[!] Erreur DB: {e}")
         return
+    
+    # Chargement des tags depuis la DB
+    tags = load_tags(cur)
+    print(f"[*] {len(tags)} tags chargés: {[t['name'] for t in tags]}")
 
     new_count = 0
     titles_seen_this_run = set()
@@ -266,9 +368,21 @@ def main():
 
             try:
                 cur.execute("""
-                    INSERT INTO \"Article\" (id, title, link, \"imageUrl\", source, description, \"publishedAt\", \"updatedAt\")
+                    INSERT INTO "Article" (id, title, link, "imageUrl", source, description, "publishedAt", "updatedAt")
                     VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW())
+                    RETURNING id
                 """, (title, real_url, img, source, desc, parsedate_to_datetime(pub_date_str)))
+                article_row = cur.fetchone()
+                article_id = article_row[0] if article_row else None
+                
+                # Détection et assignation automatique des tags
+                if article_id and tags:
+                    matched_tag_ids = detect_tags(title, desc, tags)
+                    if matched_tag_ids:
+                        assign_tags_to_article(cur, article_id, matched_tag_ids)
+                        tag_names = [t['name'] for t in tags if t['id'] in matched_tag_ids]
+                        print(f"      [🏷️] Tags: {', '.join(tag_names)}")
+                
                 conn.commit()
                 new_count += 1
                 stats["inserted_articles"].append({"title": title, "link": real_url, "source": source})
