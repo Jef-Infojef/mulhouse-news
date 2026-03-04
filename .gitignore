@@ -69,3 +69,4 @@ scripts/test_*.py
 next-env.d.ts
 
 /app/generated/prisma
+.env*.local

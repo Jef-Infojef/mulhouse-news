@@ -19,7 +19,7 @@ const s3 = new S3Client({
 
 async function downloadAllImages() {
   const bucket = process.env.B2_BUCKET_NAME || "mulhouse-news-images";
-  const localDir = "P:\\Backup\\images-articles";
+  const localDir = process.env.B2_BACKUP_LOCAL_DIR || "P:\\Backups\\images-articles";
   
   if (!fs.existsSync(localDir)) {
     fs.mkdirSync(localDir, { recursive: true });
@@ -55,11 +55,16 @@ async function downloadAllImages() {
           const batch = images.slice(i, i + batchSize);
           await Promise.all(batch.map(async (file) => {
             const localPath = path.join(localDir, file.Key!);
-            
+
             // Skip si le fichier existe déjà et a la même taille
-            if (fs.existsSync(localPath) && fs.statSync(localPath).size === file.Size) {
-              totalSkipped++;
-              return;
+            try {
+              const stat = fs.statSync(localPath);
+              if (stat.size === file.Size) {
+                totalSkipped++;
+                return;
+              }
+            } catch {
+              // Fichier n'existe pas, on continue le téléchargement
             }
 
             try {

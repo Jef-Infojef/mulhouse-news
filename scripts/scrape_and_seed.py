@@ -28,10 +28,15 @@ if not DATABASE_URL:
 else:
     print(f"DEBUG: DATABASE_URL found (length: {len(DATABASE_URL)})")
 
+def build_google_news_url(query: str) -> str:
+    """Construit une URL RSS Google News standardisée."""
+    return f"https://news.google.com/rss/search?q={query}&hl=fr&gl=FR&ceid=FR:fr"
+
 FEEDS = [
     {"name": "L'Alsace", "url": "https://www.lalsace.fr/rss", "is_google": False},
     {"name": "DNA", "url": "https://www.dna.fr/rss", "is_google": False},
-    {"name": "Google News", "url": "https://news.google.com/rss/search?q=Mulhouse&hl=fr&gl=FR&ceid=FR:fr", "is_google": True}
+    {"name": "Google News", "url": build_google_news_url("Mulhouse"), "is_google": True},
+    {"name": "Noumatrouff", "url": build_google_news_url("Noumatrouff+Mulhouse"), "is_google": True}
 ]
 MAX_CONSECUTIVE_DECODE_ERRORS = 3
 
@@ -154,11 +159,11 @@ def load_tags(cur):
             'taffarelli', 'michèle lutz',
         ],
         'sports': [
-            'sport', 'sportif', 'football', 'rugby', 'basket-ball', 'basketball', 'handball',
+            'sport', 'sportif', 'football', 'rugby', 'basket', 'basket-ball', 'basketball', 'handball',
             'volley-ball', 'volleyball', 'natation', 'tennis', 'cyclisme', 'athlétisme',
             'hockey', 'badminton', 'boxe', 'judo', 'karaté', 'escrime', 'aviron',
-            'fc mulhouse', 'ash mulhouse', 'mhsc', 'mulhouse volley', 'mulhouse foot',
-            'championnat', 'play-off', 'play-offs', 'national 3', 'régional 1', 'régional 2',
+            'panthères mulhouse', 'mustangs mulhouse', 'fc mulhouse', 'ash mulhouse', 'mhsc', 'mulhouse volley', 'mulhouse foot',
+            'championnat', 'play-off', 'play-offs', 'national 2', 'nationale 2', 'national 3', 'nationale 3', 'régional 1', 'régional 2',
             'top 12', 'coupe cev', 'ligue des champions', 'europa league',
             'pro a', 'pro b', 'nm1', 'nm2',
         ],
@@ -167,7 +172,7 @@ def load_tags(cur):
             'musée', 'agenda', 'événement', 'soirée', 'fête', 'carnaval',
             'animation', 'culture', 'culturel', 'vernissage', 'conférence', 'atelier',
             'librairie', 'livre', 'lecture', 'visite', 'balade', 'randonnée',
-            'zoo', 'parc', 'piscine', 'patinoire', 'curling', 'nuit du',
+            'zoo', 'parc', 'piscine', 'patinoire', 'curling', 'nuit du', 'noumatrouff',
         ],
         'economie': [
             'économie', 'entreprise', 'emploi', 'chômage', 'investissement', 'budget',
@@ -192,25 +197,25 @@ def load_tags(cur):
     return tags
 
 
+def normalize_text(text):
+    """Normalise le texte en minuscules et supprime les accents."""
+    if not text:
+        return ''
+    text = text.lower()
+    text = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+    return text
+
 def detect_tags(title, description, tags):
     """Retourne la liste des tag IDs correspondant au contenu de l'article."""
-    import unicodedata
-    def normalize(text):
-        if not text:
-            return ''
-        text = text.lower()
-        text = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
-        return text
-    
-    haystack = normalize(f"{title} {description or ''}")
+    haystack = normalize_text(f"{title} {description or ''}")
     matched = []
-    
+
     for tag in tags:
         for kw in tag['keywords']:
-            if normalize(kw) in haystack:
+            if normalize_text(kw) in haystack:
                 matched.append(tag['id'])
                 break
-    
+
     return matched
 
 
@@ -291,13 +296,10 @@ def main():
             desc_tag = item.find("description")
             raw_desc = desc_tag.text if desc_tag else ""
             desc_text = " ".join(raw_desc.split()).lower()
-            
-            # Normalisation Unicode pour les comparaisons (enlève les accents et caractères spéciaux)
-            def clean_text(t):
-                return "".join(c for c in unicodedata.normalize('NFKD', t) if not unicodedata.combining(c)).lower()
 
-            clean_title = clean_text(title)
-            clean_desc = clean_text(desc_text)
+            # Normalisation Unicode pour les comparaisons (enlève les accents et caractères spéciaux)
+            clean_title = normalize_text(title)
+            clean_desc = normalize_text(desc_text)
             
             is_mulhouse = "mulhous" in clean_title or "mulhous" in clean_desc
             
