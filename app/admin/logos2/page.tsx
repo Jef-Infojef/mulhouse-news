@@ -614,8 +614,8 @@ const variations = [
       <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
         <circle cx="50" cy="50" r="32" stroke="#a91101" strokeWidth="6" strokeDasharray="2 1" />
         <circle cx="50" cy="50" r="10" fill="#fde047" />
-        {[...Array(16)].map((_, i) => (
-          <path key={i} d="M50,38 L52,25 L48,22 Z" fill="#fde047" transform={`rotate(${i * 22.5} 50 50)`} />
+        {[...Array(16)].map((_, rayIndex) => (
+          <path key={`sun-geo-ray-${rayIndex}`} d="M50,38 L52,25 L48,22 Z" fill="#fde047" transform={`rotate(${rayIndex * 22.5} 50 50)`} />
         ))}
         {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => (
           <g key={a} transform={`rotate(${a} 50 50)`}>
@@ -655,8 +655,8 @@ const variations = [
       <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
         <circle cx="50" cy="50" r="32" stroke="#a91101" strokeWidth="6" strokeDasharray="2 1" />
         <circle cx="50" cy="50" r="15" stroke="#fde047" strokeWidth="1" strokeDasharray="1 2" />
-        {[...Array(24)].map((_, i) => (
-          <line key={i} x1="50" y1="35" x2="50" y2="22" stroke="#fde047" strokeWidth="0.5" transform={`rotate(${i * 15} 50 50)`} />
+        {[...Array(24)].map((_, rayIndex) => (
+          <line key={`sun-corona-ray-${rayIndex}`} x1="50" y1="35" x2="50" y2="22" stroke="#fde047" strokeWidth="0.5" transform={`rotate(${rayIndex * 15} 50 50)`} />
         ))}
         <circle cx="50" cy="50" r="8" fill="#fde047" />
         {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => (
@@ -717,8 +717,8 @@ const variations = [
         <circle cx="50" cy="50" r="32" stroke="#a91101" strokeWidth="6" strokeDasharray="2 1" />
         <circle cx="50" cy="50" r="14" stroke="#fef08a" strokeWidth="2" />
         <circle cx="50" cy="50" r="13" fill="#0f172a" />
-        {[...Array(32)].map((_, i) => (
-          <line key={i} x1="50" y1="36" x2="50" y2="34" stroke="#fef08a" strokeWidth="0.5" transform={`rotate(${i * 11.25} 50 50)`} />
+        {[...Array(32)].map((_, rayIndex) => (
+          <line key={`sun-annular-ray-${rayIndex}`} x1="50" y1="36" x2="50" y2="34" stroke="#fef08a" strokeWidth="0.5" transform={`rotate(${rayIndex * 11.25} 50 50)`} />
         ))}
         {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => (
           <g key={a} transform={`rotate(${a} 50 50)`}>

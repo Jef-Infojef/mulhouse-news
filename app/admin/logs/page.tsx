@@ -23,6 +23,8 @@ import {
   Activity
 } from 'lucide-react'
 
+// --- Types ---
+
 type State = {
   password: string
   isAuthenticated: boolean
@@ -52,6 +54,327 @@ type Action =
   | { type: 'SET_SAVING_CONFIG'; payload: boolean }
   | { type: 'SET_TESTING_CONNECTION'; payload: boolean }
   | { type: 'SET_TEST_RESULT'; payload: { success: boolean; message: string } | null }
+
+// --- Components ---
+
+function LoginOverlay({ 
+  password, 
+  onPasswordChange, 
+  onLogin, 
+  inputId 
+}: { 
+  password: string, 
+  onPasswordChange: (val: string) => void, 
+  onLogin: (e: React.FormEvent) => void,
+  inputId: string
+}) {
+  return (
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-700">
+        <div className="flex justify-center mb-6">
+          <div className="bg-blue-500/10 p-4 rounded-full">
+            <Lock className="w-12 h-12 text-blue-500" />
+          </div>
+        </div>
+        <h1 className="text-2xl font-bold text-center text-white mb-8">Administration Mulhouse News</h1>
+        <form onSubmit={onLogin} className="space-y-6">
+          <div>
+            <label htmlFor={inputId} className="block text-sm font-medium text-gray-400 mb-2">Mot de passe d'accès</label>
+            <input
+              id={inputId}
+              type="password"
+              value={password}
+              onChange={(e) => onPasswordChange(e.target.value)}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+              placeholder="••••"
+            />
+          </div>
+          <button
+            type="submit"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-blue-900/20"
+          >
+            Se connecter
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function LogItem({ 
+  log, 
+  isExpanded, 
+  onToggle 
+}: { 
+  log: any, 
+  isExpanded: boolean, 
+  onToggle: () => void 
+}) {
+  const detailsObj = log.details ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : null;
+  const isDiscovery = detailsObj && !Array.isArray(detailsObj) && detailsObj.total_rss_items !== undefined;
+  const articles = isDiscovery ? detailsObj.inserted_articles : (Array.isArray(detailsObj) ? detailsObj : []);
+
+  return (
+    <div 
+      className={`bg-gray-800 rounded-2xl border transition-all ${
+        isExpanded ? 'border-blue-500/50 ring-1 ring-blue-500/20' : 'border-gray-700 hover:border-gray-600'
+      }`}
+    >
+      <div 
+        role="button"
+        tabIndex={0}
+        className="p-4 md:p-6 cursor-pointer flex flex-wrap items-center justify-between gap-4 outline-none focus:ring-2 focus:ring-blue-500/50 rounded-2xl"
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onToggle()
+          }
+        }}
+      >
+        <div className="flex items-center gap-4">
+          <div className={`p-3 rounded-xl ${
+            log.status === 'SUCCESS' ? 'bg-green-500/10 text-green-500' :
+            log.status === 'SESSION_LOST' ? 'bg-orange-500/10 text-orange-500' :
+            'bg-red-500/10 text-red-500'
+          }`}>
+            {log.status === 'SUCCESS' ? <CheckCircle2 className="w-6 h-6" /> :
+             log.status === 'SESSION_LOST' ? <ShieldAlert className="w-6 h-6" /> :
+             <XCircle className="w-6 h-6" />}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="font-bold text-white text-lg">
+                {new Date(log.startedAt).toLocaleString('fr-FR', {
+                  timeZone: 'Europe/Paris',
+                  day: '2-digit',
+                  month: 'long',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </div>
+              <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
+                isDiscovery ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+              }`}>
+                {isDiscovery ? 'Découverte' : 'Enrichissement'}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-sm text-gray-400 mt-1">
+              <span className="flex items-center gap-1">
+                <Clock className="w-3 h-3" /> 
+                {log.finishedAt ? `${Math.round((new Date(log.finishedAt).getTime() - new Date(log.startedAt).getTime()) / 1000)}s` : 'En cours'}
+              </span>
+              <span className="flex items-center gap-1">
+                {log.isConnected ? (
+                  <><ShieldCheck className="w-3 h-3 text-green-500" /> <span className="text-green-500">Premium L'Alsace</span></>
+                ) : (
+                  <><ShieldAlert className="w-3 h-3 text-red-500" /> <span className="text-red-500">Non connecté (Premium)</span></>
+                )}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <div className="text-right">
+            <div className="text-2xl font-black text-white">{log.successCount}</div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Réussis</div>
+          </div>
+          <div className="text-right">
+            <div className={`text-2xl font-black ${log.errorCount > 0 ? 'text-red-400' : 'text-gray-600'}`}>{log.errorCount}</div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Échecs</div>
+          </div>
+          {isExpanded ? <ChevronUp className="text-gray-500" /> : <ChevronDown className="text-gray-500" />}
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="border-t border-gray-700 p-6 bg-gray-900/50 rounded-b-2xl">
+          {!log.isConnected && log.status !== 'TEST_LOG' && (
+            <div className="bg-orange-500/10 border border-orange-500/30 text-orange-400 p-4 rounded-xl mb-6 flex items-center gap-3">
+              <ShieldAlert className="shrink-0" />
+              <div className="text-sm">
+                <strong>Mode limité (EBRA) :</strong> La session abonné est expirée ou invalide. Seuls les chapôs et métadonnées sont récupérés pour L'Alsace, DNA et Est Républicain pour éviter les contenus tronqués.
+              </div>
+            </div>
+          )}
+
+          {log.errorMessage && (
+            <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl mb-6 font-mono text-sm">
+              <strong>ERREUR CRITIQUE :</strong> {log.errorMessage}
+            </div>
+          )}
+          
+          <div className="mt-4">
+            {isDiscovery && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
+                  <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Items RSS</div>
+                  <div className="text-xl font-bold text-white">{detailsObj.total_rss_items}</div>
+                </div>
+                <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
+                  <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Doublons Titre</div>
+                  <div className="text-xl font-bold text-gray-400">{detailsObj.duplicates_title}</div>
+                </div>
+                <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
+                  <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Doublons Lien</div>
+                  <div className="text-xl font-bold text-gray-400">{detailsObj.duplicates_link}</div>
+                </div>
+                <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
+                  <div className="text-[10px] uppercase text-gray-500 font-bold mb-1 text-red-400">Erreurs Google</div>
+                  <div className={`text-xl font-bold ${detailsObj.google_decode_errors > 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                    {detailsObj.google_decode_errors}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <h3 className="text-sm font-bold uppercase tracking-widest text-gray-500 mb-4">
+              {isDiscovery ? `Articles découverts (${articles.length})` : `Détails du traitement (${articles.length})`}
+            </h3>
+            
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+              {articles.map((detail: any) => (
+                <div key={detail.link} className="flex items-start justify-between gap-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 group">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white font-medium truncate">{detail.title}</div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <a 
+                        href={detail.link} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 truncate max-w-md"
+                      >
+                        <LinkIcon className="w-3 h-3" /> {detail.link}
+                      </a>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {detail.chars > 0 && <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded font-mono">{detail.chars} chars</span>}
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${
+                      (detail.status === 'SUCCESS' || isDiscovery) ? 'bg-green-500/20 text-green-400' :
+                      detail.status === 'FALLBACK' ? 'bg-blue-500/20 text-blue-400' :
+                      detail.status === 'SESSION_LOST' ? 'bg-orange-500/10 text-orange-400' :
+                      detail.status === 'SKIPPED' ? 'bg-gray-700 text-gray-400' :
+                      'bg-red-500/20 text-red-400'
+                    }`}>
+                      {isDiscovery ? 'INSÉRÉ' : (detail.status === 'SUCCESS' ? 'COMPLET' : (detail.status === 'FALLBACK' ? 'RÉSUMÉ' : (detail.status === 'SKIPPED' ? 'IGNORÉ' : detail.status)))}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {articles.length === 0 && (
+                <div className="text-center py-4 text-gray-500 italic">
+                  Aucun article traité dans ce log.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConfigModal({ 
+  state, 
+  dispatch, 
+  onSave, 
+  onTest, 
+  sessionInputId, 
+  pooolInputId 
+}: { 
+  state: State, 
+  dispatch: React.Dispatch<Action>,
+  onSave: () => void,
+  onTest: () => void,
+  sessionInputId: string,
+  pooolInputId: string
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-gray-800 border border-gray-700 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="p-6 border-b border-gray-700 flex justify-between items-center">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Key className="text-blue-500" /> Configuration Session Premium
+          </h2>
+          <button onClick={() => dispatch({ type: 'SET_CONFIG_MODAL', payload: false })} className="text-gray-400 hover:text-white">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+        
+        <div className="p-6 space-y-4">
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm text-blue-200 leading-relaxed">
+            Configurez ici les deux paramètres clés de la session Premium. Vous les trouverez dans l'onglet <strong>Application &gt; Cookies</strong> de votre navigateur sur le site de l'Alsace.
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor={sessionInputId} className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Session (.XCONNECT_SESSION)</label>
+              <textarea 
+                id={sessionInputId}
+                value={state.ebraSession}
+                onChange={(e) => dispatch({ type: 'SET_EBRA_SESSION', payload: e.target.value })}
+                placeholder="2=42F64..."
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-gray-100 font-mono text-xs h-32 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+              />
+            </div>
+            <div>
+              <label htmlFor={pooolInputId} className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Paywall (_poool)</label>
+              <textarea 
+                id={pooolInputId}
+                value={state.ebraPoool}
+                onChange={(e) => dispatch({ type: 'SET_EBRA_POOOL', payload: e.target.value })}
+                placeholder="9aab6ee3..."
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-gray-100 font-mono text-xs h-32 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+              />
+            </div>
+          </div>
+
+          {state.testResult && (
+            <div className={`p-4 rounded-xl text-sm flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200 ${
+              state.testResult.success ? 'bg-green-500/10 border border-green-500/20 text-green-400' : 'bg-red-500/10 border border-red-500/20 text-red-400'
+            }`}>
+              {state.testResult.success ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+              {state.testResult.message}
+            </div>
+          )}
+        </div>
+        
+        <div className="p-6 bg-gray-900/50 border-t border-gray-700 flex justify-between items-center">
+          <button 
+            onClick={onTest}
+            disabled={state.isTestingConnection || !state.ebraSession}
+            className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all flex items-center gap-2"
+          >
+            {state.isTestingConnection ? <Activity className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            Tester la connexion
+          </button>
+          
+          <div className="flex gap-3">
+            <button 
+              onClick={() => dispatch({ type: 'SET_CONFIG_MODAL', payload: false })}
+              className="px-6 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors"
+            >
+              Annuler
+            </button>
+            <button 
+              onClick={onSave}
+              disabled={state.isSavingConfig}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2 px-6 rounded-lg transition-all flex items-center gap-2"
+            >
+              {state.isSavingConfig ? <Clock className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Sauvegarder
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// --- Main Page ---
 
 const initialState: State = {
   password: '',
@@ -157,35 +480,12 @@ export default function AdminLogsPage() {
 
   if (!state.isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-700">
-          <div className="flex justify-center mb-6">
-            <div className="bg-blue-500/10 p-4 rounded-full">
-              <Lock className="w-12 h-12 text-blue-500" />
-            </div>
-          </div>
-          <h1 className="text-2xl font-bold text-center text-white mb-8">Administration Mulhouse News</h1>
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label htmlFor={passwordInputId} className="block text-sm font-medium text-gray-400 mb-2">Mot de passe d'accès</label>
-              <input
-                id={passwordInputId}
-                type="password"
-                value={state.password}
-                onChange={(e) => dispatch({ type: 'SET_PASSWORD', payload: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                placeholder="••••"
-              />
-            </div>
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-blue-900/20"
-            >
-              Se connecter
-            </button>
-          </form>
-        </div>
-      </div>
+      <LoginOverlay 
+        password={state.password}
+        onPasswordChange={(val) => dispatch({ type: 'SET_PASSWORD', payload: val })}
+        onLogin={handleLogin}
+        inputId={passwordInputId}
+      />
     )
   }
 
@@ -239,265 +539,26 @@ export default function AdminLogsPage() {
             </div>
           ) : (
             state.logs.map((log) => (
-              <div 
+              <LogItem 
                 key={log.id} 
-                className={`bg-gray-800 rounded-2xl border transition-all ${
-                  state.expandedLog === log.id ? 'border-blue-500/50 ring-1 ring-blue-500/20' : 'border-gray-700 hover:border-gray-600'
-                }`}
-              >
-                <div 
-                  role="button"
-                  tabIndex={0}
-                  className="p-4 md:p-6 cursor-pointer flex flex-wrap items-center justify-between gap-4 outline-none focus:ring-2 focus:ring-blue-500/50 rounded-2xl"
-                  onClick={() => dispatch({ type: 'TOGGLE_LOG', payload: log.id })}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      dispatch({ type: 'TOGGLE_LOG', payload: log.id })
-                    }
-                  }}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className={`p-3 rounded-xl ${
-                      log.status === 'SUCCESS' ? 'bg-green-500/10 text-green-500' :
-                      log.status === 'SESSION_LOST' ? 'bg-orange-500/10 text-orange-500' :
-                      'bg-red-500/10 text-red-500'
-                    }`}>
-                      {log.status === 'SUCCESS' ? <CheckCircle2 className="w-6 h-6" /> :
-                       log.status === 'SESSION_LOST' ? <ShieldAlert className="w-6 h-6" /> :
-                       <XCircle className="w-6 h-6" />}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <div className="font-bold text-white text-lg">
-                          {new Date(log.startedAt).toLocaleString('fr-FR', {
-                            timeZone: 'Europe/Paris',
-                            day: '2-digit',
-                            month: 'long',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </div>
-                        {(() => {
-                          const detailsObj = log.details ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : null;
-                          const isDiscovery = detailsObj && !Array.isArray(detailsObj) && detailsObj.total_rss_items !== undefined;
-                          return (
-                            <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
-                              isDiscovery ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                            }`}>
-                              {isDiscovery ? 'Découverte' : 'Enrichissement'}
-                            </span>
-                          )
-                        })()}
-                      </div>
-                      <div className="flex items-center gap-3 text-sm text-gray-400 mt-1">
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> 
-                          {log.finishedAt ? `${Math.round((new Date(log.finishedAt).getTime() - new Date(log.startedAt).getTime()) / 1000)}s` : 'En cours'}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          {log.isConnected ? (
-                            <><ShieldCheck className="w-3 h-3 text-green-500" /> <span className="text-green-500">Premium L'Alsace</span></>
-                          ) : (
-                            <><ShieldAlert className="w-3 h-3 text-red-500" /> <span className="text-red-500">Non connecté (Premium)</span></>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <div className="text-2xl font-black text-white">{log.successCount}</div>
-                      <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Réussis</div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`text-2xl font-black ${log.errorCount > 0 ? 'text-red-400' : 'text-gray-600'}`}>{log.errorCount}</div>
-                      <div className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Échecs</div>
-                    </div>
-                    {state.expandedLog === log.id ? <ChevronUp className="text-gray-500" /> : <ChevronDown className="text-gray-500" />}
-                  </div>
-                </div>
-
-                {state.expandedLog === log.id && (
-                  <div className="border-t border-gray-700 p-6 bg-gray-900/50 rounded-b-2xl">
-                    {!log.isConnected && log.status !== 'TEST_LOG' && (
-                      <div className="bg-orange-500/10 border border-orange-500/30 text-orange-400 p-4 rounded-xl mb-6 flex items-center gap-3">
-                        <ShieldAlert className="shrink-0" />
-                        <div className="text-sm">
-                          <strong>Mode limité (EBRA) :</strong> La session abonné est expirée ou invalide. Seuls les chapôs et métadonnées sont récupérés pour L'Alsace, DNA et Est Républicain pour éviter les contenus tronqués.
-                        </div>
-                      </div>
-                    )}
-
-                    {log.errorMessage && (
-                      <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl mb-6 font-mono text-sm">
-                        <strong>ERREUR CRITIQUE :</strong> {log.errorMessage}
-                      </div>
-                    )}
-                    
-                    {(() => {
-                      const detailsObj = log.details ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : null;
-                      const isDiscovery = detailsObj && !Array.isArray(detailsObj) && detailsObj.total_rss_items !== undefined;
-                      const articles = isDiscovery ? detailsObj.inserted_articles : (Array.isArray(detailsObj) ? detailsObj : []);
-
-                      return (
-                        <>
-                          {isDiscovery && (
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                              <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
-                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Items RSS</div>
-                                <div className="text-xl font-bold text-white">{detailsObj.total_rss_items}</div>
-                              </div>
-                              <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
-                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Doublons Titre</div>
-                                <div className="text-xl font-bold text-gray-400">{detailsObj.duplicates_title}</div>
-                              </div>
-                              <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
-                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Doublons Lien</div>
-                                <div className="text-xl font-bold text-gray-400">{detailsObj.duplicates_link}</div>
-                              </div>
-                              <div className="bg-gray-800 p-3 rounded-xl border border-gray-700">
-                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1 text-red-400">Erreurs Google</div>
-                                <div className={`text-xl font-bold ${detailsObj.google_decode_errors > 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                                  {detailsObj.google_decode_errors}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          <h3 className="text-sm font-bold uppercase tracking-widest text-gray-500 mb-4">
-                            {isDiscovery ? `Articles découverts (${articles.length})` : `Détails du traitement (${articles.length})`}
-                          </h3>
-                          
-                          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                            {articles.map((detail: any, idx: number) => (
-                              <div key={`${detail.link}-${idx}`} className="flex items-start justify-between gap-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 group">
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-white font-medium truncate">{detail.title}</div>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <a 
-                                      href={detail.link} 
-                                      target="_blank" 
-                                      rel="noopener noreferrer"
-                                      className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 truncate max-w-md"
-                                    >
-                                      <LinkIcon className="w-3 h-3" /> {detail.link}
-                                    </a>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                  {detail.chars > 0 && <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded font-mono">{detail.chars} chars</span>}
-                                  <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${
-                                    (detail.status === 'SUCCESS' || isDiscovery) ? 'bg-green-500/20 text-green-400' :
-                                    detail.status === 'FALLBACK' ? 'bg-blue-500/20 text-blue-400' :
-                                    detail.status === 'SESSION_LOST' ? 'bg-orange-500/10 text-orange-400' :
-                                    detail.status === 'SKIPPED' ? 'bg-gray-700 text-gray-400' :
-                                    'bg-red-500/20 text-red-400'
-                                  }`}>
-                                    {isDiscovery ? 'INSÉRÉ' : (detail.status === 'SUCCESS' ? 'COMPLET' : (detail.status === 'FALLBACK' ? 'RÉSUMÉ' : (detail.status === 'SKIPPED' ? 'IGNORÉ' : detail.status)))}
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
-                            {articles.length === 0 && (
-                              <div className="text-center py-4 text-gray-500 italic">
-                                Aucun article traité dans ce log.
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      )
-                    })()}
-                  </div>
-                )}
-              </div>
+                log={log} 
+                isExpanded={state.expandedLog === log.id}
+                onToggle={() => dispatch({ type: 'TOGGLE_LOG', payload: log.id })}
+              />
             ))
           )}
         </div>
       </div>
 
-      {/* Modal Configuration EBRA */}
       {state.isConfigModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-gray-800 border border-gray-700 rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-            <div className="p-6 border-b border-gray-700 flex justify-between items-center">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Key className="text-blue-500" /> Configuration Session Premium
-              </h2>
-              <button onClick={() => dispatch({ type: 'SET_CONFIG_MODAL', payload: false })} className="text-gray-400 hover:text-white">
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-4">
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm text-blue-200 leading-relaxed">
-                Configurez ici les deux paramètres clés de la session Premium. Vous les trouverez dans l'onglet <strong>Application &gt; Cookies</strong> de votre navigateur sur le site de l'Alsace.
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor={sessionInputId} className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Session (.XCONNECT_SESSION)</label>
-                  <textarea 
-                    id={sessionInputId}
-                    value={state.ebraSession}
-                    onChange={(e) => dispatch({ type: 'SET_EBRA_SESSION', payload: e.target.value })}
-                    placeholder="2=42F64..."
-                    className="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-gray-100 font-mono text-xs h-32 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
-                  />
-                </div>
-                <div>
-                  <label htmlFor={pooolInputId} className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">Paywall (_poool)</label>
-                  <textarea 
-                    id={pooolInputId}
-                    value={state.ebraPoool}
-                    onChange={(e) => dispatch({ type: 'SET_EBRA_POOOL', payload: e.target.value })}
-                    placeholder="9aab6ee3..."
-                    className="w-full bg-gray-900 border border-gray-700 rounded-xl p-3 text-gray-100 font-mono text-xs h-32 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
-                  />
-                </div>
-              </div>
-
-              {state.testResult && (
-                <div className={`p-4 rounded-xl text-sm flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200 ${
-                  state.testResult.success ? 'bg-green-500/10 border border-green-500/20 text-green-400' : 'bg-red-500/10 border border-red-500/20 text-red-400'
-                }`}>
-                  {state.testResult.success ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
-                  {state.testResult.message}
-                </div>
-              )}
-            </div>
-            
-            <div className="p-6 bg-gray-900/50 border-t border-gray-700 flex justify-between items-center">
-              <button 
-                onClick={handleTestConnection}
-                disabled={state.isTestingConnection || !state.ebraSession}
-                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all flex items-center gap-2"
-              >
-                {state.isTestingConnection ? <Activity className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                Tester la connexion
-              </button>
-              
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => dispatch({ type: 'SET_CONFIG_MODAL', payload: false })}
-                  className="px-6 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors"
-                >
-                  Annuler
-                </button>
-                <button 
-                  onClick={handleSaveConfig}
-                  disabled={state.isSavingConfig}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-2 px-6 rounded-lg transition-all flex items-center gap-2"
-                >
-                  {state.isSavingConfig ? <Clock className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  Sauvegarder
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ConfigModal 
+          state={state}
+          dispatch={dispatch}
+          onSave={handleSaveConfig}
+          onTest={handleTestConnection}
+          sessionInputId={sessionInputId}
+          pooolInputId={pooolInputId}
+        />
       )}
 
       <style jsx global>{`
