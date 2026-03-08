@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useReducer, useEffect, useMemo, useCallback, useId } from 'react'
 import { getLatestArticles } from '@/app/actions'
 import { ArticleCard } from '@/components/ArticleCard'
 import { Logo } from '@/components/Logo'
@@ -37,141 +37,186 @@ interface HomeClientProps {
   initialCount: number
 }
 
-export default function HomeClient({ initialArticles, initialCount }: HomeClientProps) {
-  const [allArticles, setAllArticles] = useState<Article[]>(() => initialArticles)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [search, setSearch] = useState('')
-  const [activeSearch, setActiveQuery] = useState('')
-  const [displayCount, setDisplayCount] = useState(24)
-  const [mounted, setMounted] = useState(false)
-  const [currentTime, setCurrentTime] = useState(new Date())
-  const [weather, setWeather] = useState<{ temp: number; code: number } | null>(null)
-  const { resolvedTheme, setTheme } = useTheme()
-  const [showSplash, setShowSplash] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [activeTag, setActiveTag] = useState<string | null>(null)
+type State = {
+  allArticles: Article[]
+  error: string | null
+  loading: boolean
+  search: string
+  activeSearch: string
+  displayCount: number
+  mounted: boolean
+  currentTime: Date
+  weather: { temp: number; code: number } | null
+  showSplash: boolean
+  isAdmin: boolean
+  activeTag: string | null
+}
 
-  const pageSize = 24
+type Action =
+  | { type: 'SET_ARTICLES'; payload: Article[] }
+  | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_SEARCH'; payload: string }
+  | { type: 'SET_ACTIVE_SEARCH'; payload: string }
+  | { type: 'LOAD_MORE' }
+  | { type: 'SET_MOUNTED' }
+  | { type: 'SET_TIME'; payload: Date }
+  | { type: 'SET_WEATHER'; payload: { temp: number; code: number } | null }
+  | { type: 'HIDE_SPLASH' }
+  | { type: 'SET_ADMIN'; payload: boolean }
+  | { type: 'SET_TAG'; payload: string | null }
+  | { type: 'DELETE_ARTICLE'; payload: string }
+
+const PAGE_SIZE = 24
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'SET_ARTICLES': return { ...state, allArticles: action.payload }
+    case 'SET_ERROR': return { ...state, error: action.payload }
+    case 'SET_LOADING': return { ...state, loading: action.payload }
+    case 'SET_SEARCH': return { ...state, search: action.payload }
+    case 'SET_ACTIVE_SEARCH': return { ...state, activeSearch: action.payload, displayCount: PAGE_SIZE }
+    case 'LOAD_MORE': return { ...state, displayCount: state.displayCount + PAGE_SIZE }
+    case 'SET_MOUNTED': return { ...state, mounted: true }
+    case 'SET_TIME': return { ...state, currentTime: action.payload }
+    case 'SET_WEATHER': return { ...state, weather: action.payload }
+    case 'HIDE_SPLASH': return { ...state, showSplash: false }
+    case 'SET_ADMIN': return { ...state, isAdmin: action.payload }
+    case 'SET_TAG': return { ...state, activeTag: action.payload, displayCount: PAGE_SIZE }
+    case 'DELETE_ARTICLE': return { ...state, allArticles: state.allArticles.filter(a => a.id !== action.payload) }
+    default: return state
+  }
+}
+
+export default function HomeClient({ initialArticles, initialCount }: HomeClientProps) {
+  const [state, dispatch] = useReducer(reducer, {
+    allArticles: initialArticles,
+    error: null,
+    loading: false,
+    search: '',
+    activeSearch: '',
+    displayCount: PAGE_SIZE,
+    mounted: false,
+    currentTime: new Date(),
+    weather: null,
+    showSplash: true,
+    isAdmin: false,
+    activeTag: null,
+  })
+
+  const { resolvedTheme, setTheme } = useTheme()
+  const searchInputId = useId()
+
+  const loadArticles = useCallback(async (query: string) => {
+    dispatch({ type: 'SET_LOADING', payload: true })
+    try {
+      const { articles, error: fetchError } = await getLatestArticles(query)
+      if (fetchError) {
+        dispatch({ type: 'SET_ERROR', payload: fetchError })
+      } else {
+        dispatch({ type: 'SET_ARTICLES', payload: articles || [] })
+        dispatch({ type: 'SET_ERROR', payload: null })
+      }
+    } catch (err: any) {
+      dispatch({ type: 'SET_ERROR', payload: err.message || 'Une erreur est survenue' })
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false })
+    }
+  }, [])
 
   useEffect(() => {
-    setMounted(true)
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000)
-
-    // Check Admin status
+    // Group updates to minimize cascading renders
     const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
+    
+    dispatch({ type: 'SET_MOUNTED' })
     if (auth === 'true') {
-      setIsAdmin(true)
+      dispatch({ type: 'SET_ADMIN', payload: true })
     }
+
+    const timer = setInterval(() => dispatch({ type: 'SET_TIME', payload: new Date() }), 1000)
 
     const fetchWeather = async () => {
       try {
         const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=47.7508&longitude=7.3359&current_weather=true')
-        if (!res.ok) throw new Error('Weather fetch failed')
-        const data = await res.json()
-        if (data.current_weather) {
-          setWeather({
-            temp: data.current_weather.temperature,
-            code: data.current_weather.weathercode
-          })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.current_weather) {
+            dispatch({ type: 'SET_WEATHER', payload: {
+              temp: data.current_weather.temperature,
+              code: data.current_weather.weathercode
+            }})
+          }
         }
-      } catch (e) { console.error("Erreur météo", e) }
+      } catch (e) {
+        console.error("Erreur météo", e)
+      }
     }
     fetchWeather()
     
     return () => clearInterval(timer)
   }, [])
 
-  const loadArticles = async (query: string) => {
-    setLoading(true)
-    try {
-      const { articles, error: fetchError } = await getLatestArticles(query)
-
-      if (fetchError) {
-        setError(fetchError)
-        setLoading(false)
-        return
-      }
-
-      setAllArticles(articles)
-      setError(null)
-      setLoading(false)
-    } catch (err: any) {
-      setError(err.message || 'Une erreur est survenue')
-      setLoading(false)
-    }
-  }
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      setActiveQuery(search)
-      loadArticles(search)
+      dispatch({ type: 'SET_ACTIVE_SEARCH', payload: state.search })
+      loadArticles(state.search)
     }
   }
 
   const clearSearch = () => {
-    setSearch('')
-    setActiveQuery('')
+    dispatch({ type: 'SET_SEARCH', payload: '' })
+    dispatch({ type: 'SET_ACTIVE_SEARCH', payload: '' })
     loadArticles('')
-  }
-
-
-  const loadMore = () => {
-    setDisplayCount((prev) => prev + pageSize)
-  }
-
-  const handleArticleDeleted = (id: string) => {
-    setAllArticles(prev => prev.filter(a => a.id !== id))
   }
 
   // Collect all unique tags from all articles
   const allTags = useMemo(() => {
     const tagMap = new Map<string, NewsTag>()
-    allArticles.forEach(article => {
+    state.allArticles.forEach(article => {
       article.ArticleGoogleTag?.forEach(({ NewsTag: tag }) => {
         if (!tagMap.has(tag.id)) tagMap.set(tag.id, tag)
       })
     })
     return Array.from(tagMap.values()).sort((a, b) => a.name.localeCompare(b.name))
-  }, [allArticles])
+  }, [state.allArticles])
 
   // Filter displayed articles by active tag
   const tagFilteredArticles = useMemo(() => {
-    if (!activeTag) return allArticles
-    return allArticles.filter(article =>
-      article.ArticleGoogleTag?.some(({ NewsTag: tag }) => tag.id === activeTag)
+    if (!state.activeTag) return state.allArticles
+    return state.allArticles.filter(article =>
+      article.ArticleGoogleTag?.some(({ NewsTag: tag }) => tag.id === state.activeTag)
     )
-  }, [allArticles, activeTag])
+  }, [state.allArticles, state.activeTag])
 
   // Derived state for display
   const displayedArticles = useMemo(() => {
-    return tagFilteredArticles.slice(0, displayCount)
-  }, [tagFilteredArticles, displayCount])
+    return tagFilteredArticles.slice(0, state.displayCount)
+  }, [tagFilteredArticles, state.displayCount])
 
   const filteredCount = tagFilteredArticles.length
 
   function getWeatherIcon(code: number) {
-    if (code === 0) return <Sun size={14} className="text-yellow-500 shrink-0" />
-    if (code >= 1 && code <= 3) return <Cloud size={14} className="text-blue-400 shrink-0" />
-    if (code >= 45 && code <= 48) return <Cloud size={14} className="text-gray-400 shrink-0" />
-    if (code >= 51 && code <= 67) return <CloudRain size={14} className="text-blue-500 shrink-0" />
-    if (code >= 71 && code <= 77) return <CloudSnow size={14} className="text-blue-200 shrink-0" />
-    if (code >= 80 && code <= 82) return <CloudRain size={14} className="text-blue-600 shrink-0" />
-    if (code >= 85 && code <= 86) return <CloudSnow size={14} className="text-blue-300 shrink-0" />
-    return <Sun size={14} className="text-yellow-500 shrink-0" />
+    if (code === 0) return <Sun size={14} className="text-yellow-500 shrink-0" aria-hidden="true" />
+    if (code >= 1 && code <= 3) return <Cloud size={14} className="text-blue-400 shrink-0" aria-hidden="true" />
+    if (code >= 45 && code <= 48) return <Cloud size={14} className="text-gray-400 shrink-0" aria-hidden="true" />
+    if (code >= 51 && code <= 67) return <CloudRain size={14} className="text-blue-500 shrink-0" aria-hidden="true" />
+    if (code >= 71 && code <= 77) return <CloudSnow size={14} className="text-blue-200 shrink-0" aria-hidden="true" />
+    if (code >= 80 && code <= 82) return <CloudRain size={14} className="text-blue-600 shrink-0" aria-hidden="true" />
+    if (code >= 85 && code <= 86) return <CloudSnow size={14} className="text-blue-300 shrink-0" aria-hidden="true" />
+    return <Sun size={14} className="text-yellow-500 shrink-0" aria-hidden="true" />
   }
 
   return (
     <>
-      {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
+      {state.showSplash && <SplashScreen onFinish={() => dispatch({ type: 'HIDE_SPLASH' })} />}
       <main className="min-h-screen transition-colors">
         {/* Top Bar Info */}
         <div className="w-full bg-gray-100/50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800 py-2">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] sm:text-sm font-medium text-gray-600 dark:text-gray-400">
             <div className="flex items-center gap-1.5 capitalize">
-              <Calendar size={14} className="text-blue-600 shrink-0" />
+              <Calendar size={14} className="text-blue-600 shrink-0" aria-hidden="true" />
               <span className="whitespace-nowrap">
-                {mounted ? currentTime.toLocaleDateString('fr-FR', { 
+                {state.mounted ? state.currentTime.toLocaleDateString('fr-FR', { 
                   weekday: 'long', 
                   day: 'numeric', 
                   month: 'long', 
@@ -182,26 +227,26 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
             </div>
             <div className="flex items-center gap-3 sm:gap-4">
               <div className="flex items-center gap-1.5 sm:border-l border-gray-300 dark:border-gray-700 sm:pl-4">
-                <Clock size={14} className="text-blue-600 shrink-0" />
-                <span>{mounted ? currentTime.toLocaleTimeString('fr-FR', { 
+                <Clock size={14} className="text-blue-600 shrink-0" aria-hidden="true" />
+                <span>{state.mounted ? state.currentTime.toLocaleTimeString('fr-FR', { 
                   hour: '2-digit', 
                   minute: '2-digit',
                   timeZone: 'Europe/Paris'
                 }) : '...'}</span>
               </div>
 
-              {weather && (
+              {state.weather && (
                 <div className="flex items-center gap-1.5 border-l border-gray-300 dark:border-gray-700 pl-3 sm:pl-4">
-                  {getWeatherIcon(weather.code)}
-                  <span className="font-bold text-gray-900 dark:text-white">{weather.temp}°C</span>
+                  {getWeatherIcon(state.weather.code)}
+                  <span className="font-bold text-gray-900 dark:text-white">{state.weather.temp}°C</span>
                 </div>
               )}
 
-              {mounted && (
+              {state.mounted && (
                 <button
                   onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
                   className="flex items-center justify-center p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm"
-                  aria-label="Toggle dark mode"
+                  aria-label={resolvedTheme === 'dark' ? "Passer au mode clair" : "Passer au mode sombre"}
                 >
                   {resolvedTheme === 'dark' ? <Sun size={14} className="text-yellow-500" /> : <Moon size={14} className="text-blue-600" />}
                 </button>
@@ -225,26 +270,28 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
                     Toute l'actu de Mulhouse en temps réel
                   </p>
                   {allTags.length > 0 && (
-                    <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1" aria-label="Filtrer par catégories">
                       <button
-                        onClick={() => { setActiveTag(null); setDisplayCount(24) }}
+                        onClick={() => dispatch({ type: 'SET_TAG', payload: null })}
                         className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
-                          activeTag === null
+                          state.activeTag === null
                             ? 'bg-blue-600 text-white border-blue-600 shadow'
                             : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-blue-400 hover:text-blue-600'
                         }`}
+                        aria-pressed={state.activeTag === null}
                       >
                         Tous
                       </button>
                       {allTags.map(tag => (
                         <button
                           key={tag.id}
-                          onClick={() => { setActiveTag(tag.id); setDisplayCount(24) }}
+                          onClick={() => dispatch({ type: 'SET_TAG', payload: tag.id })}
                           className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
-                            activeTag === tag.id ? 'shadow' : 'hover:border-opacity-80'
+                            state.activeTag === tag.id ? 'shadow' : 'hover:border-opacity-80'
                           }`}
+                          aria-pressed={state.activeTag === tag.id}
                           style={
-                            activeTag === tag.id
+                            state.activeTag === tag.id
                               ? { backgroundColor: tag.color || '#3b82f6', color: '#fff', borderColor: tag.color || '#3b82f6' }
                               : tag.color
                                 ? { backgroundColor: tag.color + '22', color: tag.color, borderColor: tag.color + '55' }
@@ -254,7 +301,7 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
                           #{tag.name}
                         </button>
                       ))}
-                    </div>
+                    </nav>
                   )}
                 </div>
               </div>
@@ -274,24 +321,26 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
         <div className="max-w-7xl mx-auto py-6 sm:py-8 px-4 sm:px-6 lg:px-8">
           <div className="mb-8">
             <div className="relative">
-              <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+              <label htmlFor={searchInputId} className="sr-only">Rechercher une actualité</label>
+              <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" aria-hidden="true" />
               <input
+                id={searchInputId}
                 type="text"
-                value={search}
+                value={state.search}
                 placeholder="Rechercher une actualité..."
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => dispatch({ type: 'SET_SEARCH', payload: e.target.value })}
                 onKeyDown={handleKeyDown}
                 className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
               />
             </div>
           </div>
 
-          {activeSearch && !loading && (
+          {state.activeSearch && !state.loading && (
             <div className="mb-8 flex items-center justify-between bg-blue-50/50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-900/30">
               <p className="text-blue-800 dark:text-blue-300 font-medium">
                 {filteredCount > 0 
-                  ? `${filteredCount} article${filteredCount > 1 ? 's' : ''} trouvé${filteredCount > 1 ? 's' : ''} pour "${activeSearch}"`
-                  : `Aucun article trouvé pour "${activeSearch}"`
+                  ? `${filteredCount} article${filteredCount > 1 ? 's' : ''} trouvé${filteredCount > 1 ? 's' : ''} pour "${state.activeSearch}"`
+                  : `Aucun article trouvé pour "${state.activeSearch}"`
                 }
               </p>
               <button onClick={clearSearch} className="text-blue-600 dark:text-blue-400 text-sm font-bold hover:underline">
@@ -300,18 +349,18 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
             </div>
           )}
 
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 mb-8 rounded-r">
+          {state.error && (
+            <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 mb-8 rounded-r" role="alert">
               <div className="flex">
-                <AlertTriangle className="h-5 w-5 text-red-400" />
+                <AlertTriangle className="h-5 w-5 text-red-400" aria-hidden="true" />
                 <div className="ml-3">
-                  <p className="text-sm text-red-700 dark:text-red-400">Erreur : {error}</p>
+                  <p className="text-sm text-red-700 dark:text-red-400">Erreur : {state.error}</p>
                 </div>
               </div>
             </div>
           )}
 
-          {loading ? (
+          {state.loading ? (
             <div className="text-center py-20">
               <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
               <p className="text-gray-500 dark:text-gray-400 text-lg">Chargement des articles...</p>
@@ -327,16 +376,16 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
                   <ArticleCard 
                     key={article.id} 
                     article={article} 
-                    isAdmin={isAdmin}
-                    onDelete={handleArticleDeleted}
+                    isAdmin={state.isAdmin}
+                    onDelete={(id) => dispatch({ type: 'DELETE_ARTICLE', payload: id })}
                   />
                 ))}
               </div>
 
-              {displayCount < filteredCount && (
+              {state.displayCount < filteredCount && (
                 <div className="text-center py-8">
                   <button
-                    onClick={loadMore}
+                    onClick={() => dispatch({ type: 'LOAD_MORE' })}
                     className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
                   >
                     Charger plus d'articles
