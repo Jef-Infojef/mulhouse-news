@@ -38,8 +38,9 @@ export default async function Home() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
+      >
+        {JSON.stringify(jsonLd)}
+      </script>
       <HomeClient 
         initialArticles={articles || []} 
         initialCount={articles?.length || 0} 
