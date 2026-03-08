@@ -41,13 +41,13 @@ export default function AdminLogsPage() {
   const [isTestingConnection, setIsTestingConnection] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
-  useEffect(() => {
-    const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
-    if (auth === 'true') {
-      setIsConnected(true)
-      fetchLogs()
-    }
-  }, [])
+  const fetchLogs = async () => {
+    setLoading(true)
+    const { logs, error } = await getScrapingLogs()
+    if (error) setError(error)
+    else setLogs(logs)
+    setLoading(false)
+  }
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
@@ -60,13 +60,13 @@ export default function AdminLogsPage() {
     }
   }
 
-  const fetchLogs = async () => {
-    setLoading(true)
-    const { logs, error } = await getScrapingLogs()
-    if (error) setError(error)
-    else setLogs(logs)
-    setLoading(false)
-  }
+  useEffect(() => {
+    const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
+    if (auth === 'true') {
+      setIsConnected(true)
+      fetchLogs()
+    }
+  }, [])
 
   const openConfigModal = async () => {
     setIsConfigModalOpen(true)
@@ -125,7 +125,6 @@ export default function AdminLogsPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                 placeholder="••••"
-                autoFocus
               />
             </div>
             <button
@@ -315,8 +314,8 @@ export default function AdminLogsPage() {
                           </h3>
                           
                           <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                            {articles.map((detail: any, idx: number) => (
-                              <div key={idx} className="flex items-start justify-between gap-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 group">
+                            {articles.map((detail: any) => (
+                              <div key={detail.link} className="flex items-start justify-between gap-4 p-3 bg-gray-800/50 rounded-lg border border-gray-700/50 group">
                                 <div className="flex-1 min-w-0">
                                   <div className="text-white font-medium truncate">{detail.title}</div>
                                   <div className="flex items-center gap-2 mt-1">

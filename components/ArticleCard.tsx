@@ -105,16 +105,29 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
     return 'bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-200'
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      window.open(article.link, '_blank', 'noopener,noreferrer')
+    }
+  }
+
   return (
-    <div
-      onClick={() => window.open(article.link, '_blank', 'noopener,noreferrer')}
-      className="group flex flex-col h-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl overflow-hidden hover:shadow-lg dark:hover:shadow-xl dark:hover:shadow-blue-900/50 transition-all duration-300 hover:-translate-y-1 cursor-pointer"
-    >
+    <>
+      <div
+        role="link"
+        tabIndex={0}
+        onClick={() => window.open(article.link, '_blank', 'noopener,noreferrer')}
+        onKeyDown={handleKeyDown}
+        aria-label={`Lire l'article : ${article.title}`}
+        className="group flex flex-col h-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl overflow-hidden hover:shadow-lg dark:hover:shadow-xl dark:hover:shadow-blue-900/50 transition-all duration-300 hover:-translate-y-1 cursor-pointer"
+      >
       <div className="relative h-48 w-full overflow-hidden bg-gray-100 dark:bg-slate-800">
         {imgUrl && (
           <img
             src={imgUrl}
-            alt={article.title}
+            alt=""
+            loading="lazy"
             className={'w-full h-full transition-transform duration-500 group-hover:scale-105 ' + (isUsingFavicon ? 'object-contain p-12' : 'object-cover')}
             onError={handleImageError}
           />
@@ -259,8 +272,7 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
                     </div>,
                     document.body
                   )}
-            
-                </div>
-              )
-            }
+    </>
+  )
+}
             

@@ -38,9 +38,7 @@ interface HomeClientProps {
 }
 
 export default function HomeClient({ initialArticles, initialCount }: HomeClientProps) {
-  const [allArticles, setAllArticles] = useState<Article[]>(initialArticles)
-  const [displayedArticles, setDisplayedArticles] = useState<Article[]>(initialArticles.slice(0, 24))
-  const [filteredCount, setFilteredCount] = useState(initialCount)
+  const [allArticles, setAllArticles] = useState<Article[]>(() => initialArticles)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -69,6 +67,7 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
     const fetchWeather = async () => {
       try {
         const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=47.7508&longitude=7.3359&current_weather=true')
+        if (!res.ok) throw new Error('Weather fetch failed')
         const data = await res.json()
         if (data.current_weather) {
           setWeather({
@@ -90,16 +89,15 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
 
       if (fetchError) {
         setError(fetchError)
+        setLoading(false)
         return
       }
 
       setAllArticles(articles)
-      setFilteredCount(articles.length)
-      setDisplayedArticles(articles.slice(0, displayCount))
       setError(null)
+      setLoading(false)
     } catch (err: any) {
       setError(err.message || 'Une erreur est survenue')
-    } finally {
       setLoading(false)
     }
   }
@@ -124,7 +122,6 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
 
   const handleArticleDeleted = (id: string) => {
     setAllArticles(prev => prev.filter(a => a.id !== id))
-    setFilteredCount(prev => prev - 1)
   }
 
   // Collect all unique tags from all articles
@@ -146,10 +143,12 @@ export default function HomeClient({ initialArticles, initialCount }: HomeClient
     )
   }, [allArticles, activeTag])
 
-  useEffect(() => {
-    setFilteredCount(tagFilteredArticles.length)
-    setDisplayedArticles(tagFilteredArticles.slice(0, displayCount))
+  // Derived state for display
+  const displayedArticles = useMemo(() => {
+    return tagFilteredArticles.slice(0, displayCount)
   }, [tagFilteredArticles, displayCount])
+
+  const filteredCount = tagFilteredArticles.length
 
   function getWeatherIcon(code: number) {
     if (code === 0) return <Sun size={14} className="text-yellow-500 shrink-0" />
