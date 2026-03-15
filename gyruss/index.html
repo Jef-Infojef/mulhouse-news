@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GYRUSS - HTML5</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+    }
+    #gameCanvas {
+      border: 1px solid #222;
+      display: block;
+    }
+    #ui {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script src="sid-engine.js"></script>
+<script src="audio.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

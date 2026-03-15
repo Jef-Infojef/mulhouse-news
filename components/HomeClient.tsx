@@ -5,8 +5,9 @@ import { getLatestArticles } from '@/app/actions'
 import { ArticleCard } from '@/components/ArticleCard'
 import { Logo } from '@/components/Logo'
 import { SplashScreen } from '@/components/SplashScreen'
-import { AlertTriangle, Search, Loader2, Moon, Sun, Calendar, Clock, Cloud, CloudRain, CloudSnow } from 'lucide-react'
+import { AlertTriangle, Search, Loader2, Moon, Sun, Calendar, Clock, Cloud, CloudRain, CloudSnow, Vote } from 'lucide-react'
 import { useTheme } from 'next-themes'
+import Link from 'next/link'
 
 // --- Types ---
 
@@ -125,13 +126,23 @@ function TopInfoBar({
           )}
 
           {mounted && (
-            <button
-              onClick={onToggleTheme}
-              className="flex items-center justify-center p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm"
-              aria-label={resolvedTheme === 'dark' ? "Passer au mode clair" : "Passer au mode sombre"}
-            >
-              {resolvedTheme === 'dark' ? <Sun size={14} className="text-yellow-500" /> : <Moon size={14} className="text-blue-600" />}
-            </button>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/municipales-2026"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm text-[10px] sm:text-xs font-bold"
+              >
+                <Vote size={12} />
+                <span>Municipales 2026</span>
+              </Link>
+              
+              <button
+                onClick={onToggleTheme}
+                className="flex items-center justify-center p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm"
+                aria-label={resolvedTheme === 'dark' ? "Passer au mode clair" : "Passer au mode sombre"}
+              >
+                {resolvedTheme === 'dark' ? <Sun size={14} className="text-yellow-500" /> : <Moon size={14} className="text-blue-600" />}
+              </button>
+            </div>
           )}
         </div>
       </div>

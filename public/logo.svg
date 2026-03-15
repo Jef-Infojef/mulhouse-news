@@ -1,0 +1,27 @@
+<svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Mulhouse Actu Logo</title>
+  <!-- Cercle Extérieur Rouge -->
+  <circle cx="50" cy="50" r="32" stroke="#a91101" stroke-width="6" stroke-dasharray="2 1" />
+  
+  <!-- Cercle intérieur Or Mat -->
+  <circle cx="50" cy="50" r="10" stroke="#ca8a04" stroke-width="2.5" />
+
+  <!-- Aiguilles Or Mat -->
+  <line x1="50" y1="50" x2="50" y2="30" stroke="#ca8a04" stroke-width="8" stroke-linecap="round" transform="rotate(-60 50 50)" />
+  <line x1="50" y1="50" x2="50" y2="20" stroke="#ca8a04" stroke-width="6" stroke-linecap="round" transform="rotate(60 50 50)" />
+  
+  <!-- Moyeu central -->
+  <circle cx="50" cy="50" r="4" fill="#ca8a04" />
+
+  <!-- Roue de Mulhouse (8 pales) -->
+  <g stroke="none">
+    <g transform="rotate(0 50 50)"><rect x="47" y="10" width="6" height="40" fill="#a91101" opacity="0.3"/><path d="M 42,5 L 58,5 L 56,15 L 44,15 Z" fill="#a91101"/></g>
+    <g transform="rotate(45 50 50)"><rect x="47" y="10" width="6" height="40" fill="#a91101" opacity="0.3"/><path d="M 42,5 L 58,5 L 56,15 L 44,15 Z" fill="#a91101"/></g>
+    <g transform="rotate(90 50 50)"><rect x="47" y="10" width="6" height="40" fill="#a91101" opacity="0.3"/><path d="M 42,5 L 58,5 L 56,15 L 44,15 Z" fill="#a91101"/></g>
+    <g transform="rotate(135 50 50)"><rect x="47" y="10" width="6" height="40" fill="#a91101" opacity="0.3"/><path d="M 42,5 L 58,5 L 56,15 L 44,15 Z" fill="#a91101"/></g>
+    <g transform="rotate(180 50 50)"><rect x="47" y="10" width="6" height="40" fill="#a91101" opacity="0.3"/><path d="M 42,5 L 58,5 L 56,15 L 44,15 Z" fill="#a91101"/></g>
+    <g transform="rotate(225 50 50)"><rect x="47" y="10" width="6" height="40" fill="#a91101" opacity="0.3"/><path d="M 42,5 L 58,5 L 56,15 L 44,15 Z" fill="#a91101"/></g>
+    <g transform="rotate(270 50 50)"><rect x="47" y="10" width="6" height="40" fill="#a91101" opacity="0.3"/><path d="M 42,5 L 58,5 L 56,15 L 44,15 Z" fill="#a91101"/></g>
+    <g transform="rotate(315 50 50)"><rect x="47" y="10" width="6" height="40" fill="#a91101" opacity="0.3"/><path d="M 42,5 L 58,5 L 56,15 L 44,15 Z" fill="#a91101"/></g>
+  </g>
+</svg>
