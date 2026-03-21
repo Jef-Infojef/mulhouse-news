@@ -246,11 +246,15 @@ def main():
             if not active:
                 status = "SESSION_LOST"
             
-            if final_content:
+            if final_content and len(final_content) >= 150:
                 cur.execute('UPDATE "Article" SET content = %s WHERE id = %s', (final_content, art_id))
                 conn.commit()
                 if status != "FALLBACK": stats["success"] += 1
             else:
+                # Contenu trop court ou absent : ne pas sauvegarder pour éviter la boucle
+                # (article restera NULL et sera retesté au prochain run)
+                if final_content:
+                    print(f"    [⚠️] Contenu trop court ({len(final_content)} chars), ignoré : {title[:40]}...")
                 stats["error"] += 1
             
             session_details.append({"title": title, "link": link, "status": status, "error": err, "chars": len(final_content) if final_content else 0})
