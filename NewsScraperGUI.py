@@ -301,13 +301,26 @@ class NewsScraperApp:
             except:
                 pass
 
-        # Fallback standard
+        # Tentative standard
         try:
             r = requests.get(url, headers=headers, timeout=12)
             if r.status_code == 200:
                 img, desc = parse_meta(r.text)
         except:
             pass
+
+        # Si pas d'image trouvée et curl_cffi disponible : second essai avec impersonation Chrome
+        # (certains sites activent leur bot-detection sur requests standard)
+        if not img and cffi_requests:
+            try:
+                r = cffi_requests.get(url, impersonate='chrome120', timeout=15)
+                if r.status_code == 200:
+                    img2, desc2 = parse_meta(r.text)
+                    if img2:
+                        img, desc = img2, desc2
+            except:
+                pass
+
         return img, desc
 
 if __name__ == "__main__":
