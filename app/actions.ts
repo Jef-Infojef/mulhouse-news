@@ -5,12 +5,13 @@ import prisma from '@/lib/prisma'
 export async function getLatestArticles(query?: string) {
   try {
     const whereClause = query ? {
+      hidden: false,
       OR: [
         { title: { contains: query, mode: 'insensitive' as const } }, { content: { contains: query, mode: 'insensitive' as const } },
         { description: { contains: query, mode: 'insensitive' as const } },
         { source: { contains: query, mode: 'insensitive' as const } },
       ],
-    } : {};
+    } : { hidden: false };
 
     const articles = await prisma.article.findMany({
       where: whereClause,
