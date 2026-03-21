@@ -1,6 +1,25 @@
 'use server'
 
 import prisma from '@/lib/prisma'
+import { cookies } from 'next/headers'
+
+export async function verifyAdminPassword(password: string) {
+  const correct = process.env.ADMIN_PASSWORD
+  if (!correct || password !== correct) return { success: false }
+  const cookieStore = await cookies()
+  cookieStore.set('admin_auth', 'true', {
+    httpOnly: true,
+    path: '/',
+    maxAge: 30 * 24 * 60 * 60,
+    sameSite: 'strict',
+  })
+  return { success: true }
+}
+
+export async function checkAdminAuth() {
+  const cookieStore = await cookies()
+  return cookieStore.get('admin_auth')?.value === 'true'
+}
 
 export async function getLatestArticles(query?: string) {
   try {

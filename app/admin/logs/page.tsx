@@ -2,7 +2,7 @@
 
 import { useReducer, useEffect, useCallback, useId, useState } from 'react'
 import Link from 'next/link'
-import { getScrapingLogs, getAppConfig, updateAppConfig, testEbraConnection } from '@/app/actions'
+import { getScrapingLogs, getAppConfig, updateAppConfig, testEbraConnection, verifyAdminPassword, checkAdminAuth } from '@/app/actions'
 import { 
   ShieldCheck, 
   ShieldAlert, 
@@ -437,10 +437,10 @@ export default function AdminLogsPage() {
     dispatch({ type: 'SET_LOADING', payload: false })
   }, [])
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (state.password === '1789') {
-      document.cookie = "admin_auth=true; path=/; max-age=" + (30 * 24 * 60 * 60) + "; SameSite=Strict"
+    const result = await verifyAdminPassword(state.password)
+    if (result.success) {
       dispatch({ type: 'SET_AUTHENTICATED', payload: true })
       fetchLogs()
     } else {
@@ -449,11 +449,12 @@ export default function AdminLogsPage() {
   }
 
   useEffect(() => {
-    const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
-    if (auth === 'true') {
-      dispatch({ type: 'SET_AUTHENTICATED', payload: true })
-      fetchLogs()
-    }
+    checkAdminAuth().then(authenticated => {
+      if (authenticated) {
+        dispatch({ type: 'SET_AUTHENTICATED', payload: true })
+        fetchLogs()
+      }
+    })
   }, [fetchLogs])
 
   const openConfigModal = async () => {
