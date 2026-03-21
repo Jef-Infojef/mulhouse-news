@@ -135,18 +135,53 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     if item.get('@type') == 'NewsArticle' and 'articleBody' in item:
                         return item['articleBody'], True, None
                 except: pass
-        # Logique mplusinfo.fr (site JS, JSON-LD + og:description)
+        # Logique mplusinfo.fr (site Next.js - contenu dans __NEXT_DATA__)
         elif "mplusinfo.fr" in url:
-            for script in soup.find_all('script', type='application/ld+json'):
+            # Extraction via __NEXT_DATA__ (contenu complet avec content_html)
+            next_data_script = soup.find('script', id='__NEXT_DATA__')
+            def _iter_content_html(obj, depth=0):
+                if depth > 15:
+                    return
+                if isinstance(obj, dict):
+                    if obj.get('content_html'):
+                        yield str(obj['content_html'])
+                        return  # un seul champ content_html par nœud suffit
+                    for v in obj.values():
+                        yield from _iter_content_html(v, depth + 1)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        yield from _iter_content_html(item, depth + 1)
+
+            if next_data_script and next_data_script.string:
                 try:
-                    data = json.loads(script.string)
-                    items = data if isinstance(data, list) else [data]
-                    for item in items:
-                        if 'description' in item and len(str(item['description'])) > 30:
-                            text_parts.append(htmllib.unescape(str(item['description'])))
-                            break
-                except: pass
-                if text_parts: break
+                    next_data = json.loads(next_data_script.string)
+                    texts = []
+                    for html_chunk in _iter_content_html(next_data):
+                        chunk_text = BeautifulSoup(html_chunk, 'html.parser').get_text('\n', strip=True)
+                        if chunk_text:
+                            texts.append(chunk_text)
+                    extracted = '\n'.join(texts)
+                    if len(extracted) > 100:
+                        text_parts.append(extracted)
+                except Exception as e:
+                    print(f"    [!] __NEXT_DATA__ parse error: {e}")
+
+            # Fallback : JSON-LD description
+            if not text_parts:
+                for script in soup.find_all('script', type='application/ld+json'):
+                    try:
+                        data = json.loads(script.string)
+                        items = data if isinstance(data, list) else [data]
+                        for item in items:
+                            if 'description' in item and len(str(item['description'])) > 30:
+                                text_parts.append(htmllib.unescape(str(item['description'])))
+                                break
+                    except Exception:
+                        pass
+                    if text_parts:
+                        break
+
+            # Fallback : og:description
             if not text_parts:
                 m = soup.find('meta', attrs={'property': 'og:description'})
                 if m and m.get('content') and len(m['content']) > 30:

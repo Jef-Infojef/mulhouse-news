@@ -172,6 +172,7 @@ def load_tags(cur):
             'animation', 'culture', 'culturel', 'vernissage', 'conférence', 'atelier',
             'librairie', 'livre', 'lecture', 'visite', 'balade', 'randonnée',
             'zoo', 'parc', 'piscine', 'patinoire', 'curling', 'nuit du', 'noumatrouff',
+            'portes ouvertes', 'porte ouverte', 'portes o', 'porte-o',
         ],
         'economie': [
             'économie', 'entreprise', 'emploi', 'chômage', 'investissement', 'budget',
