@@ -14,6 +14,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from tkcalendar import DateEntry
 import psycopg2
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 # Tentative d'import du décodeur
@@ -21,6 +22,14 @@ try:
     from googlenewsdecoder import gnewsdecoder
 except ImportError:
     gnewsdecoder = None
+
+# Tentative d'import curl_cffi pour les pages EBRA /videos/
+try:
+    from curl_cffi import requests as cffi_requests
+except ImportError:
+    cffi_requests = None
+
+EBRA_VIDEO_DOMAINS = ('lalsace.fr', 'dna.fr', 'estrepublicain.fr', 'vosgesmatin.fr')
 
 # Charger les variables depuis .env ou .env.local
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -271,17 +280,34 @@ class NewsScraperApp:
     def fetch_content_data(self, url):
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         img, desc = None, None
+        is_ebra_video = '/videos/' in url and any(d in url for d in EBRA_VIDEO_DOMAINS)
+
+        def parse_meta(html_text):
+            soup = BeautifulSoup(html_text, 'html.parser')
+            og_img = soup.find('meta', property='og:image')
+            og_desc = soup.find('meta', property='og:description') or soup.find('meta', attrs={'name': 'description'})
+            _img = html.unescape(og_img['content']) if og_img and og_img.get('content') else None
+            _desc = html.unescape(og_desc['content']) if og_desc and og_desc.get('content') else None
+            return _img, _desc
+
+        # Pour les pages /videos/ EBRA : curl_cffi en priorité (meilleure impersonation)
+        if is_ebra_video and cffi_requests:
+            try:
+                r = cffi_requests.get(url, impersonate='chrome120', timeout=15)
+                if r.status_code == 200:
+                    img, desc = parse_meta(r.text)
+                    if img:
+                        return img, desc
+            except:
+                pass
+
+        # Fallback standard
         try:
-            r = requests.get(url, headers=headers, timeout=8)
+            r = requests.get(url, headers=headers, timeout=12)
             if r.status_code == 200:
-                html_c = r.text
-                m_img = re.search(r'property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']', html_c)
-                if not m_img: m_img = re.search(r'content=["\']([^"\']+)["\']^>]*property=["\']og:image["\']', html_c)
-                if m_img: img = html.unescape(m_img.group(1))
-                m_desc = re.search(r'property=["\']og:description["\'][^>]*content=["\']([^"\']+)["\']', html_c)
-                if not m_desc: m_desc = re.search(r'name=["\']description["\'][^>]*content=["\']([^"\']+)["\']', html_c)
-                if m_desc: desc = html.unescape(m_desc.group(1))
-        except: pass
+                img, desc = parse_meta(r.text)
+        except:
+            pass
         return img, desc
 
 if __name__ == "__main__":
