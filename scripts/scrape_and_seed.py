@@ -35,8 +35,7 @@ def build_google_news_url(query: str) -> str:
 FEEDS = [
     {"name": "L'Alsace", "url": "https://www.lalsace.fr/rss", "is_google": False},
     {"name": "DNA", "url": "https://www.dna.fr/rss", "is_google": False},
-    {"name": "Google News", "url": build_google_news_url("Mulhouse"), "is_google": True},
-    {"name": "Noumatrouff", "url": build_google_news_url("Noumatrouff+Mulhouse"), "is_google": True}
+    {"name": "Google News", "url": build_google_news_url("Mulhouse"), "is_google": True}
 ]
 MAX_CONSECUTIVE_DECODE_ERRORS = 3
 
