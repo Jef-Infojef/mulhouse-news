@@ -1,9 +1,9 @@
-name: Sauvegarde Base de Données (Supabase)
+name: Sauvegarde Complète (Full) - Hebdomadaire
 
 on:
   schedule:
-    # Exécution 4 fois par jour : 0h, 6h, 12h et 18h UTC
-    - cron: '0 0,6,12,18 * * *'
+    # Chaque dimanche à 2h UTC
+    - cron: '0 2 * * 0'
   workflow_dispatch: # Permet de lancer manuellement
 
 jobs:
@@ -94,36 +94,32 @@ jobs:
           aws configure set aws_secret_access_key ${{ secrets.B2_APPLICATION_KEY }}
           aws configure set default.region us-west-002
 
-      - name: Uploader vers B2 Cloud Storage
+      - name: Uploader vers B2 Cloud Storage (full/)
         env:
           B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
           B2_BACKUP_BUCKET: mulhouse-news-backups-private
         run: |
           aws s3 cp ${{ steps.backup-file.outputs.filename }} \
-            s3://$B2_BACKUP_BUCKET/database-backups/${{ steps.backup-file.outputs.filename }} \
+            s3://$B2_BACKUP_BUCKET/database-backups/full/${{ steps.backup-file.outputs.filename }} \
             --endpoint-url=https://$B2_ENDPOINT
 
-      - name: Nettoyer les anciennes sauvegardes (garder 30 jours)
+      - name: Nettoyer les anciens backups full (garder 8 semaines)
         env:
           B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
           B2_BACKUP_BUCKET: mulhouse-news-backups-private
         run: |
-          aws s3 ls s3://$B2_BACKUP_BUCKET/database-backups/ \
+          aws s3 ls s3://$B2_BACKUP_BUCKET/database-backups/full/ \
             --endpoint-url=https://$B2_ENDPOINT > backup-list.txt || true
 
-          # Supprimer les sauvegardes de plus de 30 jours
-          CUTOFF_DATE=$(date -d '30 days ago' +%Y-%m-%d)
+          CUTOFF_DATE=$(date -d '56 days ago' +%Y-%m-%d)
 
           while IFS= read -r line; do
-            # Format: 2024-01-22 14:00:00 123456 backup-supabase-2024-01-22_14-00-00.sql.gz
             FILE_NAME=$(echo "$line" | awk '{print $4}')
-            
-            # Extraire date du nom de fichier (backup-supabase-YYYY-MM-DD_*.sql.gz)
             FILE_DATE=$(echo "$FILE_NAME" | grep -oP 'backup-supabase-\K[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
 
             if [ ! -z "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
-              echo "Suppression de l'ancienne sauvegarde : $FILE_NAME"
-              aws s3 rm s3://$B2_BACKUP_BUCKET/database-backups/$FILE_NAME \
+              echo "Suppression : $FILE_NAME"
+              aws s3 rm s3://$B2_BACKUP_BUCKET/database-backups/full/$FILE_NAME \
                 --endpoint-url=https://$B2_ENDPOINT || true
             fi
           done < backup-list.txt

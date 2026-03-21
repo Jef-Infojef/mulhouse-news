@@ -55,8 +55,11 @@ async function main() {
     where: {
       localImage: { not: null },
       r2Url: null
+    },
+    select: {
+      id: true,
+      localImage: true,
     }
-    // take: 200 removed to process everything
   });
 
   console.log(`Articles à uploader : ${articles.length}`);
