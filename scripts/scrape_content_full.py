@@ -80,7 +80,8 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
         # Logique EBRA (L'Alsace, DNA...)
         if any(x in target_url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"]):
             # ... [Logique EBRA existante conservée] ...
-            if "lalsace.fr" in target_url and not is_connected:
+            is_video_page = "/videos/" in target_url
+            if "lalsace.fr" in target_url and not is_connected and not is_video_page:
                 print(f"    [⛔] Contenu partiel refusé (Non connecté) pour : {target_url[:40]}")
                 return None, False, "Not Connected (Partial content refused)"
 
