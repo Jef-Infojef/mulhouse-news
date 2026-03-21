@@ -5,8 +5,9 @@ import { cookies } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 
 export async function verifyAdminPassword(password: string) {
-  const correct = process.env.ADMIN_PASSWORD
-  if (!correct || password !== correct) return { success: false }
+  const correct = process.env.ADMIN_PASSWORD?.trim()
+  console.log('[AUTH] ADMIN_PASSWORD défini:', !!correct, '| longueur:', correct?.length)
+  if (!correct || password.trim() !== correct) return { success: false }
   const cookieStore = await cookies()
   cookieStore.set('admin_auth', 'true', {
     httpOnly: true,
