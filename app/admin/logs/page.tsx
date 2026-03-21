@@ -1,6 +1,6 @@
 'use client'
 
-import { useReducer, useEffect, useCallback, useId } from 'react'
+import { useReducer, useEffect, useCallback, useId, useState } from 'react'
 import Link from 'next/link'
 import { getScrapingLogs, getAppConfig, updateAppConfig, testEbraConnection } from '@/app/actions'
 import { 
@@ -20,7 +20,9 @@ import {
   Save,
   X,
   Play,
-  Activity
+  Activity,
+  Eye,
+  EyeOff
 } from 'lucide-react'
 
 // --- Types ---
@@ -68,6 +70,7 @@ function LoginOverlay({
   onLogin: (e: React.FormEvent) => void,
   inputId: string
 }) {
+  const [showPassword, setShowPassword] = useState(false)
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-700">
@@ -80,14 +83,24 @@ function LoginOverlay({
         <form onSubmit={onLogin} className="space-y-6">
           <div>
             <label htmlFor={inputId} className="block text-sm font-medium text-gray-400 mb-2">Mot de passe d'accès</label>
-            <input
-              id={inputId}
-              type="password"
-              value={password}
-              onChange={(e) => onPasswordChange(e.target.value)}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg py-3 px-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-              placeholder="••••"
-            />
+            <div className="relative">
+              <input
+                id={inputId}
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => onPasswordChange(e.target.value)}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg py-3 px-4 pr-12 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                placeholder="••••"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 transition-colors"
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
           <button
             type="submit"
@@ -426,7 +439,7 @@ export default function AdminLogsPage() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
-    if (state.password === '1122') {
+    if (state.password === '1789') {
       document.cookie = "admin_auth=true; path=/; max-age=" + (30 * 24 * 60 * 60) + "; SameSite=Strict"
       dispatch({ type: 'SET_AUTHENTICATED', payload: true })
       fetchLogs()
