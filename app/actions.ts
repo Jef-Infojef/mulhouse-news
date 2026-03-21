@@ -2,6 +2,7 @@
 
 import prisma from '@/lib/prisma'
 import { cookies } from 'next/headers'
+import { revalidatePath } from 'next/cache'
 
 export async function verifyAdminPassword(password: string) {
   const correct = process.env.ADMIN_PASSWORD
@@ -19,6 +20,13 @@ export async function verifyAdminPassword(password: string) {
 export async function checkAdminAuth() {
   const cookieStore = await cookies()
   return cookieStore.get('admin_auth')?.value === 'true'
+}
+
+export async function revalidateSite() {
+  const cookieStore = await cookies()
+  if (cookieStore.get('admin_auth')?.value !== 'true') return { success: false }
+  revalidatePath('/')
+  return { success: true }
 }
 
 export async function getLatestArticles(query?: string) {

@@ -2,7 +2,7 @@
 
 import { useReducer, useEffect, useCallback, useId, useState } from 'react'
 import Link from 'next/link'
-import { getScrapingLogs, getAppConfig, updateAppConfig, testEbraConnection, verifyAdminPassword, checkAdminAuth } from '@/app/actions'
+import { getScrapingLogs, getAppConfig, updateAppConfig, testEbraConnection, verifyAdminPassword, checkAdminAuth, revalidateSite } from '@/app/actions'
 import { 
   ShieldCheck, 
   ShieldAlert, 
@@ -22,7 +22,8 @@ import {
   Play,
   Activity,
   Eye,
-  EyeOff
+  EyeOff,
+  RefreshCw
 } from 'lucide-react'
 
 // --- Types ---
@@ -425,9 +426,20 @@ function reducer(state: State, action: Action): State {
 
 export default function AdminLogsPage() {
   const [state, dispatch] = useReducer(reducer, initialState)
+  const [isRevalidating, setIsRevalidating] = useState(false)
+  const [revalidateMsg, setRevalidateMsg] = useState<string | null>(null)
   const passwordInputId = useId()
   const sessionInputId = useId()
   const pooolInputId = useId()
+
+  const handleRevalidate = async () => {
+    setIsRevalidating(true)
+    setRevalidateMsg(null)
+    const res = await revalidateSite()
+    setRevalidateMsg(res.success ? 'Cache purgé ✓' : 'Erreur')
+    setIsRevalidating(false)
+    setTimeout(() => setRevalidateMsg(null), 3000)
+  }
 
   const fetchLogs = useCallback(async () => {
     dispatch({ type: 'SET_LOADING', payload: true })
@@ -526,7 +538,15 @@ export default function AdminLogsPage() {
             >
               <Settings className="w-4 h-4" /> Configuration EBRA
             </button>
-            <button 
+            <button
+              onClick={handleRevalidate}
+              disabled={isRevalidating}
+              className="bg-green-600/20 hover:bg-green-600/30 disabled:opacity-50 text-green-400 text-sm font-medium py-2 px-4 rounded-lg border border-green-500/30 transition-colors flex items-center gap-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRevalidating ? 'animate-spin' : ''}`} />
+              {revalidateMsg ?? 'Forcer le refresh'}
+            </button>
+            <button
               onClick={fetchLogs}
               className="bg-gray-800 hover:bg-gray-700 text-sm font-medium py-2 px-4 rounded-lg border border-gray-700 transition-colors"
             >
