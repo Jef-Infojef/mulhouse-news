@@ -282,13 +282,43 @@ class NewsScraperApp:
         img, desc = None, None
         is_ebra_video = '/videos/' in url and any(d in url for d in EBRA_VIDEO_DOMAINS)
 
+        LOGO_PATTERNS = ('logo', 'header_logo', 'placeholder', 'default', 'favicon', 'no-image', 'noimage')
+
         def parse_meta(html_text):
             soup = BeautifulSoup(html_text, 'html.parser')
             og_img = soup.find('meta', property='og:image')
             og_desc = soup.find('meta', property='og:description') or soup.find('meta', attrs={'name': 'description'})
             _img = html.unescape(og_img['content']) if og_img and og_img.get('content') else None
             _desc = html.unescape(og_desc['content']) if og_desc and og_desc.get('content') else None
+            # Forcer https et ignorer logos/placeholders
+            if _img:
+                _img = _img.replace('http://', 'https://', 1)
+                if any(p in _img.lower() for p in LOGO_PATTERNS):
+                    _img = None
             return _img, _desc
+
+        def verify_image_url(img_url):
+            """Vérifie que l'image est accessible, tente des variantes si 404."""
+            if not img_url:
+                return None
+            try:
+                fn = cffi_requests if cffi_requests else requests
+                kw = {'impersonate': 'chrome120'} if cffi_requests else {'headers': {'User-Agent': 'Mozilla/5.0'}}
+                r = fn.get(img_url, timeout=10, **kw)
+                if r.ok and len(r.content) > 1000:
+                    return img_url
+                # Tenter variantes de suffixe numérique (_91, _86, _2)
+                import re as _re
+                for suffix in ('_91', '_86', '_2', '_1'):
+                    alt = _re.sub(r'_\d+(\.\w+)$', f'{suffix}\\1', img_url)
+                    if alt == img_url:
+                        break
+                    r2 = fn.get(alt, timeout=10, **kw)
+                    if r2.ok and len(r2.content) > 1000:
+                        return alt
+            except:
+                pass
+            return None
 
         # Pour les pages /videos/ EBRA : curl_cffi en priorité (meilleure impersonation)
         if is_ebra_video and cffi_requests:
@@ -321,6 +351,7 @@ class NewsScraperApp:
             except:
                 pass
 
+        img = verify_image_url(img)
         return img, desc
 
 if __name__ == "__main__":
