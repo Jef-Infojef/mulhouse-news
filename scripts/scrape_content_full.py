@@ -6,9 +6,12 @@ import re
 import time
 import random
 import subprocess
+import html as htmllib
 from curl_cffi import requests
 from dotenv import load_dotenv
 from datetime import datetime
+
+SKIP_PHRASES = ['cookie', 'abonnez', 'newsletter', 'mentions légales', 'politique de confidentialité', 'publicité']
 
 # Charger l'environnement
 load_dotenv(".envenv")
@@ -46,20 +49,20 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
         time.sleep(random.uniform(1.0, 2.0))
         
         try:
-            resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome110", timeout=30, allow_redirects=True)
+            resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome120", timeout=30, allow_redirects=True)
         except Exception as ssl_err:
             if "CertificateVerifyError" in str(ssl_err) or "SSL" in str(ssl_err):
-                resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome110", timeout=30, allow_redirects=True, verify=False)
+                resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome120", timeout=30, allow_redirects=True, verify=False)
             else:
                 raise ssl_err
-        
+
         # Si le fallback L'Alsace échoue (404), on tente l'URL originale sans cookies (pour les gratuits)
         if resp.status_code == 404 and target_url != url:
             try:
-                resp = requests.get(url, impersonate="chrome110", timeout=20, allow_redirects=True)
+                resp = requests.get(url, impersonate="chrome120", timeout=20, allow_redirects=True)
             except Exception as ssl_err:
                 if "CertificateVerifyError" in str(ssl_err) or "SSL" in str(ssl_err):
-                    resp = requests.get(url, impersonate="chrome110", timeout=20, allow_redirects=True, verify=False)
+                    resp = requests.get(url, impersonate="chrome120", timeout=20, allow_redirects=True, verify=False)
                 else:
                     raise ssl_err
             
@@ -109,9 +112,20 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     except: pass
         # Logique JDS (Agenda)
         elif "jds.fr" in url:
-            desc_div = soup.find('div', class_='description') or soup.find('div', id='description') or soup.find('div', itemprop='description')
-            if desc_div:
-                text_parts.append(desc_div.get_text(separator="\n", strip=True))
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    data = json.loads(script.string)
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if 'description' in item and len(str(item['description'])) > 50:
+                            text_parts.append(htmllib.unescape(str(item['description'])))
+                            break
+                except: pass
+                if text_parts: break
+            if not text_parts:
+                desc_div = soup.find('div', class_='description') or soup.find('div', id='description') or soup.find('div', itemprop='description')
+                if desc_div:
+                    text_parts.append(desc_div.get_text(separator="\n", strip=True))
         # Logique Le Parisien
         elif "leparisien.fr" in url:
             for script in soup.find_all('script', type='application/ld+json'):
@@ -121,16 +135,40 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     if item.get('@type') == 'NewsArticle' and 'articleBody' in item:
                         return item['articleBody'], True, None
                 except: pass
+        # Logique mplusinfo.fr (site JS, JSON-LD + og:description)
+        elif "mplusinfo.fr" in url:
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    data = json.loads(script.string)
+                    items = data if isinstance(data, list) else [data]
+                    for item in items:
+                        if 'description' in item and len(str(item['description'])) > 30:
+                            text_parts.append(htmllib.unescape(str(item['description'])))
+                            break
+                except: pass
+                if text_parts: break
+            if not text_parts:
+                m = soup.find('meta', attrs={'property': 'og:description'})
+                if m and m.get('content') and len(m['content']) > 30:
+                    text_parts.append(m['content'])
         # Logique M+ (Mulhouse Alsace Agglomération)
         elif "mag.mulhouse-alsace.fr" in url:
             content_div = soup.find('div', class_='interne')
             if content_div:
-                text_parts.append(content_div.get_text(separator="\n\n", strip=True))
+                paras = [p.get_text(' ', strip=True) for p in content_div.find_all('p') if len(p.get_text(strip=True)) > 40]
+                if paras:
+                    text_parts.append('\n\n'.join(paras))
+                else:
+                    text_parts.append(content_div.get_text(separator="\n\n", strip=True))
         # Fallback générique
         if not text_parts:
-            body = soup.find('div', itemprop='articleBody') or soup.find('article')
+            body = soup.find('div', itemprop='articleBody') or soup.find('article') or soup.find('main')
             if body:
-                text_parts.extend([p.get_text().strip() for p in body.find_all('p') if len(p.get_text().strip()) > 40])
+                text_parts.extend([
+                    p.get_text(' ', strip=True) for p in body.find_all('p')
+                    if len(p.get_text(strip=True)) > 40
+                    and not any(s in p.get_text(strip=True).lower() for s in SKIP_PHRASES)
+                ])
 
         if text_parts:
             # Nettoyage des caractères NULL (PostgreSQL n'aime pas ça)
@@ -263,23 +301,28 @@ def main():
 
         # Image processing
         img_status = run_image_scripts()
-        
+
         # Enregistrement du LOG final
         finished_at = datetime.now()
         status_final = "SUCCESS" if stats["error"] == 0 else "PARTIAL"
         if any(d["status"] == "SESSION_LOST" for d in session_details): status_final = "SESSION_LOST"
 
-        cur.execute("""
-            INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "isConnected", "articlesCount", "successCount", "errorCount", details)
-            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (start_time, finished_at, status_final, stats["is_connected"], len(articles), stats["success"], stats["error"], json.dumps(session_details)))
-        conn.commit()
-        print(f"\n✅ Log enregistré en base de données. Statut: {status_final}")
+        try:
+            cur.execute("""
+                INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "isConnected", "articlesCount", "successCount", "errorCount", details)
+                VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (start_time, finished_at, status_final, stats["is_connected"], len(articles), stats["success"], stats["error"], json.dumps(session_details)))
+            conn.commit()
+            print(f"\n✅ Log enregistré en base de données. Statut: {status_final}")
+        except Exception as log_err:
+            conn.rollback()
+            print(f"\n[!] Log non enregistré (table absente?) : {log_err}")
 
     except Exception as e:
         print(f"❌ Erreur critique : {e}")
         if conn:
             try:
+                conn.rollback()
                 cur = conn.cursor()
                 cur.execute("""
                     INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "errorMessage")
