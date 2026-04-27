@@ -254,13 +254,14 @@ function LogItem({
                   <div className="flex-1 min-w-0">
                     <div className="text-white font-medium truncate">{detail.title}</div>
                     <div className="flex items-center gap-2 mt-1">
-                      <a 
-                        href={detail.link} 
-                        target="_blank" 
+                      <a
+                        href={detail.link}
+                        target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 truncate max-w-md"
+                        className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 break-all"
+                        title={detail.link}
                       >
-                        <LinkIcon className="w-3 h-3" /> {detail.link}
+                        <LinkIcon className="w-3 h-3 shrink-0" /> {detail.link}
                       </a>
                     </div>
                   </div>
