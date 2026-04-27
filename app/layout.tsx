@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   authors: [{ name: "Mulhouse Actu" }],
   openGraph: {
     title: "Mulhouse Actu - Toute l'actualité de Mulhouse",
-    description: "Le meilleur de la presse locale mulhousienne réuni au même endroit.",
+    description: "Le meilleur de la presse locale mulhousienne réunit au même endroit.",
     url: "https://mulhouse-actu.vercel.app/",
     siteName: "Mulhouse Actu",
     locale: "fr_FR",
@@ -36,8 +36,12 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "/",
   },
-  viewport: "width=device-width, initial-scale=1",
   robots: "index, follow",
+}
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
 }
 
 export default function RootLayout({
