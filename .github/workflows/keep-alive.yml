@@ -1,0 +1,21 @@
+name: Keep-Alive
+on:
+  schedule:
+    - cron: '0 0 14 * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create empty commit to keep repository active
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b keep-alive-tmp
+          git commit --allow-empty -m "chore: keep-alive [skip ci]"
+          git push origin keep-alive-tmp:${{ github.event.repository.default_branch }}
