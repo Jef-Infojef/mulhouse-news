@@ -159,6 +159,9 @@ export async function testEbraConnection(sessionValue: string, pooolValue?: stri
     if (cleanPoool.includes('_poool=')) {
       finalPoool = cleanPoool.split('_poool=')[1].split(';')[0]
     }
+    // Formats DevTools type '_poool :"79f0c712-..."' : on extrait l'UUID directement
+    const uuidMatch = finalPoool.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/)
+    if (uuidMatch) finalPoool = uuidMatch[0]
     finalPoool = finalPoool.replace(/['"]/g, '').trim()
 
     const finalCookie = `.XCONNECT_SESSION=${finalSession}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=${finalPoool}`

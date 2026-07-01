@@ -243,15 +243,18 @@ def main():
         cookies_dict = {}
 
         if db_session:
-            # Nettoyage session
+            # Nettoyage session (gère aussi le format DevTools '.XCONNECT_SESSION :"2=..."')
             s_val = db_session.strip().replace('"', '').replace("'", "")
             if "2=" in s_val:
-                s_val = s_val[s_val.find("2="):].split(";")[0]
-            
-            # Nettoyage poool
+                s_val = s_val[s_val.find("2="):].split(";")[0].strip()
+
+            # Nettoyage poool : on extrait l'UUID quel que soit le format collé
             p_val = db_poool.strip().replace('"', '').replace("'", "") if db_poool else "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
             if "_poool=" in p_val:
                 p_val = p_val.split("_poool=")[1].split(";")[0]
+            uuid_match = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', p_val)
+            if uuid_match:
+                p_val = uuid_match.group(0)
             
             cookies_dict = {
                 ".XCONNECT_SESSION": s_val,
