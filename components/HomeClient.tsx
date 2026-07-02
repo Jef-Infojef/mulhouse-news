@@ -181,6 +181,15 @@ function PageHeader({
               <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400 mb-3">
                 Toute l'actu de Mulhouse en temps réel
               </p>
+              <div className="flex items-center gap-2 mb-3">
+                <Link
+                  href="/mplus-mag"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-700 text-white transition-colors text-xs font-bold shadow-sm"
+                >
+                  <BookOpen size={12} />
+                  <span>Archives M+Mag</span>
+                </Link>
+              </div>
               {allTags.length > 0 && (
                 <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1" aria-label="Filtrer par catégories">
                   <button
