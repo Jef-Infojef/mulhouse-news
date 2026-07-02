@@ -14,6 +14,7 @@ const SEASONS: Record<string, string> = {
 }
 
 const MAGAZINES = [
+  { num: 35, season: 'printemps', year: 2026 },
   { num: 34, season: 'hiver', year: 2025 },
   { num: 33, season: 'automne', year: 2025 },
   { num: 32, season: 'ete', year: 2025 },
@@ -34,7 +35,7 @@ const MAGAZINES = [
   { num: 17, season: 'automne', year: 2021 },
   { num: 16, season: 'ete', year: 2021 },
   { num: 15, season: 'printemps', year: 2021 },
-].reverse()
+]
 
 export default function MplusMagPage() {
   const containerVariants = {
