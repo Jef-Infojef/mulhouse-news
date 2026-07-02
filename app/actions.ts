@@ -1,31 +1,44 @@
 'use server'
 
 import prisma from '@/lib/prisma'
-import { cookies } from 'next/headers'
+import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
+import { createAdminSession, isAdminAuthenticated, safeEqual } from '@/lib/adminAuth'
+
+// Limitation des essais de connexion (par instance serveur)
+const loginAttempts = new Map<string, { count: number; firstAttemptAt: number }>()
+const MAX_ATTEMPTS = 10
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000
+
+async function isRateLimited(): Promise<boolean> {
+  const headerStore = await headers()
+  const ip = headerStore.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  const now = Date.now()
+  const entry = loginAttempts.get(ip)
+  if (!entry || now - entry.firstAttemptAt > ATTEMPT_WINDOW_MS) {
+    loginAttempts.set(ip, { count: 1, firstAttemptAt: now })
+    return false
+  }
+  entry.count++
+  return entry.count > MAX_ATTEMPTS
+}
 
 export async function verifyAdminPassword(password: string) {
+  if (await isRateLimited()) {
+    return { success: false, error: 'Trop de tentatives, réessayez plus tard.' }
+  }
   const correct = process.env.ADMIN_PASSWORD?.trim()
-  console.log('[AUTH] ADMIN_PASSWORD défini:', !!correct, '| longueur:', correct?.length)
-  if (!correct || password.trim() !== correct) return { success: false }
-  const cookieStore = await cookies()
-  cookieStore.set('admin_auth', 'true', {
-    httpOnly: true,
-    path: '/',
-    maxAge: 30 * 24 * 60 * 60,
-    sameSite: 'strict',
-  })
-  return { success: true }
+  if (!correct || !safeEqual(password.trim(), correct)) return { success: false }
+  const created = await createAdminSession()
+  return { success: created }
 }
 
 export async function checkAdminAuth() {
-  const cookieStore = await cookies()
-  return cookieStore.get('admin_auth')?.value === 'true'
+  return isAdminAuthenticated()
 }
 
 export async function revalidateSite() {
-  const cookieStore = await cookies()
-  if (cookieStore.get('admin_auth')?.value !== 'true') return { success: false }
+  if (!(await isAdminAuthenticated())) return { success: false }
   revalidatePath('/')
   return { success: true }
 }
@@ -105,6 +118,7 @@ export async function getLatestArticles(query?: string) {
 }
 
 export async function getScrapingLogs() {
+  if (!(await isAdminAuthenticated())) return { logs: [], error: 'Non autorisé' }
   try {
     const logs = await prisma.scrapingLog.findMany({
       orderBy: {
@@ -120,6 +134,7 @@ export async function getScrapingLogs() {
 }
 
 export async function getAppConfig(key: string) {
+  if (!(await isAdminAuthenticated())) return { value: null, error: 'Non autorisé' }
   try {
     const config = await prisma.appConfig.findUnique({
       where: { key }
@@ -131,6 +146,7 @@ export async function getAppConfig(key: string) {
 }
 
 export async function updateAppConfig(key: string, value: string) {
+  if (!(await isAdminAuthenticated())) return { success: false, error: 'Non autorisé' }
   try {
     await prisma.appConfig.upsert({
       where: { key },
@@ -144,6 +160,7 @@ export async function updateAppConfig(key: string, value: string) {
 }
 
 export async function testEbraConnection(sessionValue: string, pooolValue?: string) {
+  if (!(await isAdminAuthenticated())) return { success: false, message: 'Non autorisé' }
   try {
     const cleanSession = String(sessionValue).trim()
     const cleanPoool = pooolValue ? String(pooolValue).trim() : '9aab6ee3-fda6-43fc-a90e-29de3c73d8f7'
@@ -260,6 +277,7 @@ export async function testEbraConnection(sessionValue: string, pooolValue?: stri
 }
 
 export async function deleteArticle(id: string) {
+  if (!(await isAdminAuthenticated())) return { success: false, error: 'Non autorisé' }
   try {
     await prisma.article.delete({
       where: { id }

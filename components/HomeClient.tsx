@@ -1,11 +1,11 @@
 'use client'
 
 import { useReducer, useEffect, useMemo, useCallback, useId } from 'react'
-import { getLatestArticles } from '@/app/actions'
+import { getLatestArticles, checkAdminAuth } from '@/app/actions'
 import { ArticleCard } from '@/components/ArticleCard'
 import { Logo } from '@/components/Logo'
 import { SplashScreen } from '@/components/SplashScreen'
-import { AlertTriangle, Search, Loader2, Moon, Sun, Calendar, Clock, Cloud, CloudRain, CloudSnow, Vote } from 'lucide-react'
+import { AlertTriangle, Search, Loader2, Moon, Sun, Calendar, Clock, Cloud, CloudRain, CloudSnow, Vote, BookOpen } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import Link from 'next/link'
 
@@ -127,6 +127,13 @@ function TopInfoBar({
 
           {mounted && (
             <div className="flex items-center gap-2">
+              <Link
+                href="/mplus-mag"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-700 text-white transition-colors shadow-sm text-[10px] sm:text-xs font-bold"
+              >
+                <BookOpen size={12} />
+                <span>M+Mag</span>
+              </Link>
               <Link
                 href="/municipales-2026"
                 className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm text-[10px] sm:text-xs font-bold"
@@ -303,9 +310,8 @@ export default function HomeClient({ initialArticles }: { initialArticles: Artic
   }, [])
 
   useEffect(() => {
-    const auth = document.cookie.split('; ').find(row => row.startsWith('admin_auth='))?.split('=')[1]
     dispatch({ type: 'SET_MOUNTED' })
-    if (auth === 'true') dispatch({ type: 'SET_ADMIN', payload: true })
+    checkAdminAuth().then(ok => { if (ok) dispatch({ type: 'SET_ADMIN', payload: true }) })
 
     const timer = setInterval(() => dispatch({ type: 'SET_TIME', payload: new Date() }), 1000)
     fetchWeather()

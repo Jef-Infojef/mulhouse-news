@@ -80,6 +80,20 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
         soup = BeautifulSoup(page_text, 'html.parser')
         text_parts = []
 
+        # LD+JSON articleBody pour toute source (20 Minutes, Foot National, etc.)
+        for script in soup.find_all('script', type='application/ld+json'):
+            try:
+                raw = script.string.strip()
+                data = json.loads(raw)
+                items = data.get('@graph', data) if isinstance(data, dict) else data
+                if isinstance(items, dict): items = [items]
+                for item in items:
+                    if isinstance(item, dict) and item.get('articleBody'):
+                        body = item['articleBody'].strip()
+                        if len(body) > 100:
+                            return body, True, None
+            except: pass
+
         # Logique EBRA (L'Alsace, DNA...)
         if any(x in target_url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"]):
             # ... [Logique EBRA existante conservée] ...
@@ -126,15 +140,6 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                 desc_div = soup.find('div', class_='description') or soup.find('div', id='description') or soup.find('div', itemprop='description')
                 if desc_div:
                     text_parts.append(desc_div.get_text(separator="\n", strip=True))
-        # Logique Le Parisien
-        elif "leparisien.fr" in url:
-            for script in soup.find_all('script', type='application/ld+json'):
-                try:
-                    data = json.loads(script.string.strip())
-                    item = data[0] if isinstance(data, list) else data
-                    if item.get('@type') == 'NewsArticle' and 'articleBody' in item:
-                        return item['articleBody'], True, None
-                except: pass
         # Logique mplusinfo.fr (site Next.js - contenu dans __NEXT_DATA__)
         elif "mplusinfo.fr" in url:
             # Extraction via __NEXT_DATA__ (contenu complet avec content_html)
@@ -195,6 +200,62 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     text_parts.append('\n\n'.join(paras))
                 else:
                     text_parts.append(content_div.get_text(separator="\n\n", strip=True))
+        # Logique Le Figaro
+        elif "lefigaro.fr" in url:
+            for script in soup.find_all('script', type='application/ld+json'):
+                try:
+                    data = json.loads(script.string.strip())
+                    item = data[0] if isinstance(data, list) else data
+                    if item.get('@type') == 'NewsArticle' and 'articleBody' in item:
+                        text_parts.append(item['articleBody'])
+                        break
+                except: pass
+            if not text_parts:
+                body = soup.find('div', class_='fig-content-body')
+                if body:
+                    paras = [p.get_text(' ', strip=True) for p in body.find_all('p')
+                             if len(p.get_text(strip=True)) > 40
+                             and not any(s in p.get_text(strip=True).lower() for s in SKIP_PHRASES)]
+                    if paras:
+                        text_parts.append('\n\n'.join(paras))
+        # Logique Les Echos
+        elif "lesechos.fr" in url:
+            article = soup.find('article')
+            if article:
+                paras = [p.get_text(' ', strip=True) for p in article.find_all('p')
+                         if len(p.get_text(strip=True)) > 40
+                         and not any(s in p.get_text(strip=True).lower() for s in SKIP_PHRASES)]
+                if paras:
+                    text_parts.append('\n\n'.join(paras))
+        # Logique Le Trois (Elementor - contenu dans divs)
+        if not text_parts and "letrois.info" in url:
+            article = soup.find('article')
+            if article:
+                all_divs = article.find_all('div')
+                big_texts = [d.get_text(' ', strip=True) for d in all_divs if len(d.get_text(' ', strip=True)) > 150]
+                if big_texts:
+                    text_parts.append('\n\n'.join(big_texts))
+        # Logique Air Journal
+        if not text_parts and "air-journal.fr" in url:
+            content = soup.find('div', class_='post-content')
+            if content:
+                paras = content.find_all('p')
+                valid = [p.get_text(' ', strip=True) for p in paras if len(p.get_text(strip=True)) > 80]
+                if valid:
+                    text_parts.append('\n\n'.join(valid))
+            if not text_parts:
+                desc_meta = soup.find('meta', attrs={'name': 'description'})
+                if desc_meta and desc_meta.get('content') and len(desc_meta['content']) > 100:
+                    text_parts.append(desc_meta['content'])
+        # Logique Hockey Hebdo (table-based old-school layout)
+        if not text_parts and "hockeyhebdo.com" in url:
+            for td in soup.find_all('td', attrs={'bgcolor': '#FFFFFF'}):
+                txt = td.get_text(strip=True)
+                if len(txt) > 500:
+                    parts = [c.get_text(' ', strip=True) for c in td.find_all('td') if len(c.get_text(' ', strip=True)) > 50]
+                    if parts:
+                        text_parts.append('\n\n'.join(parts))
+                    break
         # Fallback générique
         if not text_parts:
             body = soup.find('div', itemprop='articleBody') or soup.find('article') or soup.find('main')

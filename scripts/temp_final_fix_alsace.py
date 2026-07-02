@@ -23,16 +23,17 @@ def fix():
         if "_poool=" in p_val: p_val = p_val.split("_poool=")[1].split(";")[0]
         cookies = {".XCONNECT_SESSION": s_val, ".XCONNECTKeepAlive": "2=1", ".XCONNECT": "2=1", "_poool": p_val}
 
-    for aid, title, link in articles:
-        print(f"  [*] Processing: {title[:40]}...")
+    total = len(articles)
+    for i, (aid, title, link) in enumerate(articles, 1):
+        print(f"  [{i}/{total}] {title[:40]}...")
         content, active, err = s.fetch_article_content(link, cookies, True)
         if content:
             clean_content = content.replace('\x00', '')
             cur.execute('UPDATE "Article" SET content = %s WHERE id = %s', (clean_content, aid))
             conn.commit()
-            print(f"  [✅] {len(clean_content)} chars")
+            print(f"    [OK] {len(clean_content)} chars")
         else:
-            print(f"  [❌] Echec : {err}")
+            print(f"    [FAIL] {err}")
     
     conn.close()
 
