@@ -6,6 +6,11 @@ import { ChevronLeft, FileText, Download, BookOpen } from 'lucide-react'
 import Link from 'next/link'
 import { Logo } from '@/components/Logo'
 
+// Les PDF (≈136 Mo au total) sont hébergés sur Backblaze B2 plutôt que dans public/
+// pour alléger les déploiements Vercel et économiser la bande passante.
+// Upload : npx tsx scripts/upload_mplus_mag_to_b2.ts
+// Le téléchargement passe par /mplus-mag/download/<fichier> qui redirige vers une URL B2 présignée.
+
 const SEASONS: Record<string, string> = {
   printemps: 'Printemps',
   ete: 'Été',
@@ -14,6 +19,7 @@ const SEASONS: Record<string, string> = {
 }
 
 const MAGAZINES = [
+  { num: 36, season: 'ete', year: 2026 },
   { num: 35, season: 'printemps', year: 2026 },
   { num: 34, season: 'hiver', year: 2025 },
   { num: 33, season: 'automne', year: 2025 },
@@ -136,7 +142,7 @@ export default function MplusMagPage() {
                       </div>
                       <div className="flex-grow" />
                       <a
-                        href={`/mplus-mag/${encodeURI(filename)}`}
+                        href={`/mplus-mag/download/${filename}`}
                         download
                         className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-colors shadow-sm"
                       >

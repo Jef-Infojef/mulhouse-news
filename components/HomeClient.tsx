@@ -23,11 +23,11 @@ interface Article {
   title: string
   link: string
   imageUrl: string | null
+  imageCaption: string | null
   localImage: string | null
   r2Url: string | null
   source: string | null
   description: string | null
-  content: string | null
   publishedAt: Date
   scrapedAt: Date
   createdAt: Date

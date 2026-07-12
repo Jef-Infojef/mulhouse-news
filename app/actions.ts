@@ -54,13 +54,29 @@ export async function getLatestArticles(query?: string) {
       ],
     } : { hidden: false };
 
+    // `content` (texte intégral scrapé) est volontairement exclu : il alourdirait
+    // le payload de plusieurs Mo. L'admin le charge à la demande via getArticleContent().
     const articles = await prisma.article.findMany({
       where: whereClause,
-      take: 200, 
+      take: 200,
       orderBy: {
         publishedAt: 'desc',
       },
-      include: {
+      select: {
+        id: true,
+        title: true,
+        link: true,
+        imageUrl: true,
+        imageCaption: true,
+        source: true,
+        description: true,
+        publishedAt: true,
+        scrapedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        localImage: true,
+        r2Url: true,
+        hidden: true,
         ArticleGoogleTag: {
           include: {
             NewsTag: true,
@@ -114,6 +130,20 @@ export async function getLatestArticles(query?: string) {
   } catch (error: any) {
     console.error('ERREUR PRISMA:', error)
     return { articles: [], error: error.message || String(error) }
+  }
+}
+
+export async function getArticleContent(id: string) {
+  if (!(await isAdminAuthenticated())) return { content: null, error: 'Non autorisé' }
+  try {
+    const article = await prisma.article.findUnique({
+      where: { id },
+      select: { content: true },
+    })
+    return { content: article?.content ?? null, error: null }
+  } catch (error: any) {
+    console.error('Erreur récupération contenu article:', error)
+    return { content: null, error: error.message || String(error) }
   }
 }
 

@@ -4,7 +4,7 @@ import { useReducer, useMemo, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { ExternalLink, Calendar, Trash2, Info, X } from 'lucide-react'
-import { deleteArticle } from '@/app/actions'
+import { deleteArticle, getArticleContent } from '@/app/actions'
 import { createPortal } from 'react-dom'
 
 interface NewsTag {
@@ -20,11 +20,11 @@ interface ArticleProps {
     title: string
     link: string
     imageUrl: string | null
+    imageCaption: string | null
     localImage: string | null
     r2Url: string | null
     source: string | null
     description: string | null
-    content: string | null
     publishedAt: Date
     scrapedAt: Date
     createdAt: Date
@@ -41,6 +41,8 @@ type State = {
   isUsingFavicon: boolean
   isDeleting: boolean
   showDetails: boolean
+  content: string | null
+  contentLoading: boolean
 }
 
 type Action =
@@ -48,6 +50,7 @@ type Action =
   | { type: 'IMAGE_ERROR'; payload: { imgUrl: string | null; type: 'FALLBACK' | 'FAVICON' } }
   | { type: 'SET_DELETING'; payload: boolean }
   | { type: 'SET_SHOW_DETAILS'; payload: boolean }
+  | { type: 'SET_CONTENT'; payload: string | null }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -63,7 +66,11 @@ function reducer(state: State, action: Action): State {
     case 'SET_DELETING':
       return { ...state, isDeleting: action.payload }
     case 'SET_SHOW_DETAILS':
-      return { ...state, showDetails: action.payload }
+      return action.payload
+        ? { ...state, showDetails: true, contentLoading: state.content === null }
+        : { ...state, showDetails: false }
+    case 'SET_CONTENT':
+      return { ...state, content: action.payload, contentLoading: false }
     default:
       return state
   }
@@ -76,6 +83,8 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
     isUsingFavicon: false,
     isDeleting: false,
     showDetails: false,
+    content: null,
+    contentLoading: false,
   })
 
   const getDomain = (url: string) => {
@@ -122,6 +131,17 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
     })
   }, [article.id, article.imageUrl, article.r2Url, article.localImage, faviconUrl])
 
+  const handleShowDetails = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dispatch({ type: 'SET_SHOW_DETAILS', payload: true })
+    if (state.content === null) {
+      getArticleContent(article.id)
+        .then(res => dispatch({ type: 'SET_CONTENT', payload: res.content ?? (res.error ? `Erreur : ${res.error}` : null) }))
+        .catch(() => dispatch({ type: 'SET_CONTENT', payload: 'Erreur de chargement du contenu' }))
+    }
+  }
+
   const handleImageError = () => {
     if (!state.isUsingFallback && !state.isUsingFavicon && (article.r2Url || article.localImage)) {
       dispatch({ type: 'IMAGE_ERROR', payload: { imgUrl: article.r2Url || article.localImage, type: 'FALLBACK' } })
@@ -164,11 +184,16 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
           {state.imgUrl && (
             <img
               src={state.imgUrl}
-              alt=""
+              alt={article.imageCaption || ''}
               loading="lazy"
               className={'w-full h-full transition-transform duration-500 group-hover:scale-105 ' + (state.isUsingFavicon ? 'object-contain p-12' : 'object-cover')}
               onError={handleImageError}
             />
+          )}
+          {article.imageCaption && !state.isUsingFavicon && (
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2">
+              <p className="text-[10px] text-white/90 line-clamp-2 leading-snug">{article.imageCaption}</p>
+            </div>
           )}
           {isAdmin && (
             <div className="absolute top-3 left-3 flex flex-col gap-2 z-10">
@@ -181,7 +206,7 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
                 <Trash2 size={16} className={state.isDeleting ? 'animate-pulse' : ''} />
               </button>
               <button
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); dispatch({ type: 'SET_SHOW_DETAILS', payload: true }); }}
+                onClick={handleShowDetails}
                 className="p-2 bg-white/90 hover:bg-blue-500 text-blue-600 hover:text-white rounded-full shadow-lg transition-all duration-200"
                 title="Voir les détails BDD"
               >
@@ -285,6 +310,7 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
                   { label: 'Titre', value: article.title },
                   { label: 'Lien Original', value: article.link, isLink: true },
                   { label: 'Image URL', value: article.imageUrl, isLink: true },
+                  { label: 'Légende photo', value: article.imageCaption },
                   { label: 'R2 URL', value: article.r2Url, isLink: true },
                   { label: 'Local Image', value: article.localImage },
                 ].map(field => (
@@ -309,7 +335,7 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
                   <span className="text-gray-400 block mb-1 uppercase tracking-wider text-[10px]">Contenu Complet (Raw)</span>
                   <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                     <p className="text-gray-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed text-[11px]">
-                      {article.content || 'AUCUN CONTENU RÉCUPÉRÉ'}
+                      {state.contentLoading ? 'Chargement du contenu...' : (state.content || 'AUCUN CONTENU RÉCUPÉRÉ')}
                     </p>
                   </div>
                 </div>

@@ -6,10 +6,16 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backfill:captions": "python scripts/backfill_image_captions.py",
+    "backfill:captions:other": "python scripts/backfill_image_captions_other.py",
+    "test:captions:other": "python scripts/test_caption_scraper_other.py",
+    "recover:orphans": "node -r tsx/cjs scripts/recover_orphan_images.ts",
+    "recover:never-downloaded": "node -r tsx/cjs scripts/recover_orphan_images.ts --never-downloaded"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.975.0",
+    "@aws-sdk/s3-request-presigner": "^3.975.0",
     "@prisma/client": "^6.0.0",
     "@types/jsdom": "^27.0.0",
     "clsx": "^2.1.1",

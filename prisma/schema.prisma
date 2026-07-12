@@ -12,6 +12,7 @@ model Article {
   title            String
   link             String             @unique
   imageUrl         String?
+  imageCaption     String?
   source           String?
   description      String?
   publishedAt      DateTime

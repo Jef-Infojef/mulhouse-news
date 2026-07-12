@@ -10,6 +10,7 @@ import html as htmllib
 from curl_cffi import requests
 from dotenv import load_dotenv
 from datetime import datetime
+from scrape_utils import extract_image_caption, fetch_page_caption
 
 SKIP_PHRASES = ['cookie', 'abonnez', 'newsletter', 'mentions légales', 'politique de confidentialité', 'publicité']
 
@@ -67,7 +68,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     raise ssl_err
             
         if resp.status_code != 200:
-            return None, True, f"HTTP {resp.status_code}"
+            return None, None, True, f"HTTP {resp.status_code}"
 
         page_text = resp.text
         is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber", "premium", "Abonné"])
@@ -78,6 +79,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
             print(f"    [!] Mode non-abonné pour : {target_url[:40]}")
 
         soup = BeautifulSoup(page_text, 'html.parser')
+        image_caption = extract_image_caption(soup, target_url)
         text_parts = []
 
         # LD+JSON articleBody pour toute source (20 Minutes, Foot National, etc.)
@@ -91,7 +93,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     if isinstance(item, dict) and item.get('articleBody'):
                         body = item['articleBody'].strip()
                         if len(body) > 100:
-                            return body, True, None
+                            return body, image_caption, True, None
             except: pass
 
         # Logique EBRA (L'Alsace, DNA...)
@@ -100,7 +102,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
             is_video_page = "/videos/" in target_url
             if "lalsace.fr" in target_url and not is_connected and not is_video_page:
                 print(f"    [⛔] Contenu partiel refusé (Non connecté) pour : {target_url[:40]}")
-                return None, False, "Not Connected (Partial content refused)"
+                return None, image_caption, False, "Not Connected (Partial content refused)"
 
             chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
             if chapo: text_parts.append(chapo.get_text().strip())
@@ -269,10 +271,10 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
         if text_parts:
             # Nettoyage des caractères NULL (PostgreSQL n'aime pas ça)
             clean_parts = [p.replace('\x00', '') for p in text_parts if p]
-            return "\n\n".join(dict.fromkeys(clean_parts)), True, None # déduplication simple
-        return None, True, "No content found"
+            return "\n\n".join(dict.fromkeys(clean_parts)), image_caption, True, None # déduplication simple
+        return None, image_caption, True, "No content found"
     except Exception as e:
-        return None, True, str(e)
+        return None, None, True, str(e)
 
 def run_image_scripts():
     """Lance les scripts TS et retourne un résumé."""
@@ -369,7 +371,7 @@ def main():
             current_desc = row_desc[0] if row_desc else None
 
             # Tentative d'extraction du contenu complet
-            content, active, err = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
+            content, image_caption, active, err = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
             
             status = "SUCCESS" if content else "FAILED"
             
@@ -384,9 +386,17 @@ def main():
             if not active:
                 status = "SESSION_LOST"
             
+            updated = False
+            if image_caption:
+                cur.execute(
+                    'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
+                    (image_caption, art_id),
+                )
+                updated = True
+
             if final_content and len(final_content) >= 150:
                 cur.execute('UPDATE "Article" SET content = %s WHERE id = %s', (final_content, art_id))
-                conn.commit()
+                updated = True
                 if status != "FALLBACK": stats["success"] += 1
             else:
                 # Contenu trop court ou absent : ne pas sauvegarder pour éviter la boucle
@@ -394,9 +404,39 @@ def main():
                 if final_content:
                     print(f"    [⚠️] Contenu trop court ({len(final_content)} chars), ignoré : {title[:40]}...")
                 stats["error"] += 1
+
+            if updated:
+                conn.commit()
             
             session_details.append({"title": title, "link": link, "status": status, "error": err, "chars": len(final_content) if final_content else 0})
             print(f"    [{i}/{len(articles)}] {status} | {title[:40]}...")
+
+        # Rattrapage légendes photo (articles récents sans imageCaption)
+        cur.execute("""
+            SELECT id, link FROM "Article"
+            WHERE "imageCaption" IS NULL
+              AND "imageUrl" IS NOT NULL AND "imageUrl" <> ''
+              AND "publishedAt" > NOW() - INTERVAL '14 days'
+              AND (
+                link LIKE '%lalsace.fr%' OR link LIKE '%dna.fr%'
+                OR link LIKE '%estrepublicain.fr%' OR link LIKE '%vosgesmatin.fr%'
+              )
+            ORDER BY "publishedAt" DESC LIMIT 30
+        """)
+        caption_rows = cur.fetchall()
+        if caption_rows:
+            print(f"\n[*] Rattrapage légendes photo : {len(caption_rows)} articles...")
+            caption_ok = 0
+            for art_id, link in caption_rows:
+                caption = fetch_page_caption(link, cookies_dict, alsace_cookies is not None)
+                if caption:
+                    cur.execute(
+                        'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
+                        (caption, art_id),
+                    )
+                    conn.commit()
+                    caption_ok += 1
+            print(f"    Légendes récupérées : {caption_ok}/{len(caption_rows)}")
 
         # Image processing
         img_status = run_image_scripts()

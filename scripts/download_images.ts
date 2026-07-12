@@ -115,7 +115,11 @@ async function main() {
   const articles = await prisma.article.findMany({
     where: {
       imageUrl: { not: null, notIn: ['', 'null'] },
-      localImage: null,
+      OR: [
+        { localImage: null },
+        // Orphelin : localImage en base mais jamais uploadé sur B2 (fichier local perdu sur runner éphémère)
+        { localImage: { not: null }, r2Url: null },
+      ],
       publishedAt: {
         gte: new Date(Date.now() - 48 * 60 * 60 * 1000) // 48h
       }

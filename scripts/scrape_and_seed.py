@@ -17,6 +17,7 @@ import time
 import random
 from urllib.parse import urljoin
 import unicodedata
+from scrape_utils import extract_image_caption
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -57,7 +58,7 @@ def extract_real_url(google_url):
     return google_url
 
 def fetch_content_data(url, fetch_title=False):
-    img, desc, title = None, None, None
+    img, desc, title, caption = None, None, None, None
     try:
         time.sleep(random.uniform(0.5, 1.5))
         
@@ -124,7 +125,10 @@ def fetch_content_data(url, fetch_title=False):
                 elif not img.startswith("http"):
                     img = urljoin(url, img)
 
-            # 3. Extraction Description
+            # 3. Légende photo
+            caption = extract_image_caption(soup, url)
+
+            # 4. Extraction Description
             og_desc = soup.find("meta", property="og:description")
             if og_desc and og_desc.get("content"):
                 candidate_desc = html.unescape(og_desc["content"])
@@ -143,7 +147,7 @@ def fetch_content_data(url, fetch_title=False):
     if title and ("radware" in title.lower() or "bot" in title.lower() or "page de chargement" in title.lower()):
         title = None
 
-    return img, desc, title
+    return img, desc, title, caption
 
 def load_tags(cur):
     """Charge tous les tags depuis la DB et retourne une liste de (id, name, slug, keywords)."""
@@ -356,7 +360,7 @@ def main():
             
             # Si le titre semble corrompu (cas DNA), on demande à fetch_content_data de le récupérer
             needs_title_fix = title.startswith('$') or "TitleNoTags" in title
-            img, desc, fetched_title = fetch_content_data(real_url, fetch_title=needs_title_fix)
+            img, desc, fetched_title, caption = fetch_content_data(real_url, fetch_title=needs_title_fix)
             
             if needs_title_fix and fetched_title:
                 print(f"      [ℹ️] Titre corrigé: {fetched_title[:50]}...")
@@ -370,10 +374,10 @@ def main():
 
             try:
                 cur.execute("""
-                    INSERT INTO "Article" (id, title, link, "imageUrl", source, description, "publishedAt", "updatedAt")
-                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, NOW())
+                    INSERT INTO "Article" (id, title, link, "imageUrl", "imageCaption", source, description, "publishedAt", "updatedAt")
+                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, NOW())
                     RETURNING id
-                """, (title, real_url, img, source, desc, parsedate_to_datetime(pub_date_str)))
+                """, (title, real_url, img, caption, source, desc, parsedate_to_datetime(pub_date_str)))
                 article_row = cur.fetchone()
                 article_id = article_row[0] if article_row else None
                 
