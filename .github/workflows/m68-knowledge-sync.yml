@@ -82,3 +82,11 @@ jobs:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync Zoo de Mulhouse (pages + PDF)
+        if: always()
+        run: npx tsx scripts/zoo-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
