@@ -15,7 +15,7 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout assocommercants (deploy key lecture seule)
         uses: actions/checkout@v4
@@ -126,6 +126,14 @@ jobs:
       - name: Sync Musée Historique de Mulhouse (crawl lent, ~2 min)
         if: always()
         run: npx tsx scripts/historical-museum-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync Musée des Beaux-Arts de Mulhouse (crawl lent, ~2 min)
+        if: always()
+        run: npx tsx scripts/fine-arts-museum-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
