@@ -1,0 +1,60 @@
+name: M68 Knowledge Sync
+
+# Exécute le code du repo privé assocommercants sur les runners publics
+# (minutes illimitées). Syncs RAG directes vers les BDD ; seule la sync
+# mulhouse.fr passe par une route Vercel (leur pare-feu bloque les IPs
+# GitHub Actions).
+on:
+  schedule:
+    # Tous les jours à 2h30 UTC — mulhouse.fr + Wikipédia → RAG
+    - cron: "30 2 * * *"
+    # Mercredi 3h UTC — rafraîchissement presse mi-semaine
+    - cron: "0 3 * * 3"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout assocommercants (deploy key lecture seule)
+        uses: actions/checkout@v4
+        with:
+          repository: Jef-Infojef/assocommercants
+          ssh-key: ${{ secrets.ASSOCOMMERCANTS_DEPLOY_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+
+      - name: Sync pages mulhouse.fr (via Vercel, IPs GitHub bloquées)
+        run: |
+          response=$(curl -s -w "\n%{http_code}" --max-time 290 \
+            "https://www.mulhouse68.fr/api/cron/city-sync?key=${{ secrets.M68_CRON_SECRET }}")
+          echo "$response" | head -1
+          [ "$(echo "$response" | tail -1)" = "200" ]
+
+      - name: Sync Wikipédia
+        if: always()
+        run: npx tsx scripts/wiki-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync articles presse (RAG)
+        if: always()
+        run: npx tsx scripts/rag-sync-articles.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
