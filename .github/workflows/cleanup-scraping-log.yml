@@ -1,0 +1,73 @@
+name: Purge des logs de scraping
+
+on:
+  schedule:
+    # Chaque dimanche à 4h UTC, après le backup full (2h) et l'incrémental
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: "Nombre de jours de logs à conserver"
+        required: false
+        default: '60'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer les dépendances
+        run: pip install psycopg2-binary
+
+      - name: Purger les ScrapingLog de plus de N jours
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RETENTION_DAYS: ${{ github.event.inputs.retention_days || '60' }}
+        run: |
+          python - <<'EOF'
+          import os, psycopg2
+
+          DATABASE_URL = os.environ["DATABASE_URL"].replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+          retention_days = int(os.environ["RETENTION_DAYS"])
+
+          conn = psycopg2.connect(DATABASE_URL)
+          conn.autocommit = True
+          cur = conn.cursor()
+
+          cur.execute('SELECT COUNT(*) FROM "ScrapingLog"')
+          before = cur.fetchone()[0]
+
+          cur.execute(
+            'DELETE FROM "ScrapingLog" WHERE "startedAt" < now() - interval %s',
+            (f'{retention_days} days',)
+          )
+          deleted = cur.rowcount
+
+          cur.execute('SELECT COUNT(*) FROM "ScrapingLog"')
+          after = cur.fetchone()[0]
+
+          print(f"Rétention : {retention_days} jours")
+          print(f"Avant : {before} lignes")
+          print(f"Supprimées : {deleted} lignes")
+          print(f"Après : {after} lignes")
+
+          # VACUUM FULL restitue réellement l'espace disque (une simple
+          # DELETE + VACUUM ne fait que marquer l'espace réutilisable).
+          # Verrou exclusif bref, acceptable en dehors des heures de scraping.
+          cur.execute('VACUUM FULL "ScrapingLog"')
+          print("VACUUM FULL terminé")
+
+          cur.close()
+          conn.close()
+          EOF
+
+      - name: Notification d'erreur
+        if: failure()
+        run: |
+          echo "[FAILED] La purge des ScrapingLog a échoué !"
+          exit 1
