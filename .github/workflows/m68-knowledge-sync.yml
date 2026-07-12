@@ -210,3 +210,11 @@ jobs:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync répertoire des rues Mulhouse (BAN, data.gouv.fr)
+        if: always()
+        run: npx tsx scripts/street-directory-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
