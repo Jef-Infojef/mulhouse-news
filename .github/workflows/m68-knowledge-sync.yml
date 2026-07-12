@@ -202,3 +202,11 @@ jobs:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync boîtes aux lettres Mulhouse (La Poste, data.gouv.fr)
+        if: always()
+        run: npx tsx scripts/mailboxes-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
