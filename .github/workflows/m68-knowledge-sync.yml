@@ -15,7 +15,7 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Checkout assocommercants (deploy key lecture seule)
         uses: actions/checkout@v4
@@ -134,6 +134,38 @@ jobs:
       - name: Sync Musée des Beaux-Arts de Mulhouse (crawl lent, ~2 min)
         if: always()
         run: npx tsx scripts/fine-arts-museum-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync Musée de la Mine et de la Potasse (crawl lent, ~2,3 min)
+        if: always()
+        run: npx tsx scripts/mine-museum-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync Musée du Papier Peint (Rixheim, crawl lent, ~6,3 min)
+        if: always()
+        run: npx tsx scripts/wallpaper-museum-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync Parc de Wesserling (crawl lent, ~6 min)
+        if: always()
+        run: npx tsx scripts/wesserling-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync La Kunsthalle Mulhouse
+        if: always()
+        run: npx tsx scripts/kunsthalle-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
