@@ -55,6 +55,11 @@ jobs:
         run: |
           python scripts/scrape_content_full.py
 
+      - name: Sync RAG index (direct Supabase, sans Vercel)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/rag_sync_articles.py
+
       - name: Log failure to DB
         if: failure()
         env:
