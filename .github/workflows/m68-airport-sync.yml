@@ -1,0 +1,39 @@
+name: M68 Airport Sync
+
+# Compagnies + destinations de l'aéroport Bâle-Mulhouse (EuroAirport) : aucune
+# page publique du site ne mappe destination↔compagnie directement. Exécuté
+# toutes les heures pour accumuler progressivement les compagnies observées
+# sur les vols du jour dans le document destinations (le document RAG déjà
+# indexé sert de mémoire, relu et fusionné à chaque passage — voir
+# lib/rag/indexer.ts indexAirportPages()). Repo public (minutes illimitées),
+# checkout MulhouseGPT (propriétaire du moteur RAG).
+on:
+  schedule:
+    - cron: "15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout MulhouseGPT (deploy key lecture seule)
+        uses: actions/checkout@v4
+        with:
+          repository: Jef-Infojef/MulhouseGPT
+          ssh-key: ${{ secrets.MULHOUSEGPT_DEPLOY_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync aéroport Bâle-Mulhouse (compagnies + destinations + compagnies observées)
+        run: npx tsx scripts/airport-pages-sync.ts
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
