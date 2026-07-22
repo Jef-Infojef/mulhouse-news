@@ -1,6 +1,6 @@
 name: M68 Library Catalog Sync
 
-# Exécute le code du repo privé assocommercants sur les runners publics
+# Exécute le code du repo privé MulhouseGPT sur les runners publics
 # (minutes illimitées) — même pattern que m68-knowledge-sync.yml. Workflow
 # séparé (pas fusionné dans le sync quotidien) : le crawl catalogue est
 # volontairement mensuel, pas une histoire de minutes GitHub ici mais de
@@ -25,11 +25,11 @@ jobs:
     timeout-minutes: 240
 
     steps:
-      - name: Checkout assocommercants (deploy key lecture seule)
+      - name: Checkout MulhouseGPT (deploy key lecture seule)
         uses: actions/checkout@v4
         with:
-          repository: Jef-Infojef/assocommercants
-          ssh-key: ${{ secrets.ASSOCOMMERCANTS_DEPLOY_KEY }}
+          repository: Jef-Infojef/MulhouseGPT
+          ssh-key: ${{ secrets.MULHOUSEGPT_DEPLOY_KEY }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -46,7 +46,7 @@ jobs:
       - name: Sync catalogue bibliothèques (crawl Anubis/Puppeteer, ~2h30)
         run: npx tsx scripts/library-catalog-sync.ts ${{ inputs.max_records && format('--max-records={0}', inputs.max_records) || '' }}
         env:
-          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
           ANUBIS_COOKIE: ${{ inputs.anubis_cookie }}
