@@ -37,6 +37,7 @@ jobs:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
 
       - name: Sync pages mulhouse.fr (via Vercel, IPs GitHub bloquées)
+        if: github.event.schedule != '0 3 * * 3'
         run: |
           response=$(curl -s -w "\n%{http_code}" --max-time 290 \
             "https://www.mulhouse68.fr/api/cron/city-sync?key=${{ secrets.M68_CRON_SECRET }}")
@@ -44,7 +45,7 @@ jobs:
           [ "$(echo "$response" | tail -1)" = "200" ]
 
       - name: Sync Wikipédia
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/wiki-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -60,7 +61,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync sorties à venir (RAG)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/outings-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -68,7 +69,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Office de Tourisme (pages + guides PDF)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/tourism-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -76,7 +77,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync plaques bilingues (plaquesbilingues.fr)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/bilingual-plaques-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -84,7 +85,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Zoo de Mulhouse (pages + PDF)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/zoo-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -92,7 +93,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Musée National de l'Automobile (crawl lent, ~10 min)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/museum-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -100,7 +101,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Cité du Train (musée ferroviaire)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/railway-museum-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -108,7 +109,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Musée Electropolis (bloqué depuis mon environnement, test réel ici)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/electropolis-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -116,7 +117,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Musée de l'Impression sur Étoffes (MISE)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/textile-museum-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -124,7 +125,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Musée Historique de Mulhouse (crawl lent, ~2 min)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/historical-museum-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -132,7 +133,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Musée des Beaux-Arts de Mulhouse (crawl lent, ~2 min)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/fine-arts-museum-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -140,7 +141,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Musée de la Mine et de la Potasse (crawl lent, ~2,3 min)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/mine-museum-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -148,7 +149,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Musée du Papier Peint (Rixheim, crawl lent, ~6,3 min)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/wallpaper-museum-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -156,7 +157,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Parc de Wesserling (crawl lent, ~6 min)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/wesserling-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -164,7 +165,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync La Kunsthalle Mulhouse
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/kunsthalle-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -172,7 +173,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync motoco (friche artistique DMC)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/motoco-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -180,7 +181,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync street art Mulhouse (Visit Alsace, 6 fiches)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/street-art-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -188,7 +189,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync annuaire radios Mulhouse (annuradio.fr)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/radio-directory-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -196,7 +197,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync élus de Mulhouse (RNE, data.gouv.fr)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/elected-officials-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -204,7 +205,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync boîtes aux lettres Mulhouse (La Poste, data.gouv.fr)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/mailboxes-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -212,7 +213,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync répertoire des rues Mulhouse (BAN, data.gouv.fr)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/street-directory-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -220,7 +221,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync démographie Mulhouse (INSEE, ~50 Mo à télécharger)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/demographics-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -228,7 +229,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Sync Bibliothèques de Mulhouse (pages + agenda)
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/libraries-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
@@ -236,7 +237,7 @@ jobs:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
       - name: Vérifier le solde Jina
-        if: always()
+        if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/check-jina-balance.ts
         env:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
