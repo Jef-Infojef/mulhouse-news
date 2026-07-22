@@ -233,6 +233,20 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
+      - name: Sync FAQ aéroport Bâle-Mulhouse (EuroAirport)
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/airport-faq-sync.ts
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync pages pratiques aéroport (transports, parking, bagages, PMR...)
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/airport-practical-sync.ts
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
       - name: Vérifier le solde Jina
         if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/check-jina-balance.ts
