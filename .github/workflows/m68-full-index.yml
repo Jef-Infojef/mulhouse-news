@@ -1,0 +1,44 @@
+name: M68 Full Index
+
+# Index complet toutes sources + purge + embeddings — équivalent hebdomadaire
+# de m68-knowledge-sync.yml (qui ne couvre que les sources synchronisées au
+# quotidien). Couvre en plus : agglo/uha/associations/open-data/conseil
+# municipal/emploi (France Travail), sources sans sync quotidienne dédiée.
+on:
+  schedule:
+    # Dimanche 4h UTC — index complet toutes sources + purge + embeddings
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    # Backfill embeddings cadencé à 100K tokens/min (free tier Jina) : prévoir large
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout MulhouseGPT (deploy key lecture seule)
+        uses: actions/checkout@v4
+        with:
+          repository: Jef-Infojef/MulhouseGPT
+          ssh-key: ${{ secrets.MULHOUSEGPT_DEPLOY_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Index RAG complet (toutes sources + purge + embeddings)
+        run: npx tsx scripts/rag-index.ts
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.MULHOUSEGPT_TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.MULHOUSEGPT_TURSO_AUTH_TOKEN }}
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
