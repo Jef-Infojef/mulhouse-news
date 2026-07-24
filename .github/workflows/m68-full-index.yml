@@ -59,7 +59,7 @@ jobs:
           - name: emploi
             sources: job_offer,labour_market_stats,territory_employment,employment_access,hiring_company,employment_event
           - name: administratif
-            sources: conseil_municipal_pdf,conseil_municipal_archive,library_page,library_event,airport_page
+            sources: conseil_municipal_pdf,conseil_municipal_archive,library_page,library_event,airport_page,insee_profile
     runs-on: ubuntu-latest
     timeout-minutes: 60
     name: Index (${{ matrix.name }})
