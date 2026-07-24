@@ -53,7 +53,7 @@ jobs:
           - name: core-data
             sources: shop,event,document,magazine,open_data,osm_poi,outing
           - name: culture-tourisme
-            sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,elected_officials,mailbox_directory,street_directory,demographics,association_directory,agglo_page,uha_page
+            sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,elected_officials,mailbox_directory,street_directory,quartier_directory,demographics,association_directory,agglo_page,uha_page
           - name: musees
             sources: museum_page,railway_page,electropolis_page,textile_museum_page,historical_museum_page,fine_arts_museum_page,mine_museum_page,wallpaper_museum_page,wesserling_page,kunsthalle_page,motoco_page
           - name: emploi
