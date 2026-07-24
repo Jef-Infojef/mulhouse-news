@@ -2,19 +2,54 @@ name: M68 Full Index
 
 # Index complet toutes sources + purge + embeddings — équivalent hebdomadaire
 # de m68-knowledge-sync.yml (qui ne couvre que les sources synchronisées au
-# quotidien). Couvre en plus : agglo/uha/associations/open-data/conseil
-# municipal/emploi (France Travail), sources sans sync quotidienne dédiée.
+# quotidien). Couvre en plus : agglo/uha/associations/open-data/OSM/
+# monuments/conseil municipal/emploi (France Travail), sources sans sync
+# quotidienne dédiée.
+#
+# Scindé en 5 jobs parallèles (ciblés via --sources=) plutôt qu'un run
+# monolithique séquentiel : un run unique dépassait régulièrement la limite
+# de 2h (~45 sources dont plusieurs crawls lents — musées Puppeteer ~30 min
+# cumulées, emploi France Travail paginé et parfois lent) — confirmé le
+# 2026-07-24, run annulé par timeout après 2h00, bloqué ~24 min sur le
+# groupe emploi. Chaque groupe a son propre budget de temps, un groupe lent
+# ou en échec ne bloque plus les autres. ensureFtsReady() (lib/rag/
+# indexer.ts) est protégé par un verrou advisory Postgres pour tolérer ces
+# 5 démarrages simultanés.
 on:
   schedule:
     # Dimanche 4h UTC — index complet toutes sources + purge + embeddings
     - cron: "0 4 * * 0"
   workflow_dispatch:
 
+env:
+  TURSO_DATABASE_URL: ${{ secrets.MULHOUSEGPT_TURSO_DATABASE_URL }}
+  TURSO_AUTH_TOKEN: ${{ secrets.MULHOUSEGPT_TURSO_AUTH_TOKEN }}
+  NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+  RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+  JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+  FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
+  FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+
 jobs:
   index:
+    strategy:
+      # Un job en échec/timeout n'annule pas les autres groupes.
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            sources: shop,article,news_article,event,document,magazine,city_page,wiki,landmark_directory,open_data,osm_poi,outing
+          - name: culture-tourisme
+            sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,elected_officials,mailbox_directory,street_directory,demographics,association_directory,agglo_page,uha_page
+          - name: musees
+            sources: museum_page,railway_page,electropolis_page,textile_museum_page,historical_museum_page,fine_arts_museum_page,mine_museum_page,wallpaper_museum_page,wesserling_page,kunsthalle_page,motoco_page
+          - name: emploi
+            sources: job_offer,labour_market_stats,territory_employment,employment_access,hiring_company,employment_event
+          - name: administratif
+            sources: conseil_municipal_pdf,conseil_municipal_archive,library_page,library_event,airport_page
     runs-on: ubuntu-latest
-    # Backfill embeddings cadencé à 100K tokens/min (free tier Jina) : prévoir large
-    timeout-minutes: 120
+    timeout-minutes: 60
+    name: Index (${{ matrix.name }})
 
     steps:
       - name: Checkout MulhouseGPT (deploy key lecture seule)
@@ -32,13 +67,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Index RAG complet (toutes sources + purge + embeddings)
-        run: npx tsx scripts/rag-index.ts
-        env:
-          TURSO_DATABASE_URL: ${{ secrets.MULHOUSEGPT_TURSO_DATABASE_URL }}
-          TURSO_AUTH_TOKEN: ${{ secrets.MULHOUSEGPT_TURSO_AUTH_TOKEN }}
-          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
-          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
-          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
-          FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
-          FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+      - name: Index RAG — groupe ${{ matrix.name }}
+        run: npx tsx scripts/rag-index.ts --sources=${{ matrix.sources }}
