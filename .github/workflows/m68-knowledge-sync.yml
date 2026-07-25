@@ -37,7 +37,8 @@ jobs:
         if: github.event.schedule != '0 3 * * 3'
         run: |
           response=$(curl -s -w "\n%{http_code}" --max-time 290 \
-            "https://mulhousegpt.vercel.app/api/cron/city-sync?key=${{ secrets.M68_CRON_SECRET }}")
+            -H "Authorization: ${{ secrets.M68_CRON_SECRET }}" \
+            "https://mulhousegpt.vercel.app/api/cron/city-sync")
           echo "$response" | head -1
           [ "$(echo "$response" | tail -1)" = "200" ]
 
