@@ -11,6 +11,13 @@
 # testing
 /coverage
 
+# python
+__pycache__/
+*.py[cod]
+
+# terminaux locaux
+/terminals/
+
 # next.js
 /.next/
 /out/
