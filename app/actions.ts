@@ -45,10 +45,13 @@ export async function revalidateSite() {
 
 export async function getLatestArticles(query?: string) {
   try {
+    // La recherche ne porte pas sur `content` : ce champ contient le texte intégral
+    // scrapé (dont des articles derrière paywall), et un filtre `contains` public
+    // permettrait de le reconstituer sous-chaîne par sous-chaîne sans jamais le renvoyer.
     const whereClause = query ? {
       hidden: false,
       OR: [
-        { title: { contains: query, mode: 'insensitive' as const } }, { content: { contains: query, mode: 'insensitive' as const } },
+        { title: { contains: query, mode: 'insensitive' as const } },
         { description: { contains: query, mode: 'insensitive' as const } },
         { source: { contains: query, mode: 'insensitive' as const } },
       ],
