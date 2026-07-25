@@ -5,22 +5,66 @@ import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { createAdminSession, isAdminAuthenticated, safeEqual } from '@/lib/adminAuth'
 
-// Limitation des essais de connexion (par instance serveur)
-const loginAttempts = new Map<string, { count: number; firstAttemptAt: number }>()
+// Limitation des essais de connexion. Le compteur vit en base (table AppConfig,
+// simple clé/valeur : aucune migration requise) et non en mémoire : sur Vercel,
+// chaque instance serverless a son propre tas et disparaît au cold start, donc un
+// compteur en mémoire ne limitait rien en pratique.
 const MAX_ATTEMPTS = 10
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000
+const RL_PREFIX = 'ratelimit:login:'
+
+async function clientIp(): Promise<string> {
+  const headerStore = await headers()
+  return headerStore.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+}
 
 async function isRateLimited(): Promise<boolean> {
-  const headerStore = await headers()
-  const ip = headerStore.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  const key = RL_PREFIX + (await clientIp())
   const now = Date.now()
-  const entry = loginAttempts.get(ip)
-  if (!entry || now - entry.firstAttemptAt > ATTEMPT_WINDOW_MS) {
-    loginAttempts.set(ip, { count: 1, firstAttemptAt: now })
-    return false
+  try {
+    const existing = await prisma.appConfig.findUnique({ where: { key } })
+    let count = 0
+    let windowStart = now
+    if (existing) {
+      const parsed = JSON.parse(existing.value) as { c?: number; t?: number }
+      if (typeof parsed.t === 'number' && now - parsed.t <= ATTEMPT_WINDOW_MS) {
+        count = typeof parsed.c === 'number' ? parsed.c : 0
+        windowStart = parsed.t
+      }
+    }
+    count++
+    const value = JSON.stringify({ c: count, t: windowStart })
+    await prisma.appConfig.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value },
+    })
+    // Purge opportuniste des compteurs expirés, pour éviter que la table n'enfle
+    // si quelqu'un pulvérise des tentatives depuis de nombreuses IP.
+    if (Math.random() < 0.02) {
+      await prisma.appConfig.deleteMany({
+        where: {
+          key: { startsWith: RL_PREFIX },
+          updatedAt: { lt: new Date(now - ATTEMPT_WINDOW_MS) },
+        },
+      })
+    }
+    return count > MAX_ATTEMPTS
+  } catch (error) {
+    // En cas d'indisponibilité de la base, on refuse la tentative plutôt que de
+    // laisser passer un bruteforce non compté. L'admin dépend de toute façon de la
+    // base pour tout le reste, il n'y a donc rien à perdre à échouer ici.
+    console.error('[LOGIN] Rate limit indisponible, tentative refusée:', error)
+    return true
   }
-  entry.count++
-  return entry.count > MAX_ATTEMPTS
+}
+
+async function clearRateLimit(): Promise<void> {
+  try {
+    await prisma.appConfig.delete({ where: { key: RL_PREFIX + (await clientIp()) } })
+  } catch {
+    // Rien à nettoyer (ou base indisponible) : sans conséquence.
+  }
 }
 
 export async function verifyAdminPassword(password: string) {
@@ -30,6 +74,7 @@ export async function verifyAdminPassword(password: string) {
   const correct = process.env.ADMIN_PASSWORD?.trim()
   if (!correct || !safeEqual(password.trim(), correct)) return { success: false }
   const created = await createAdminSession()
+  if (created) await clearRateLimit()
   return { success: created }
 }
 
