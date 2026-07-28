@@ -248,6 +248,51 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
+      # Programmation d'un théâtre : c'est le passage de la sync qui SORT du
+      # corpus les spectacles joués depuis plus de 60 jours. Sans exécution
+      # régulière, la programmation ne devient pas fausse d'un coup — elle se
+      # périme lentement, ce qui est pire car rien ne le signale. Deux
+      # représentations ont par ailleurs été annulées du jour au lendemain
+      # (fortes chaleurs, juin 2026). Site léger : ~80 pages et 3 PDF.
+      - name: Sync Théâtre de la Sinne
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/theatre-sinne-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      # Le site n'expose ni sitemap, ni Last-Modified, ni ETag : une sentinelle
+      # (sa page « nouveautés ») décide s'il faut parcourir les ~1 000 pages.
+      # Une exécution qui ne trouve rien de neuf coûte 1 requête et 30 s ; un
+      # parcours complet, 1 000 requêtes et 20 min. D'où le quotidien.
+      - name: Sync Université Populaire du Rhin
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/universite-populaire-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      # Monuments historiques : le fichier du ministère pèse 95 Mo et couvre la
+      # France entière pour n'en garder que 103 notices ; la base bouge de
+      # quelques classements par an. Le quotidien coûterait ~35 Go par an pour
+      # un contenu qui ne change presque jamais — d'où le 1er du mois. Le test
+      # est fait ici plutôt que par un cron dédié : un cron supplémentaire
+      # relancerait TOUTES les étapes de ce workflow.
+      - name: Sync monuments historiques (Mérimée) — le 1er du mois
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: |
+          if [ "$(date -u +%d)" = "01" ]; then
+            npx tsx scripts/merimee-sync.ts
+          else
+            echo "Mérimée : hors du 1er du mois, synchronisation ignorée (95 Mo pour quelques classements par an)"
+          fi
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
       - name: Vérifier le solde Jina
         if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/check-jina-balance.ts
