@@ -36,6 +36,14 @@ jobs:
       - name: Publish scheduled articles
         run: npx tsx scripts/publish-scheduled.ts
         env:
+          # Turso porte les articles d'assocommercants : sans ces deux
+          # variables, publish-scheduled.ts échoue À L'IMPORT (lib/prisma.ts
+          # est chargé au niveau module par lib/rag/indexer.ts) et pas une
+          # publication n'a lieu. Elles n'étaient déclarées que sur le step
+          # « npm ci », qui n'en a aucun usage : le job échouait donc à chaque
+          # exécution programmée, soit toutes les 15 minutes.
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
