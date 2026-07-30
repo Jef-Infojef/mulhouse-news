@@ -19,6 +19,9 @@ on:
         description: "Plafond de notices (défaut 2000)"
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest

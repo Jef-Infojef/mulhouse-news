@@ -77,3 +77,12 @@ next-env.d.ts
 
 /app/generated/prisma
 .env*.local
+
+# Contenus scrapés : droits d'auteur + volume, ne jamais publier sur un repo public
+/public/article-images/
+/M+Mag/*.pdf
+lemonde_articles.json
+
+# Scripts d'analyse locale à la racine (mêmes motifs que dans scripts/)
+/check_*.py
+/test_*.py

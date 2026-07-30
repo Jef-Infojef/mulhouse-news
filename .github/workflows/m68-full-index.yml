@@ -39,6 +39,9 @@ env:
   FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
   FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
 
+permissions:
+  contents: read
+
 jobs:
   index:
     strategy:

@@ -2,6 +2,9 @@ name: Test Scraper Connection
 on: 
   workflow_dispatch: # Permet le lancement manuel
 
+permissions:
+  contents: read
+
 jobs:
   test-connection:
     runs-on: ubuntu-latest

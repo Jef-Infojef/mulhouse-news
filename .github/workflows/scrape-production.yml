@@ -2,6 +2,9 @@ name: Run Full Scraper (Production)
 on: 
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
