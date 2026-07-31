@@ -1,0 +1,87 @@
+name: M68 Shop Sites Sync
+
+# Aspiration du contenu des sites web des commerçants de l'annuaire.
+#
+# Exécute le code du repo privé MulhouseGPT sur les runners publics — même
+# motif que m68-library-catalog-sync.yml, et pour la même raison de fond :
+# workflow SÉPARÉ du sync quotidien parce que le parcours touche ~700 domaines
+# TIERS. Une cadence quotidienne les solliciterait sans nécessité (le contenu
+# d'un site vitrine ne change pas tous les jours) et userait la patience de
+# commerçants qui ne nous ont rien demandé. La source shop_site est d'ailleurs
+# hors de la liste par défaut d'indexAllSources, exactement comme library_record.
+#
+# Le module lib/rag/web-fetch.ts lit et applique robots.txt de lui-même
+# (Disallow, Crawl-delay), sérialise les requêtes par domaine et s'identifie —
+# ces ~700 domaines ne sont pas relus à la main comme les quinze sites choisis
+# des autres sources.
+#
+# Durées mesurées le 2026-07-31 sur le premier passage complet : ~30 min de
+# parcours (738 sites, 5 en parallèle) puis ~40 min d'embeddings pour 4704
+# chunks. Les passages suivants sont bien plus courts — une sentinelle par
+# domaine (empreinte de l'accueil, filet hebdomadaire) fait qu'un site inchangé
+# coûte UNE requête au lieu de douze.
+on:
+  schedule:
+    # Mercredi 3h UTC — à l'écart du dimanche 4h (m68-full-index) et du 3 du
+    # mois 2h (catalogue bibliothèques), pour ne pas cumuler les charges sur la
+    # base RAG ni sur le quota Jina.
+    - cron: "0 3 * * 3"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Ignorer la sentinelle et reparcourir tous les sites"
+        type: boolean
+        required: false
+        default: false
+      limite:
+        description: "Plafond de sites traités (pour un essai)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout MulhouseGPT (deploy key lecture seule)
+        uses: actions/checkout@v4
+        with:
+          repository: Jef-Infojef/MulhouseGPT
+          ssh-key: ${{ secrets.MULHOUSEGPT_DEPLOY_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Deux étapes distinctes, et c'est le point important : une panne réseau
+      # pendant les embeddings ne doit pas faire passer pour ratée une
+      # indexation qui a réussi. Le 2026-07-31, une résolution DNS en échec a
+      # tué un passage en pleine phase d'embedding — 4704 chunks correctement
+      # indexés, 1998 laissés sans vecteur, et un code de sortie 1. En séparant,
+      # GitHub montre laquelle des deux a échoué et l'autre reste acquise.
+      - name: Aspirer les sites (sans embeddings)
+        run: >-
+          npx tsx scripts/shop-sites-sync.ts --skip-embeddings
+          ${{ inputs.force && '--force' || '' }}
+          ${{ inputs.limite && format('--limite={0}', inputs.limite) || '' }}
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.MULHOUSEGPT_TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.MULHOUSEGPT_TURSO_AUTH_TOKEN }}
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Calculer les embeddings
+        run: npx tsx scripts/rag-backfill-embeddings.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
