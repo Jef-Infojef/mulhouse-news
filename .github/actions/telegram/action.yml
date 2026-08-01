@@ -1,0 +1,76 @@
+name: Notification Telegram
+description: Envoie un message Telegram. Ne fait jamais echouer le workflow appelant.
+
+inputs:
+  token:
+    description: Token du bot (secrets.TELEGRAM_BOT_TOKEN)
+    required: true
+  chat_id:
+    description: Identifiant de conversation (secrets.TELEGRAM_CHAT_ID)
+    required: true
+  status:
+    description: "ok | alerte | echec — choisit l'emoji de tete"
+    required: false
+    default: ok
+  title:
+    description: Premiere ligne, en gras
+    required: true
+  body:
+    description: Corps du message (texte simple, retours a la ligne conserves)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TG_TOKEN: ${{ inputs.token }}
+        TG_CHAT: ${{ inputs.chat_id }}
+        TG_STATUS: ${{ inputs.status }}
+        TG_TITLE: ${{ inputs.title }}
+        TG_BODY: ${{ inputs.body }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        REPO: ${{ github.repository }}
+      run: |
+        set +e   # une notification qui echoue ne doit jamais masquer le vrai resultat
+
+        if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
+          echo "::warning::Secrets Telegram absents, notification ignoree"
+          exit 0
+        fi
+
+        case "$TG_STATUS" in
+          echec)  EMOJI="🔴" ;;
+          alerte) EMOJI="🟠" ;;
+          *)      EMOJI="🟢" ;;
+        esac
+
+        # HTML plutot que Markdown : le mode Markdown de Telegram casse des que
+        # le texte contient un _ ou un * -- or les noms de steps en contiennent.
+        esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+        # Saut de ligne via $'\n' : une chaine multiligne litterale devrait
+        # commencer en colonne 0, ce qui briserait le bloc YAML de ce `run`.
+        NL=$'\n'
+
+        TEXT="$EMOJI <b>$(esc "$TG_TITLE")</b>"
+        if [ -n "${TG_BODY:-}" ]; then
+          TEXT="${TEXT}${NL}$(esc "$TG_BODY")"
+        fi
+        TEXT="${TEXT}${NL}${NL}<a href=\"$RUN_URL\">$(esc "$REPO") · voir le run</a>"
+
+        code=$(curl -s -o /tmp/tg.json -w "%{http_code}" --max-time 20 \
+          -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+          -d "chat_id=${TG_CHAT}" \
+          -d "parse_mode=HTML" \
+          -d "disable_web_page_preview=true" \
+          --data-urlencode "text=${TEXT}")
+
+        if [ "$code" = "200" ]; then
+          echo "Notification Telegram envoyee"
+        else
+          echo "::warning::Telegram a repondu $code"
+          head -c 400 /tmp/tg.json
+        fi
+        exit 0

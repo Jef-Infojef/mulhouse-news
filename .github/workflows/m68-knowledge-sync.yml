@@ -304,3 +304,51 @@ jobs:
           SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
           SENDER_EMAIL_PASSWORD: ${{ secrets.SENDER_EMAIL_PASSWORD }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
+
+      # Détecte les pannes qui laissent le run vert : retard d'embeddings qui
+      # s'accumule, corpus qui cesse d'être alimenté. C'est ce qui manquait
+      # quand le solde Jina s'est épuisé fin juillet — une semaine de runs
+      # verts pendant que le contenu s'indexait sans vecteurs.
+      # continue-on-error : on veut le verdict DANS la notification, pas un
+      # arrêt qui empêcherait de l'envoyer.
+      - name: Garde-fou corpus RAG
+        id: guard
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          npx tsx scripts/rag-ci-guard.ts
+          rc=$?
+          {
+            echo "GUARD_REPORT<<GUARD_EOF"
+            cat /tmp/rag-guard.txt 2>/dev/null || echo "(rapport indisponible)"
+            echo "GUARD_EOF"
+          } >> "$GITHUB_ENV"
+          exit $rc
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+
+      - name: Notifier Telegram
+        if: always()
+        uses: ./.github/actions/telegram
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: >-
+            ${{ job.status != 'success' && 'echec'
+                || steps.guard.outcome == 'failure' && 'alerte'
+                || 'ok' }}
+          title: >-
+            ${{ job.status != 'success' && 'Sync RAG — échec'
+                || steps.guard.outcome == 'failure' && 'Sync RAG — corpus en dérive'
+                || 'Sync RAG — terminée' }}
+          body: ${{ env.GUARD_REPORT }}
+
+      # Après la notification, pour qu'elle parte quand même : un corpus qui
+      # dérive doit aussi rendre le run ROUGE dans la liste des exécutions.
+      # Un vert permanent est précisément ce qui a masqué la panne d'embeddings.
+      - name: Échouer si le corpus dérive
+        if: always() && steps.guard.outcome == 'failure'
+        run: |
+          echo "::error::Le garde-fou du corpus RAG a signalé une anomalie"
+          exit 1
