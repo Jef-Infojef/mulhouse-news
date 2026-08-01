@@ -18,6 +18,13 @@ permissions:
   # Pour relire les steps du run courant et nommer ceux qui ont echoue.
   actions: read
 
+# Declare a quel environnement appartiennent ces runs, pour que l'embedder
+# tire sa cle Jina du magasin plutot que du secret JINA_API_KEY -- et bascule
+# seul sur une cle de reserve si celle en service s'epuise. Au niveau du
+# workflow pour valoir sur la trentaine de steps sans les alourdir chacun.
+env:
+  JINA_KEY_ENV: github
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -295,6 +302,18 @@ jobs:
           fi
         env:
           NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      # Relit le solde de chaque cle du magasin. Sans ce passage, le total de
+      # reserve affiche par /jina reste une estimation a 10 M par cle. En
+      # profite pour inscrire le secret JINA_API_KEY dans le magasin s'il n'y
+      # est pas encore : il ne vit nulle part ailleurs.
+      - name: Rafraîchir le magasin de clés Jina
+        if: always()
+        continue-on-error: true
+        run: npx tsx scripts/jina-keys-refresh.ts
+        env:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
