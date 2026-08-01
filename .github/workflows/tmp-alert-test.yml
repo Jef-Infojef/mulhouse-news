@@ -1,0 +1,17 @@
+name: TEMP Alert Test
+
+# Jetable : verifie que le declencheur workflow_run de telegram-alert.yml
+# fonctionne vraiment. Un workflow_run mal cable reste muet, et on ne s'en
+# apercevrait que le jour d'une vraie panne.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  echouer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Step qui reussit
+        run: echo "ok"
+      - name: Step qui echoue volontairement
+        run: exit 1
