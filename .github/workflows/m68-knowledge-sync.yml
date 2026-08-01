@@ -15,6 +15,8 @@ on:
 
 permissions:
   contents: read
+  # Pour relire les steps du run courant et nommer ceux qui ont echoue.
+  actions: read
 
 jobs:
   sync:
@@ -332,6 +334,36 @@ jobs:
         env:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
 
+      # Une trentaine de syncs tournent dans ce job : savoir QUE le run a
+      # echoue, sans savoir laquelle, oblige a ouvrir les logs a chaque fois.
+      #
+      # ATTENTION : ne jamais ecrire la sequence dollar-accolades dans ce bloc,
+      # meme en commentaire. GitHub y cherche une expression et rejette le
+      # fichier entier -- pas seulement ce step. Verifier avec actionlint.
+      - name: Recenser les steps en échec
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          echecs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[].steps[] | select(.conclusion=="failure") | "· \(.name)"' \
+            2>/dev/null | head -15)
+          {
+            echo "FAILED_STEPS<<STEPS_EOF"
+            if [ -n "$echecs" ]; then
+              echo "Steps en échec :"
+              echo "$echecs"
+              echo
+            fi
+            printf '\n'
+            echo "STEPS_EOF"
+          } >> "$GITHUB_ENV"
+          exit 0
+
       - name: Notifier Telegram
         if: always()
         uses: ./.github/actions/telegram
@@ -346,7 +378,8 @@ jobs:
             ${{ job.status != 'success' && 'Sync RAG — échec'
                 || steps.guard.outcome == 'failure' && 'Sync RAG — corpus en dérive'
                 || 'Sync RAG — terminée' }}
-          body: ${{ env.GUARD_REPORT }}
+          body: |
+            ${{ env.FAILED_STEPS }}${{ env.GUARD_REPORT }}
 
       # Après la notification, pour qu'elle parte quand même : un corpus qui
       # dérive doit aussi rendre le run ROUGE dans la liste des exécutions.

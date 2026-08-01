@@ -1,0 +1,96 @@
+name: Alerte Telegram
+
+# Signale sur Telegram tout workflow planifie qui echoue.
+#
+# Declenche par workflow_run plutot qu'ajoute dans chaque fichier : un seul
+# endroit a maintenir pour douze workflows, et surtout cela fonctionne meme
+# pour ceux qui ne font pas de checkout (cleanup-scraping-log), ou qui
+# extraient un AUTRE depot -- auquel cas une action locale ./github/actions
+# ne se resout pas dans ce depot-ci.
+#
+# m68-knowledge-sync est volontairement absent de la liste : il envoie sa
+# propre notification, plus riche (etat du corpus, chiffres de la sync). L'y
+# ajouter produirait deux messages pour un seul echec.
+
+on:
+  workflow_run:
+    # Ce sont les noms declares par `name:` dans chaque fichier, pas les noms de
+    # fichiers : une valeur qui ne correspond a rien n'est pas signalee par
+    # GitHub, l'alerte resterait simplement muette pour toujours.
+    workflows:
+      - Sauvegarde Complète (Full) - Hebdomadaire
+      - Sauvegarde Incrémentale - Quotidienne
+      - Purge des logs de scraping
+      - Keep-Alive
+      - M68 Airport Sync
+      - M68 Full Index
+      - M68 Library Catalog Sync
+      - M68 Pages Changes Report
+      - M68 Publish Scheduled
+      - M68 Shop Sites Sync
+      - Scrape Mulhouse News
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  alerte:
+    # Le silence est la regle : on ne parle que des echecs. Un workflow annule
+    # a la main n'est pas un incident.
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Relever les steps fautifs
+        id: details
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          echecs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(.conclusion=="failure") | .steps[] | select(.conclusion=="failure") | "· \(.name)"' \
+            2>/dev/null | head -12)
+          {
+            echo "DETAILS<<TG_EOF"
+            if [ -n "$echecs" ]; then
+              echo "Steps en echec :"
+              echo "$echecs"
+            else
+              echo "(aucun step identifie — echec au demarrage du job ?)"
+            fi
+            printf '\n'
+            echo "TG_EOF"
+          } >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Envoyer
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          WF_URL: ${{ github.event.workflow_run.html_url }}
+          DETAILS: ${{ env.DETAILS }}
+        run: |
+          set +e
+          if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
+            echo "::warning::Secrets Telegram absents"
+            exit 0
+          fi
+          NL=$'\n'
+          esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+          TEXT="🔴 <b>$(esc "$WF_NAME") — echec</b>${NL}$(esc "$DETAILS")"
+          TEXT="${TEXT}${NL}<a href=\"$WF_URL\">voir le run</a>"
+
+          code=$(curl -s -o /tmp/tg.json -w "%{http_code}" --max-time 20 \
+            -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_CHAT}" -d "parse_mode=HTML" \
+            -d "disable_web_page_preview=true" \
+            --data-urlencode "text=${TEXT}")
+          echo "Telegram: HTTP $code"
+          [ "$code" = "200" ] || head -c 300 /tmp/tg.json
+          exit 0
