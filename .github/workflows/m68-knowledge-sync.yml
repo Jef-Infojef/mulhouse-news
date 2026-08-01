@@ -15,6 +15,10 @@ on:
 
 permissions:
   contents: read
+  # Nécessaire pour relire les steps du run en cours et nommer ceux qui ont
+  # échoué dans la notification Telegram. « Sync RAG — échec » sans autre
+  # précision oblige à ouvrir les logs pour savoir de quoi il s'agit.
+  actions: read
 
 jobs:
   sync:
@@ -332,6 +336,32 @@ jobs:
         env:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
 
+      # Une trentaine de syncs tournent dans ce job : savoir QUE ça a échoué
+      # sans savoir laquelle oblige à ouvrir les logs à chaque fois.
+      - name: Recenser les steps en échec
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          echecs=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '.jobs[].steps[] | select(.conclusion=="failure") | "· \(.name)"' 2>/dev/null)
+          # L'en-tête est ajouté ici plutôt que dans l'expression du step
+          # suivant : composer du texte conditionnel en syntaxe ${{ }} donne
+          # vite quelque chose d'illisible.
+          {
+            echo "FAILED_STEPS<<STEPS_EOF"
+            if [ -n "$echecs" ]; then
+              echo "Steps en échec :"
+              echo "$echecs"
+              echo
+            fi
+            printf '\n'
+            echo "STEPS_EOF"
+          } >> "$GITHUB_ENV"
+          exit 0
+
       - name: Notifier Telegram
         if: always()
         uses: ./.github/actions/telegram
@@ -346,7 +376,8 @@ jobs:
             ${{ job.status != 'success' && 'Sync RAG — échec'
                 || steps.guard.outcome == 'failure' && 'Sync RAG — corpus en dérive'
                 || 'Sync RAG — terminée' }}
-          body: ${{ env.GUARD_REPORT }}
+          body: |
+            ${{ env.FAILED_STEPS }}${{ env.GUARD_REPORT }}
 
       # Après la notification, pour qu'elle parte quand même : un corpus qui
       # dérive doit aussi rendre le run ROUGE dans la liste des exécutions.
