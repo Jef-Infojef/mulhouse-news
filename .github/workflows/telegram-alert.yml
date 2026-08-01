@@ -29,7 +29,6 @@ on:
       - M68 Publish Scheduled
       - M68 Shop Sites Sync
       - Scrape Mulhouse News
-      - TEMP Alert Test
     types: [completed]
 
 permissions:
