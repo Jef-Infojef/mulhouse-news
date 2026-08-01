@@ -319,9 +319,13 @@ jobs:
           set +e
           npx tsx scripts/rag-ci-guard.ts
           rc=$?
+          # Le `printf` final garantit un saut de ligne avant le délimiteur même
+          # si le fichier n'en a pas : sinon GitHub rejette le bloc entier avec
+          # « Matching delimiter not found » et le step échoue à tort.
           {
             echo "GUARD_REPORT<<GUARD_EOF"
             cat /tmp/rag-guard.txt 2>/dev/null || echo "(rapport indisponible)"
+            printf '\n'
             echo "GUARD_EOF"
           } >> "$GITHUB_ENV"
           exit $rc
