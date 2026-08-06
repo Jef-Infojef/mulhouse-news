@@ -42,7 +42,7 @@ jobs:
     if: github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     steps:
-      - name: Relever les steps fautifs
+      - name: Relever les steps fautifs et extraire les erreurs
         id: details
         continue-on-error: true
         env:
@@ -54,13 +54,61 @@ jobs:
           echecs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
             --jq '.jobs[] | select(.conclusion=="failure") | .steps[] | select(.conclusion=="failure") | "· \(.name)"' \
             2>/dev/null | head -12)
+
+          # Job fautif : nom + duree, calculee depuis les horodatages GitHub.
+          job_info=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(.conclusion=="failure") | [.name, .started_at, .completed_at] | @tsv' \
+            2>/dev/null | head -1)
+          if [ -n "$job_info" ]; then
+            job_name=$(printf '%s' "$job_info" | cut -f1)
+            start_ts=$(printf '%s' "$job_info" | cut -f2)
+            end_ts=$(printf '%s' "$job_info" | cut -f3)
+            duree=$(python3 -c "
+import sys
+from datetime import datetime
+s=datetime.fromisoformat('$start_ts'.replace('Z','+00:00'))
+e=datetime.fromisoformat('$end_ts'.replace('Z','+00:00'))
+d=int((e-s).total_seconds())
+print(f'{d//60}m{d%60:02d}s' if d>=60 else f'{d}s')
+" 2>/dev/null || echo "duree inconnue")
+          else
+            job_name=""
+            duree=""
+          fi
+
+          # Lignes d'erreur du premier job fautif, pour montrer la cause
+          # reelle (ex. "Service Unavailable") et pas seulement le step.
+          job_id=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(.conclusion=="failure") | .id' \
+            2>/dev/null | head -1)
+          erreurs=""
+          if [ -n "$job_id" ]; then
+            erreurs=$(gh api "repos/$REPO/actions/jobs/$job_id/logs" 2>/dev/null \
+              | grep -aiE '##\[error\]|failed to|error:|unavailable|exception|npm ERR|is not defined' \
+              | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+Z[^:]*: *//' \
+              | sort -u | tail -6)
+          fi
+
           {
+            echo "JOB_NAME<<TG_EOF"
+            echo "$job_name"
+            echo "TG_EOF"
+            echo "DUREE<<TG_EOF"
+            echo "$duree"
+            echo "TG_EOF"
             echo "DETAILS<<TG_EOF"
             if [ -n "$echecs" ]; then
               echo "Steps en echec :"
               echo "$echecs"
             else
               echo "(aucun step identifie — echec au demarrage du job ?)"
+            fi
+            printf '\n'
+            echo "TG_EOF"
+            echo "ERREURS<<TG_EOF"
+            if [ -n "$erreurs" ]; then
+              echo "Cause(s) :"
+              echo "$erreurs"
             fi
             printf '\n'
             echo "TG_EOF"
@@ -73,7 +121,13 @@ jobs:
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           WF_NAME: ${{ github.event.workflow_run.name }}
           WF_URL: ${{ github.event.workflow_run.html_url }}
+          WF_NUMBER: ${{ github.event.workflow_run.run_number }}
+          WF_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WF_EVENT: ${{ github.event.workflow_run.event }}
+          JOB_NAME: ${{ env.JOB_NAME }}
+          DUREE: ${{ env.DUREE }}
           DETAILS: ${{ env.DETAILS }}
+          ERREURS: ${{ env.ERREURS }}
         run: |
           set +e
           if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
@@ -83,7 +137,22 @@ jobs:
           NL=$'\n'
           esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
-          TEXT="🔴 <b>$(esc "$WF_NAME") — echec</b>${NL}$(esc "$DETAILS")"
+          # Declencheur lisible : planifie / manuel / pousse.
+          case "${WF_EVENT}" in
+            schedule) motif="planifie" ;;
+            workflow_dispatch) motif="manuel" ;;
+            push) motif="pousse" ;;
+            *) motif="${WF_EVENT}" ;;
+          esac
+
+          TEXT="🔴 <b>$(esc "$WF_NAME") — echec</b>${NL}"
+          TEXT="${TEXT}#${WF_NUMBER} · branche <code>$(esc "$WF_BRANCH")</code> · ${motif}"
+          if [ -n "$JOB_NAME" ]; then
+            TEXT="${TEXT} · job <code>$(esc "$JOB_NAME")</code>"
+            [ -n "$DUREE" ] && TEXT="${TEXT} (${DUREE})"
+          fi
+          TEXT="${TEXT}${NL}${NL}$(esc "$DETAILS")"
+          [ -n "$ERREURS" ] && TEXT="${TEXT}${NL}$(esc "$ERREURS")"
           TEXT="${TEXT}${NL}<a href=\"$WF_URL\">voir le run</a>"
 
           code=$(curl -s -o /tmp/tg.json -w "%{http_code}" --max-time 20 \
