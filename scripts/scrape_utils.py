@@ -23,6 +23,10 @@ def is_ebra_url(url: str) -> bool:
     return any(d in url for d in EBRA_DOMAINS)
 
 
+def is_jds_url(url: str) -> bool:
+    return "jds.fr" in url
+
+
 def ebra_target_url(url: str, alsace_cookies_active: bool) -> str:
     if alsace_cookies_active and any(d in url for d in ("dna.fr", "estrepublicain.fr", "vosgesmatin.fr")):
         return (
@@ -892,10 +896,33 @@ def _img_url_from_element(img) -> str | None:
 def _is_generic_image_src(url: str) -> bool:
     """Filtre les images décoratives/génériques souvent répétées."""
     lower = url.lower()
-    return any(p in lower for p in (
-        "logo", "banner", "icon-", "/icons/", "sprite", "avatar", "pixel",
+    if any(p in lower for p in (
+        "logo", "banner", "bannierepub", "icon-", "/icons/", "sprite", "avatar", "pixel",
         "placeholder", "default", "background", "pattern", "advert", "pub-",
-    ))
+        "spacer", "tracking", "beacon", "bouton-pub", "partenaire",
+    )):
+        return True
+    # Bannières publicitaires aux dimensions dédiées (jds-300x600, -970-250, …)
+    if re.search(r"(jds|pub|banner|ad)-?\d{3,4}x\d{2,4}", lower):
+        return True
+    return False
+
+
+def _upgrade_jds_url(url: str) -> str:
+    """Passe les vignettes jds.fr (-260-260, -200-200) à la haute résolution.
+
+    Les URLs jds.fr acceptent le suffixe -LARGEUR-HAUTEUR ; -1200-0 donne la
+    version la plus grande dispo. On laisse les dimensions déjà grandes.
+    """
+    if "jds.fr/medias/image/" not in url:
+        return url
+    m = re.search(r"-(\d{3,4})-(\d{3,4})\.(webp|jpg|jpeg|png)$", url)
+    if not m:
+        return url
+    w, h = int(m.group(1)), int(m.group(2))
+    if w >= 800 or h >= 800:
+        return url
+    return re.sub(r"-\d{3,4}-\d{3,4}\.(webp|jpg|jpeg|png)$", "-1200-0.\\1", url)
 
 
 def _dedupe_images(images: list) -> list:
@@ -970,6 +997,16 @@ def _extract_figure_images(soup: BeautifulSoup, page_url: str) -> list:
     return images
 
 
+def _extract_jds_images(soup: BeautifulSoup, page_url: str) -> list:
+    """jds.fr : pas de galerie d'article exploitable.
+
+    Le "carousel-contenu" et les blocs de la page contiennent des vignettes
+    de suggestions/annonces sponsorisées (blindtest, quiz, billetterie…),
+    pas les images de l'article. On ne retourne donc aucune image.
+    """
+    return []
+
+
 def _extract_article_images(soup: BeautifulSoup, page_url: str) -> list:
     """Images d'articles génériques (img dans <article>/<main>)."""
     images = []
@@ -979,6 +1016,7 @@ def _extract_article_images(soup: BeautifulSoup, page_url: str) -> list:
         src = _absolutize_media_url(page_url, _img_url_from_element(img))
         if not src or _is_generic_image_src(src) or _normalize_image_path(src) in seen:
             continue
+        src = _upgrade_jds_url(src)
         seen.add(_normalize_image_path(src))
         caption = None
         figcap = img.find_parent("figure")
@@ -1008,6 +1046,8 @@ def extract_article_images(
     """
     if is_ebra_url(url):
         images = _extract_ebra_images(soup, url)
+    elif is_jds_url(url):
+        images = _extract_jds_images(soup, url)
     else:
         images = _extract_article_images(soup, url)
 

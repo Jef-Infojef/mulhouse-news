@@ -36,12 +36,16 @@ def build_cookies(conn):
 
 
 def main():
-    days = int(sys.argv[sys.argv.index("--days") + 1]) if "--days" in sys.argv else 14
+    days = int(sys.argv[sys.argv.index("--days") + 1]) if "--days" in sys.argv else None
     limit = int(sys.argv[sys.argv.index("--limit") + 1]) if "--limit" in sys.argv else None
     if "--sources" in sys.argv:
         sources = sys.argv[sys.argv.index("--sources") + 1].split(",")
     else:
         sources = None
+    # Plage de dates explicite : --from 2026-05-01 --to 2026-06-01
+    # Si fournie, elle prime sur --days.
+    from_date = sys.argv[sys.argv.index("--from") + 1] if "--from" in sys.argv else None
+    to_date = sys.argv[sys.argv.index("--to") + 1] if "--to" in sys.argv else None
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -52,10 +56,23 @@ def main():
         placeholders = ", ".join(["%s"] * len(sources))
         source_filter = f' AND a.source IN ({placeholders})'
 
+    date_filter = ""
+    date_params = []
+    if from_date and to_date:
+        date_filter = " AND a.\"publishedAt\" >= %s AND a.\"publishedAt\" < %s"
+        date_params = [from_date, to_date]
+    elif days:
+        date_filter = " AND a.\"publishedAt\" > NOW() - INTERVAL '%s days'"
+        date_params = [days]
+
+    # Ordre des placeholders dans le SQL : date_filter d'abord, source_filter ensuite
+    params = date_params + (sources or [])
+
     cur.execute(("""
         SELECT a.id, a.link, a."imageUrl", a."imageCaption"
         FROM "Article" a
-        WHERE a."publishedAt" > NOW() - INTERVAL '%s days'
+        WHERE 1=1
+          %s
           AND a."imageUrl" IS NOT NULL AND a."imageUrl" NOT IN ('', 'null')
           AND a.content IS NOT NULL AND LENGTH(a.content) >= 150
           %s
@@ -64,13 +81,14 @@ def main():
               WHERE ai."articleId" = a.id AND ai.source = 'gallery'
           )
         ORDER BY a."publishedAt" DESC
-    """ % (days, source_filter)), (sources or []))
+    """ % (date_filter, source_filter)), params)
     articles = cur.fetchall()
     if limit:
         articles = articles[:limit]
 
     print(f"Articles à traiter : {len(articles)} (cookies EBRA {'OK' if alsace_active else 'ABSENT'})"
-          + (f" | sources: {sources}" if sources else ""))
+          + (f" | sources: {sources}" if sources else "")
+          + (f" | dates: {from_date} -> {to_date}" if from_date and to_date else ""))
 
     done = 0
     with_gallery = 0
