@@ -319,6 +319,7 @@ jobs:
 
       - name: Vérifier le solde Jina
         if: always() && github.event.schedule != '0 3 * * 3'
+        continue-on-error: true
         run: npx tsx scripts/check-jina-balance.ts
         env:
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
