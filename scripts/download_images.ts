@@ -135,10 +135,6 @@ async function main() {
   });
 
   console.log(`Articles à traiter : ${articles.length}`);
-  if (articles.length === 0) {
-    console.log('Tout est déjà à jour !');
-    return;
-  }
 
   let success = 0;
   let failed = 0;
@@ -170,9 +166,37 @@ async function main() {
     }
   }
 
+  await downloadArticleImages();
+
   console.log('\n--- Résumé ---');
-  console.log(`Réussis   : ${success}`);
-  console.log(`Échecs    : ${failed}`);
+  console.log(`Réussis (article) : ${success}`);
+  console.log(`Échecs (article)  : ${failed}`);
+}
+
+async function downloadArticleImages() {
+  console.log('\n--- Téléchargement des images de galerie (ArticleImage) ---');
+  const images = await prisma.articleImage.findMany({
+    where: {
+      OR: [{ localImage: null }, { localImage: { not: null }, r2Url: null }],
+      article: { publishedAt: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } }
+    },
+    select: { id: true, url: true, article: { select: { link: true } } },
+    orderBy: { createdAt: 'desc' }
+  });
+  console.log(`Images à traiter : ${images.length}`);
+
+  let ok = 0;
+  let ko = 0;
+  for (const img of images) {
+    const filename = await downloadImage(img.url, `gal-${img.id}`, img.article.link);
+    if (filename) {
+      await prisma.articleImage.update({ where: { id: img.id }, data: { localImage: filename } });
+      ok++;
+    } else {
+      ko++;
+    }
+  }
+  console.log(`Galerie : ${ok} OK, ${ko} échecs`);
 }
 
 main()

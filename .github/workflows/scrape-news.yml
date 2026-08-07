@@ -5,6 +5,9 @@ on:
     - cron: '*/5 * * * *' # Exécution toutes les 5 minutes
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -42,6 +45,24 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python scripts/scrape_and_seed.py
+
+      - name: Run mplusinfo.fr scraper
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python scripts/scrape_mplusinfo.py --days 14
+
+      - name: Run le-periscope.info scraper
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python scripts/scrape_periscope_seed.py --days 14
+
+      - name: Run m2A le mag scraper
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python scripts/scrape_mag_m2a.py --days 14
 
       - name: Run Full Content & Image Scraper
         env:

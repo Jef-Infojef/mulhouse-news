@@ -31,7 +31,6 @@ for _env in (".envenv", ".env.local", ".env"):
 DATABASE_URL = os.environ.get("DATABASE_URL", "").replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
 
 NO_CAPTION = ""
-CONSECUTIVE_FAILURE_LIMIT = 10
 
 
 def _ebra_exclude_clause() -> str:
@@ -92,75 +91,59 @@ def main():
     print()
 
     ok = 0
-    failed = 0
-    consecutive_failures = 0
-    pending_failures: list[str] = []
-    stopped_early = False
+    sans_legende = 0
+    fetch_errors = 0
 
     for i, (art_id, link, image_url) in enumerate(rows, 1):
-        caption = fetch_page_caption(link, {}, False, image_url)
+        result = fetch_page_caption(link, {}, False, image_url)
         short_link = link if len(link) <= 70 else link[:67] + "…"
-        if caption:
-            for pid in pending_failures:
-                cur.execute(
-                    'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
-                    (NO_CAPTION, pid),
-                )
-            if pending_failures:
-                conn.commit()
-                failed += len(pending_failures)
-                pending_failures.clear()
-            consecutive_failures = 0
 
+        if result.caption:
             cur.execute(
                 'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
-                (caption, art_id),
+                (result.caption, art_id),
             )
             conn.commit()
             ok += 1
-            print(f"[{i}/{total} | ok:{ok} échecs:{failed}] SUCCÈS | {short_link}")
-            print(f"         → {caption[:90]}{'…' if len(caption) > 90 else ''}")
+            print(f"[{i}/{total} | ok:{ok} sans:{sans_legende} err:{fetch_errors}] SUCCÈS | {short_link}")
+            print(f"         → {result.caption[:90]}{'…' if len(result.caption) > 90 else ''}")
+
+        elif result.fetched:
+            cur.execute(
+                'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
+                (NO_CAPTION, art_id),
+            )
+            conn.commit()
+            sans_legende += 1
+            print(
+                f"[{i}/{total} | ok:{ok} sans:{sans_legende} err:{fetch_errors}] "
+                f"SANS LÉGENDE | {short_link}"
+            )
+            print("         → source sans légende (marqué, plus retenté)")
+
         else:
-            consecutive_failures += 1
-            pending_failures.append(art_id)
-
-            if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
-                stopped_early = True
-                print(
-                    f"\n⛔ Arrêt : {CONSECUTIVE_FAILURE_LIMIT} échecs consécutifs "
-                    f"(probable blocage réseau ou rate-limit). "
-                    f"{len(pending_failures)} article(s) non marqués."
-                )
-                break
-
-            print(f"[{i}/{total} | ok:{ok} échecs:{failed + len(pending_failures)}] IGNORÉ | {short_link}")
-            print("         → pas de légende (en attente de confirmation)")
+            fetch_errors += 1
+            status_note = f"HTTP {result.status_code}" if result.status_code else "réseau/timeout"
+            print(
+                f"[{i}/{total} | ok:{ok} sans:{sans_legende} err:{fetch_errors}] "
+                f"ÉCHEC CHARGEMENT | {short_link}"
+            )
+            print(f"         → {status_note} (imageCaption laissé NULL, retentable)")
 
         time.sleep(random.uniform(0.3, 0.8))
 
         if i % 25 == 0 or i == total:
-            done = ok + failed + (0 if stopped_early else len(pending_failures))
-            print(f"Progression : {i}/{total} | succès {ok} | ignorés {failed} | reste ~{max(pending_total - done, 0)} en attente")
-
-    if pending_failures and not stopped_early:
-        for pid in pending_failures:
-            cur.execute(
-                'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
-                (NO_CAPTION, pid),
+            done = ok + sans_legende
+            print(
+                f"Progression : {i}/{total} | succès {ok} | sans légende {sans_legende} | "
+                f"échecs chargement {fetch_errors} | reste ~{max(pending_total - done, 0)} en attente"
             )
-        conn.commit()
-        failed += len(pending_failures)
-        pending_failures.clear()
 
     print("\n--- Résumé ---")
-    if stopped_early:
-        print(f"Succès   : {ok} (arrêt anticipé après {CONSECUTIVE_FAILURE_LIMIT} échecs consécutifs)")
-        print(f"Ignorés  : {failed} (marqués avant blocage)")
-        print(f"Non marqués : {len(pending_failures)} (imageCaption NULL, retentables plus tard)")
-    else:
-        print(f"Succès   : {ok}/{total}")
-        print(f"Ignorés  : {failed}/{total} (marqués, plus retentés)")
-    print(f"Restant  : ~{max(pending_total - ok - failed, 0)} article(s) jamais tentés")
+    print(f"Succès        : {ok}/{total}")
+    print(f"Sans légende  : {sans_legende}/{total} (marqués, plus retentés)")
+    print(f"Échec chargem.: {fetch_errors}/{total} (NULL, retentables)")
+    print(f"Restant       : ~{max(pending_total - ok - sans_legende, 0)} article(s) jamais tentés")
     conn.close()
 
 

@@ -71,9 +71,9 @@ def main():
     stopped_early = False
 
     for i, (art_id, link, image_url) in enumerate(rows, 1):
-        caption = fetch_page_caption(link, {}, False, image_url)
+        result = fetch_page_caption(link, {}, False, image_url)
         short_link = link if len(link) <= 70 else link[:67] + "…"
-        if caption:
+        if result.caption:
             for pid in pending_failures:
                 cur.execute(
                     'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
@@ -87,13 +87,13 @@ def main():
 
             cur.execute(
                 'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
-                (caption, art_id),
+                (result.caption, art_id),
             )
             conn.commit()
             ok += 1
             print(f"[{i}/{total} | ok:{ok} échecs:{failed}] SUCCÈS | {short_link}")
-            print(f"         → {caption[:90]}{'…' if len(caption) > 90 else ''}")
-        else:
+            print(f"         → {result.caption[:90]}{'…' if len(result.caption) > 90 else ''}")
+        elif result.fetched:
             consecutive_failures += 1
             pending_failures.append(art_id)
 
@@ -107,6 +107,21 @@ def main():
 
             print(f"[{i}/{total} | ok:{ok} échecs:{failed + len(pending_failures)}] IGNORÉ | {short_link}")
             print("         → pas de légende (en attente de confirmation)")
+        else:
+            consecutive_failures += 1
+            pending_failures.append(art_id)
+
+            if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
+                stopped_early = True
+                print(
+                    f"\n⛔ Arrêt : {CONSECUTIVE_FAILURE_LIMIT} échecs de chargement consécutifs "
+                    f"(probable blocage EBRA). {len(pending_failures)} article(s) non marqués."
+                )
+                break
+
+            status_note = f"HTTP {result.status_code}" if result.status_code else "réseau/timeout"
+            print(f"[{i}/{total} | ok:{ok} échecs:{failed + len(pending_failures)}] ÉCHEC | {short_link}")
+            print(f"         → {status_note} (en attente de confirmation)")
 
         time.sleep(random.uniform(0.3, 0.8))
 

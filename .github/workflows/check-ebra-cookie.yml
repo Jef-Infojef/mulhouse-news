@@ -1,0 +1,55 @@
+name: Check Cookie EBRA - Quotidien
+
+# Verifie une fois par jour que le cookie EBRA debloque toujours le contenu
+# premium de L'Alsace. Si ce n'est plus le cas, alerte Telegram.
+#
+# Volontairement absent de la liste telegram-alert.yml : ce workflow envoie
+# sa propre notification, plus informative (ecart de taille observe).
+
+on:
+  schedule:
+    - cron: '30 7 * * *' # Tous les jours a 07:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install beautifulsoup4 psycopg2-binary curl_cffi
+
+      - name: Verifier le cookie EBRA
+        id: cookie_check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python scripts/check_ebra_cookie.py
+          echo "cookie_ok=true" >> "$GITHUB_OUTPUT"
+        continue-on-error: false
+
+      - name: Notifier Telegram (cookie KO)
+        if: steps.cookie_check.outcome == 'failure'
+        uses: ./.github/actions/telegram
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: alerte
+          title: "Cookie EBRA KO — scraping premium en panne"
+          body: "Le test quotidien constate que la session ne debloque plus le contenu premium de L'Alsace. Renouveler EBRA_SESSION / EBRA_POOOL dans AppConfig (et le secret ALSACE_COOKIES)."
+
+      - name: Afficher stade OK
+        if: steps.cookie_check.outputs.cookie_ok == 'true'
+        run: echo "Cookie EBRA OK, rien a signaler."

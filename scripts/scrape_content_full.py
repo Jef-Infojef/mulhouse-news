@@ -10,7 +10,12 @@ import html as htmllib
 from curl_cffi import requests
 from dotenv import load_dotenv
 from datetime import datetime
-from scrape_utils import extract_image_caption, fetch_page_caption
+from scrape_utils import (
+    extract_image_caption,
+    extract_article_images,
+    fetch_page_caption,
+    parse_mplusinfo_article,
+)
 
 SKIP_PHRASES = ['cookie', 'abonnez', 'newsletter', 'mentions légales', 'politique de confidentialité', 'publicité']
 
@@ -35,6 +40,89 @@ def get_app_config(conn, key):
             return row[0] if row else None
     except:
         return None
+
+def sync_article_images(conn, article_id, images, image_url, image_caption):
+    """Enregistre toutes les images d'un article dans ArticleImage.
+
+    L'image hero (imageUrl BDD) est toujours position 0. Les autres images
+    sont ajoutées/actualisées par URL, sans doublon.
+    """
+    if not images and not image_url:
+        return False
+
+    changed = False
+
+    with conn.cursor() as cur:
+        cur.execute(
+            'SELECT url, caption, "source", position FROM "ArticleImage" WHERE "articleId" = %s',
+            (article_id,),
+        )
+        existing = {(r[0], r[1], r[2], r[3]) for r in cur.fetchall()}
+
+        if image_url:
+            hero = {"url": image_url, "caption": image_caption, "source": "hero"}
+            images = [hero] + [
+                dict(i, source="gallery")
+                for i in images
+                if i.get("url") and not _same_img(i["url"], image_url)
+            ]
+
+        for position, img in enumerate(images):
+            url = (img.get("url") or "").strip()
+            if not url:
+                continue
+            caption = img.get("caption")
+            source = img.get("source") or ("hero" if position == 0 else "gallery")
+            row = (url, caption, source, position)
+            if row in existing:
+                continue
+            if (url,) in {(u,) for u, _, _, _ in existing}:
+                cur.execute(
+                    'UPDATE "ArticleImage" SET caption = %s, "source" = %s, position = %s WHERE "articleId" = %s AND url = %s',
+                    (caption, source, position, article_id, url),
+                )
+            else:
+                cur.execute(
+                    'INSERT INTO "ArticleImage" (id, "articleId", url, caption, position, source, "createdAt") VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, NOW())',
+                    (article_id, url, caption, position, source),
+                )
+            changed = True
+
+    return changed
+
+def _norm_img(url):
+    """Normalise une URL d'image pour comparer les variantes d'un même cliché.
+
+    La clé = UUID du dossier `/images/<UUID>/` + identifiant numérique du
+    fichier. L'UUID distingue deux clichés différents ; l'ID numérique
+    distingue les images dans un même dossier. Les variantes de résolution
+    (FB1200/NW_raw) partagent UUID + ID → même clé ; deux photos distinctes
+    n'ont jamais le même couple.
+    """
+    if not url:
+        return ""
+    path = url.split("?")[0]
+    low = path.lower()
+    m = re.search(r"/images/([0-9a-f-]{8,36})/", low)
+    folder = m.group(1) if m else ""
+    m2 = re.search(r"-(\d{5,})\.(webp|jpg|jpeg|png|gif)$", low)
+    file_id = m2.group(1) if m2 else ""
+    name = re.sub(r"(-\d{2,}){1,3}\.(webp|jpg|jpeg|png|gif)$", "", low.split("/")[-1])
+    name = re.sub(r"\.(webp|jpg|jpeg|png|gif)$", "", name)
+    return (folder, file_id, name)
+
+
+def _same_img(url_a, url_b):
+    """True si deux URLs d'image désignent le même cliché (variantes de résolution)."""
+    if not url_a or not url_b:
+        return False
+    fa, ia, na = _norm_img(url_a)
+    fb, ib, nb = _norm_img(url_b)
+    if fa and fb:
+        if ia and ib:
+            return fa == fb and ia == ib
+        return fa == fb and na == nb
+    return na == nb
 
 def fetch_article_content(url, cookies_dict, alsace_cookies_active):
     """Récupère le contenu complet selon la source."""
@@ -68,7 +156,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     raise ssl_err
             
         if resp.status_code != 200:
-            return None, None, True, f"HTTP {resp.status_code}"
+            return None, None, True, f"HTTP {resp.status_code}", []
 
         page_text = resp.text
         is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber", "premium", "Abonné"])
@@ -80,6 +168,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
 
         soup = BeautifulSoup(page_text, 'html.parser')
         image_caption = extract_image_caption(soup, target_url)
+        images = extract_article_images(soup, target_url)
         text_parts = []
 
         # LD+JSON articleBody pour toute source (20 Minutes, Foot National, etc.)
@@ -93,7 +182,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     if isinstance(item, dict) and item.get('articleBody'):
                         body = item['articleBody'].strip()
                         if len(body) > 100:
-                            return body, image_caption, True, None
+                            return body, image_caption, True, None, images
             except: pass
 
         # Logique EBRA (L'Alsace, DNA...)
@@ -102,7 +191,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
             is_video_page = "/videos/" in target_url
             if "lalsace.fr" in target_url and not is_connected and not is_video_page:
                 print(f"    [⛔] Contenu partiel refusé (Non connecté) pour : {target_url[:40]}")
-                return None, image_caption, False, "Not Connected (Partial content refused)"
+                return None, image_caption, False, "Not Connected (Partial content refused)", images
 
             chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
             if chapo: text_parts.append(chapo.get_text().strip())
@@ -142,57 +231,15 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                 desc_div = soup.find('div', class_='description') or soup.find('div', id='description') or soup.find('div', itemprop='description')
                 if desc_div:
                     text_parts.append(desc_div.get_text(separator="\n", strip=True))
-        # Logique mplusinfo.fr (site Next.js - contenu dans __NEXT_DATA__)
+        # Logique mplusinfo.fr (Next.js / payload RSC embarqué)
         elif "mplusinfo.fr" in url:
-            # Extraction via __NEXT_DATA__ (contenu complet avec content_html)
-            next_data_script = soup.find('script', id='__NEXT_DATA__')
-            def _iter_content_html(obj, depth=0):
-                if depth > 15:
-                    return
-                if isinstance(obj, dict):
-                    if obj.get('content_html'):
-                        yield str(obj['content_html'])
-                        return  # un seul champ content_html par nœud suffit
-                    for v in obj.values():
-                        yield from _iter_content_html(v, depth + 1)
-                elif isinstance(obj, list):
-                    for item in obj:
-                        yield from _iter_content_html(item, depth + 1)
-
-            if next_data_script and next_data_script.string:
-                try:
-                    next_data = json.loads(next_data_script.string)
-                    texts = []
-                    for html_chunk in _iter_content_html(next_data):
-                        chunk_text = BeautifulSoup(html_chunk, 'html.parser').get_text('\n', strip=True)
-                        if chunk_text:
-                            texts.append(chunk_text)
-                    extracted = '\n'.join(texts)
-                    if len(extracted) > 100:
-                        text_parts.append(extracted)
-                except Exception as e:
-                    print(f"    [!] __NEXT_DATA__ parse error: {e}")
-
-            # Fallback : JSON-LD description
-            if not text_parts:
-                for script in soup.find_all('script', type='application/ld+json'):
-                    try:
-                        data = json.loads(script.string)
-                        items = data if isinstance(data, list) else [data]
-                        for item in items:
-                            if 'description' in item and len(str(item['description'])) > 30:
-                                text_parts.append(htmllib.unescape(str(item['description'])))
-                                break
-                    except Exception:
-                        pass
-                    if text_parts:
-                        break
-
-            # Fallback : og:description
-            if not text_parts:
-                m = soup.find('meta', attrs={'property': 'og:description'})
-                if m and m.get('content') and len(m['content']) > 30:
-                    text_parts.append(m['content'])
+            parsed = parse_mplusinfo_article(soup, url)
+            if parsed.get("content") and len(parsed["content"]) > 100:
+                text_parts.append(parsed["content"])
+            elif parsed.get("description") and len(parsed["description"]) > 30:
+                text_parts.append(parsed["description"])
+            if parsed.get("image_caption") and not image_caption:
+                image_caption = parsed["image_caption"]
         # Logique M+ (Mulhouse Alsace Agglomération)
         elif "mag.mulhouse-alsace.fr" in url:
             content_div = soup.find('div', class_='interne')
@@ -271,10 +318,10 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
         if text_parts:
             # Nettoyage des caractères NULL (PostgreSQL n'aime pas ça)
             clean_parts = [p.replace('\x00', '') for p in text_parts if p]
-            return "\n\n".join(dict.fromkeys(clean_parts)), image_caption, True, None # déduplication simple
-        return None, image_caption, True, "No content found"
+            return "\n\n".join(dict.fromkeys(clean_parts)), image_caption, True, None, images
+        return None, image_caption, True, "No content found", images
     except Exception as e:
-        return None, None, True, str(e)
+        return None, None, True, str(e), []
 
 def run_image_scripts():
     """Lance les scripts TS et retourne un résumé."""
@@ -366,12 +413,19 @@ def main():
         
         for i, (art_id, title, link) in enumerate(articles, 1):
             # On récupère la description actuelle pour le fallback
-            cur.execute('SELECT description FROM "Article" WHERE id = %s', (art_id,))
+            cur.execute('SELECT description, "imageUrl", "imageCaption" FROM "Article" WHERE id = %s', (art_id,))
             row_desc = cur.fetchone()
             current_desc = row_desc[0] if row_desc else None
+            current_image_url = row_desc[1] if row_desc else None
+            current_image_caption = row_desc[2] if row_desc else None
 
             # Tentative d'extraction du contenu complet
-            content, image_caption, active, err = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
+            content, image_caption, active, err, images = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
+
+            # Enregistrement de toutes les images (hero + galerie) dans ArticleImage
+            images_changed = False
+            if images:
+                images_changed = sync_article_images(conn, art_id, images, current_image_url, current_image_caption)
             
             status = "SUCCESS" if content else "FAILED"
             
@@ -386,7 +440,7 @@ def main():
             if not active:
                 status = "SESSION_LOST"
             
-            updated = False
+            updated = images_changed
             if image_caption:
                 cur.execute(
                     'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
@@ -428,11 +482,11 @@ def main():
             print(f"\n[*] Rattrapage légendes photo : {len(caption_rows)} articles...")
             caption_ok = 0
             for art_id, link in caption_rows:
-                caption = fetch_page_caption(link, cookies_dict, alsace_cookies is not None)
-                if caption:
+                caption_result = fetch_page_caption(link, cookies_dict, alsace_cookies is not None)
+                if caption_result.caption:
                     cur.execute(
                         'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
-                        (caption, art_id),
+                        (caption_result.caption, art_id),
                     )
                     conn.commit()
                     caption_ok += 1

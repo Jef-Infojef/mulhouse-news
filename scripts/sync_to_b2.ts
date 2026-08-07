@@ -81,6 +81,37 @@ async function main() {
     }
   }
 
+  // --- Images de galerie (ArticleImage) ---
+  const galleryImages = await prisma.articleImage.findMany({
+    where: {
+      localImage: { not: null },
+      r2Url: null
+    },
+    select: {
+      id: true,
+      localImage: true,
+    }
+  });
+
+  console.log(`Images de galerie à uploader : ${galleryImages.length}`);
+
+  for (const img of galleryImages) {
+    const localPath = path.join(IMAGE_DIR, img.localImage!);
+    
+    if (fs.existsSync(localPath)) {
+      process.stdout.write(`Upload de ${img.localImage}... `);
+      const b2Url = await uploadToB2(localPath, img.localImage!);
+      
+      if (b2Url) {
+        await prisma.articleImage.update({
+          where: { id: img.id },
+          data: { r2Url: b2Url }
+        });
+        console.log('OK');
+      }
+    }
+  }
+
   console.log('--- Terminé ---');
 }
 

@@ -24,10 +24,26 @@ model Article {
   r2Url            String?
   hidden           Boolean            @default(false)
   ArticleGoogleTag ArticleGoogleTag[]
+  ArticleImage     ArticleImage[]
 
   @@index([publishedAt])
   @@index([source])
   @@index([hidden])
+}
+
+model ArticleImage {
+  id         String  @id @default(cuid())
+  articleId  String
+  url        String
+  caption    String?
+  position   Int     @default(0)
+  localImage String?
+  r2Url      String?
+  source     String? @default("hero")
+  createdAt  DateTime @default(now())
+  Article    Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
 }
 
 model ScrapingLog {

@@ -1,0 +1,51 @@
+name: Scrape Outings (Agenda)
+
+on:
+  schedule:
+    # Tous les jours à 3h UTC
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scrape-outings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 lxml psycopg2-binary python-dotenv curl_cffi
+
+      - name: Scrape agendas (M+ Info, m2A le mag, JDS.fr)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ASSOCIATION_ID: ${{ secrets.ASSOCIATION_ID }}
+        run: |
+          python scripts/scrape_outings.py --source all --past-days=7 --ahead-days=120
+
+      - name: Invalider le cache sorties
+        if: success()
+        run: |
+          curl -sf "https://www.mulhouse68.fr/api/cron/revalidate?tag=outings" \
+            -H "Authorization: ${{ secrets.CRON_SECRET }}" \
+            && echo "Cache sorties invalidé" \
+            || echo "Revalidation cache ignorée"
+
+      - name: Log failure to DB
+        if: failure()
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python scripts/log_github_failure.py

@@ -4,8 +4,17 @@ import json
 import re
 import time
 import random
+import unicodedata
+from dataclasses import dataclass
 from bs4 import BeautifulSoup
 from curl_cffi import requests
+
+
+@dataclass
+class CaptionFetchResult:
+    caption: str | None = None
+    fetched: bool = False
+    status_code: int | None = None
 
 EBRA_DOMAINS = ("lalsace.fr", "dna.fr", "estrepublicain.fr", "vosgesmatin.fr")
 
@@ -137,12 +146,19 @@ def _hero_alt_from_image_url(soup: BeautifulSoup, image_url: str) -> str | None:
     return None
 
 
-def extract_image_caption(soup: BeautifulSoup, url: str, image_url: str | None = None) -> str | None:
+def extract_image_caption(
+    soup: BeautifulSoup, url: str, image_url: str | None = None
+) -> str | None:
     """Extrait la légende de la photo principale (ou description vidéo)."""
     if "/video" in url.lower():
         video_caption = _extract_video_caption(soup)
         if video_caption:
             return video_caption
+
+    if "le-periscope.info" in url:
+        periscope_caption = _extract_periscope_hero_caption(soup, url, image_url)
+        if periscope_caption:
+            return periscope_caption
 
     caption = None
 
@@ -181,8 +197,12 @@ def fetch_page_caption(
     cookies_dict: dict,
     alsace_cookies_active: bool,
     image_url: str | None = None,
-) -> str | None:
-    """Télécharge la page et extrait uniquement la légende image."""
+) -> CaptionFetchResult:
+    """Télécharge la page et extrait la légende image.
+
+    fetched=True : page accessible (HTTP 200), caption None = source sans légende.
+    fetched=False : erreur réseau, timeout ou HTTP non-200.
+    """
     try:
         target_url = ebra_target_url(url, alsace_cookies_active)
         time.sleep(random.uniform(0.3, 0.8))
@@ -207,8 +227,794 @@ def fetch_page_caption(
             else:
                 raise ssl_err
         if resp.status_code != 200:
-            return None
+            return CaptionFetchResult(fetched=False, status_code=resp.status_code)
         soup = BeautifulSoup(resp.text, "html.parser")
-        return extract_image_caption(soup, target_url, image_url)
+        return CaptionFetchResult(
+            caption=extract_image_caption(soup, target_url, image_url),
+            fetched=True,
+            status_code=resp.status_code,
+        )
+    except Exception:
+        return CaptionFetchResult(fetched=False)
+
+
+def _iter_mplusinfo_content_html(obj, depth=0):
+    if depth > 15:
+        return
+    if isinstance(obj, dict):
+        if obj.get("content_html"):
+            yield str(obj["content_html"])
+            return
+        for value in obj.values():
+            yield from _iter_mplusinfo_content_html(value, depth + 1)
+    elif isinstance(obj, list):
+        for item in obj:
+            yield from _iter_mplusinfo_content_html(item, depth + 1)
+
+
+def _extract_mplusinfo_content_html(soup: BeautifulSoup) -> str | None:
+    next_data = soup.find("script", id="__NEXT_DATA__")
+    if next_data and next_data.string:
+        try:
+            data = json.loads(next_data.string)
+            chunks = list(_iter_mplusinfo_content_html(data))
+            if chunks:
+                return _mplusinfo_html_to_text(chunks)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    for script in soup.find_all("script"):
+        if not script.string or "content_html" not in script.string:
+            continue
+        txt = script.string.strip()
+        if txt.startswith('{"status"'):
+            try:
+                outer = json.loads(txt)
+                inner = json.loads(outer["body"])
+                chunks = list(_iter_mplusinfo_content_html(inner))
+                if chunks:
+                    return _mplusinfo_html_to_text(chunks)
+            except (json.JSONDecodeError, TypeError, KeyError):
+                pass
+
+    article = soup.find("article") or soup.find("main")
+    if article:
+        paragraphs = [
+            p.get_text(" ", strip=True)
+            for p in article.find_all("p")
+            if len(p.get_text(strip=True)) > 40
+        ]
+        if paragraphs:
+            return "\n\n".join(dict.fromkeys(paragraphs))
+
+    return None
+
+
+def _mplusinfo_html_to_text(chunks: list[str]) -> str:
+    texts = []
+    for chunk in chunks:
+        text = BeautifulSoup(chunk, "html.parser").get_text("\n", strip=True)
+        if text:
+            texts.append(text)
+    return "\n\n".join(dict.fromkeys(texts))
+
+
+def _parse_mplusinfo_image(image_field) -> str | None:
+    if isinstance(image_field, str):
+        return image_field
+    if isinstance(image_field, dict):
+        return image_field.get("url") or image_field.get("@id")
+    if isinstance(image_field, list) and image_field:
+        return _parse_mplusinfo_image(image_field[0])
+    return None
+
+
+def _parse_mplusinfo_image_caption(image_field) -> str | None:
+    if isinstance(image_field, dict):
+        return _clean_caption(image_field.get("caption"))
+    return None
+
+
+def _clean_mplusinfo_title(title: str | None) -> str | None:
+    if not title:
+        return None
+    title = htmllib.unescape(title).strip()
+    title = re.sub(r"\s*[-|]\s*mplusinfo\.fr\s*$", "", title, flags=re.I)
+    title = re.sub(r"\s*\|\s*M\+\s*$", "", title)
+    return title.strip() or None
+
+
+def parse_mplusinfo_article(soup: BeautifulSoup, url: str) -> dict:
+    """Extrait métadonnées et contenu d'une page mplusinfo.fr."""
+    title = None
+    description = None
+    image_url = None
+    image_caption = None
+    published_at = None
+    content = None
+
+    og_title = soup.find("meta", property="og:title")
+    if og_title and og_title.get("content"):
+        title = _clean_mplusinfo_title(og_title["content"])
+
+    og_desc = soup.find("meta", property="og:description")
+    if og_desc and og_desc.get("content"):
+        description = htmllib.unescape(og_desc["content"]).strip()
+
+    og_image = soup.find("meta", property="og:image")
+    if og_image and og_image.get("content"):
+        image_url = htmllib.unescape(og_image["content"]).strip()
+
+    pub_meta = soup.find("meta", property="article:published_time")
+    if pub_meta and pub_meta.get("content"):
+        published_at = _parse_iso_datetime(pub_meta["content"])
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            raw = script.string
+            if not raw:
+                continue
+            data = json.loads(raw.strip())
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict) or item.get("@type") != "NewsArticle":
+                    continue
+                if not title and item.get("headline"):
+                    title = _clean_mplusinfo_title(str(item["headline"]))
+                if not description and item.get("description"):
+                    description = htmllib.unescape(str(item["description"])).strip()
+                if not published_at and item.get("datePublished"):
+                    published_at = _parse_iso_datetime(str(item["datePublished"]))
+                if not image_url:
+                    image_url = _parse_mplusinfo_image(item.get("image"))
+                if not image_caption:
+                    image_caption = _parse_mplusinfo_image_caption(item.get("image"))
+                break
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    if not title:
+        h1 = soup.find("h1")
+        if h1:
+            title = _clean_mplusinfo_title(h1.get_text(strip=True))
+
+    if not image_caption:
+        image_caption = extract_image_caption(soup, url, image_url)
+
+    content = _extract_mplusinfo_content_html(soup)
+    if content:
+        content = content.replace("\x00", "")
+
+    if not description and content:
+        description = content[:300]
+
+    return {
+        "title": title,
+        "description": description or "",
+        "image_url": image_url,
+        "image_caption": image_caption,
+        "published_at": published_at,
+        "content": content,
+    }
+
+
+def _parse_iso_datetime(value: str | None):
+    from datetime import datetime, timezone
+
+    if not value:
+        return None
+    value = value.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except ValueError:
+        return None
+
+
+def fetch_mplusinfo_page(url: str) -> BeautifulSoup | None:
+    try:
+        time.sleep(random.uniform(0.4, 1.0))
+        resp = requests.get(url, impersonate="chrome110", timeout=25, allow_redirects=True)
+        if resp.status_code != 200:
+            return None
+        return BeautifulSoup(resp.text, "html.parser")
     except Exception:
         return None
+
+
+def normalize_text(text: str | None) -> str:
+    if not text:
+        return ""
+    text = text.lower()
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+
+def is_mulhouse_related(title: str, description: str | None = None, content: str | None = None) -> bool:
+    haystack = normalize_text(f"{title} {description or ''} {content or ''}")
+    return "mulhous" in haystack
+
+
+def fetch_periscope_page(url: str) -> BeautifulSoup | None:
+    try:
+        time.sleep(random.uniform(0.4, 1.0))
+        resp = requests.get(url, impersonate="chrome110", timeout=25, allow_redirects=True)
+        if resp.status_code != 200:
+            return None
+        return BeautifulSoup(resp.text, "html.parser")
+    except Exception:
+        return None
+
+
+def _clean_periscope_title(title: str | None) -> str | None:
+    if not title:
+        return None
+    title = htmllib.unescape(title).strip()
+    title = re.sub(r"\s*[-|]\s*le periscope\s*$", "", title, flags=re.I)
+    title = re.sub(r"\s*[-|]\s*le périscope\s*$", "", title, flags=re.I)
+    return title.strip() or None
+
+
+PERISCOPE_BLOCK_TAGS = frozenset({"p", "h2", "h3", "h4", "figure", "ul", "ol", "blockquote"})
+
+
+def _find_periscope_content_root(soup: BeautifulSoup):
+    for cls in ("ph-single-content__body", "entry-content"):
+        node = soup.find("div", class_=cls)
+        if node:
+            return node
+    return soup.find("article") or soup.find("main")
+
+
+def _absolute_periscope_url(page_url: str, src: str | None) -> str | None:
+    if not src:
+        return None
+    src = src.strip()
+    if not src or src.startswith("data:"):
+        return None
+    if src.startswith("//"):
+        return f"https:{src}"
+    if src.startswith("/"):
+        from urllib.parse import urljoin
+
+        return urljoin(page_url, src)
+    if src.startswith("http"):
+        return src
+    return None
+
+
+def _is_periscope_junk_block(element) -> bool:
+    if not element or not getattr(element, "name", None):
+        return True
+    if "addtoany" in str(element).lower():
+        return True
+    classes = " ".join(element.get("class") or []).lower()
+    if any(x in classes for x in ("sharedaddy", "addtoany", "wp-block-embed")):
+        return True
+    return False
+
+
+def _is_periscope_junk_text(text: str) -> bool:
+    if not text or len(text) < 5:
+        return True
+    lower = text.lower().strip()
+    if lower.startswith(("édition :", "partager", "partagez")):
+        return True
+    return _is_junk_caption(text)
+
+
+def _periscope_image_caption(block, img) -> str | None:
+    figure = img.find_parent("figure")
+    if figure:
+        figcap = figure.find("figcaption")
+        if figcap:
+            caption = _clean_caption(figcap.get_text(" ", strip=True))
+            if caption:
+                return caption
+
+    search_blocks = [block, img.parent]
+    for parent in img.parents:
+        if parent is block:
+            continue
+        classes = " ".join(parent.get("class") or []).lower()
+        if "wp-caption" in classes or "wp-block-image" in classes:
+            search_blocks.append(parent)
+            break
+
+    for container in search_blocks:
+        if not container:
+            continue
+        for selector in (".wp-caption-text", ".photo-credit", ".image-credit", ".legend", ".legende"):
+            cap_el = container.select_one(selector)
+            if cap_el:
+                caption = _clean_caption(cap_el.get_text(" ", strip=True))
+                if caption:
+                    return caption
+
+    alt = _clean_caption((img.get("alt") or "").strip())
+    if alt:
+        return alt
+    return None
+
+
+def _append_periscope_image_html(parts: list[str], img, page_url: str, block=None) -> None:
+    src = _absolute_periscope_url(
+        page_url,
+        img.get("src") or img.get("data-src") or img.get("data-lazy-src"),
+    )
+    if not src:
+        return
+    caption = _periscope_image_caption(block or img.parent, img)
+    alt = htmllib.escape(caption or "", quote=True)
+    src_esc = htmllib.escape(src, quote=True)
+    parts.append(f'<p><img src="{src_esc}" alt="{alt}"></p>')
+    if caption:
+        parts.append(f"<p><em>{htmllib.escape(caption)}</em></p>")
+
+
+def _append_periscope_text_html(parts: list[str], tag: str, text: str) -> None:
+    if _is_periscope_junk_text(text):
+        return
+    parts.append(f"<{tag}>{htmllib.escape(text)}</{tag}>")
+
+
+def _extract_periscope_hero_caption(
+    soup: BeautifulSoup, page_url: str, image_url: str | None
+) -> str | None:
+    root = _find_periscope_content_root(soup)
+    if not root:
+        return None
+
+    for img in root.find_all("img"):
+        src = _absolute_periscope_url(
+            page_url,
+            img.get("src") or img.get("data-src") or img.get("data-lazy-src"),
+        )
+        if not src:
+            continue
+        if image_url and not _image_urls_match(src, image_url):
+            continue
+        caption = _periscope_image_caption(img.parent, img)
+        if caption:
+            return caption
+    return None
+
+
+def _extract_periscope_content(soup: BeautifulSoup, page_url: str = "") -> str | None:
+    container = _find_periscope_content_root(soup)
+    if not container:
+        return None
+
+    parts: list[str] = []
+    seen_text: set[str] = set()
+    seen_images: set[str] = set()
+
+    for element in container.find_all(PERISCOPE_BLOCK_TAGS):
+        if _is_periscope_junk_block(element):
+            continue
+        if any(
+            parent.name in PERISCOPE_BLOCK_TAGS and parent is not container
+            for parent in element.parents
+        ):
+            continue
+
+        if element.name == "figure":
+            img = element.find("img")
+            if img:
+                src = _absolute_periscope_url(
+                    page_url,
+                    img.get("src") or img.get("data-src") or img.get("data-lazy-src"),
+                )
+                if src and src not in seen_images:
+                    seen_images.add(src)
+                    _append_periscope_image_html(parts, img, page_url, element)
+            continue
+
+        imgs = element.find_all("img")
+        text = element.get_text(" ", strip=True)
+
+        if imgs:
+            for img in imgs:
+                src = _absolute_periscope_url(
+                    page_url,
+                    img.get("src") or img.get("data-src") or img.get("data-lazy-src"),
+                )
+                if not src or src in seen_images:
+                    continue
+                seen_images.add(src)
+                _append_periscope_image_html(parts, img, page_url, element)
+            if len(text) > 20 and not _is_periscope_junk_text(text):
+                key = text.lower()
+                if key not in seen_text:
+                    seen_text.add(key)
+                    _append_periscope_text_html(parts, element.name, text)
+            continue
+
+        if element.name in ("ul", "ol"):
+            items = [
+                li.get_text(" ", strip=True)
+                for li in element.find_all("li", recursive=False)
+                if li.get_text(strip=True)
+            ]
+            if not items:
+                continue
+            tag = element.name
+            lis = "".join(f"<li>{htmllib.escape(item)}</li>" for item in items)
+            parts.append(f"<{tag}>{lis}</{tag}>")
+            continue
+
+        if element.name == "blockquote":
+            if text and not _is_periscope_junk_text(text):
+                parts.append(f"<blockquote>{htmllib.escape(text)}</blockquote>")
+            continue
+
+        if element.name in ("p", "h2", "h3", "h4") and text:
+            key = text.lower()
+            if key in seen_text:
+                continue
+            seen_text.add(key)
+            _append_periscope_text_html(parts, element.name, text)
+
+    if not parts:
+        return None
+    return "\n".join(parts)
+
+
+def fetch_mag_m2a_page(url: str) -> BeautifulSoup | None:
+    try:
+        time.sleep(random.uniform(0.4, 1.0))
+        resp = requests.get(url, impersonate="chrome110", timeout=25, allow_redirects=True)
+        if resp.status_code != 200:
+            return None
+        return BeautifulSoup(resp.text, "html.parser")
+    except Exception:
+        return None
+
+
+def _clean_mag_title(title: str | None) -> str | None:
+    if not title:
+        return None
+    title = htmllib.unescape(title).strip()
+    title = re.sub(r"\s*[-|]\s*m2a le mag\s*$", "", title, flags=re.I)
+    title = re.sub(r"\s*[-|]\s*mulhouse alsace\s*$", "", title, flags=re.I)
+    return title.strip() or None
+
+
+def _extract_mag_content(soup: BeautifulSoup) -> str | None:
+    content_div = (
+        soup.find("div", class_="interne")
+        or soup.find("div", class_="tribe-events-single-event-description")
+        or soup.find("div", class_="tribe-events-content")
+        or soup.find("div", class_="entry-content")
+    )
+    if not content_div:
+        return None
+
+    text_parts = []
+    extrait = soup.find("p", class_="extrait")
+    if extrait:
+        text_parts.append(extrait.get_text().strip())
+
+    for garbage in content_div.select(".important, .encadre, script, style, .sharedaddy"):
+        garbage.decompose()
+
+    body = content_div.get_text("\n", strip=True)
+    if body:
+        text_parts.append(body)
+
+    if not text_parts:
+        return None
+    return "\n\n".join(dict.fromkeys(text_parts))
+
+
+def parse_mag_m2a_article(soup: BeautifulSoup, url: str) -> dict:
+    title = None
+    description = None
+    image_url = None
+    image_caption = None
+    published_at = None
+    content = None
+
+    og_title = soup.find("meta", property="og:title")
+    if og_title and og_title.get("content"):
+        title = _clean_mag_title(og_title["content"])
+
+    og_desc = soup.find("meta", property="og:description")
+    if og_desc and og_desc.get("content"):
+        description = htmllib.unescape(og_desc["content"]).strip()
+
+    og_image = soup.find("meta", property="og:image")
+    if og_image and og_image.get("content"):
+        image_url = htmllib.unescape(og_image["content"]).strip()
+
+    pub_meta = soup.find("meta", property="article:published_time")
+    if pub_meta and pub_meta.get("content"):
+        published_at = _parse_iso_datetime(pub_meta["content"])
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            raw = script.string
+            if not raw:
+                continue
+            data = json.loads(raw.strip())
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("@type") not in ("NewsArticle", "Article", "BlogPosting", "Event"):
+                    continue
+                if not title:
+                    title = _clean_mag_title(str(item.get("headline") or item.get("name") or ""))
+                if not description and item.get("description"):
+                    description = htmllib.unescape(str(item["description"])).strip()
+                if not published_at and item.get("datePublished"):
+                    published_at = _parse_iso_datetime(str(item["datePublished"]))
+                if not image_url:
+                    image_url = _parse_mplusinfo_image(item.get("image"))
+                break
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    if not title:
+        h1 = soup.find("h1")
+        if h1:
+            title = _clean_mag_title(h1.get_text(strip=True))
+
+    content = _extract_mag_content(soup)
+    if content:
+        content = content.replace("\x00", "")
+
+    if not image_caption:
+        image_caption = extract_image_caption(soup, url, image_url)
+
+    if not description and content:
+        description = content[:300]
+
+    return {
+        "title": title,
+        "description": description or "",
+        "image_url": image_url,
+        "image_caption": image_caption,
+        "published_at": published_at,
+        "content": content,
+    }
+
+
+def parse_periscope_article(soup: BeautifulSoup, url: str) -> dict:
+    title = None
+    description = None
+    image_url = None
+    image_caption = None
+    published_at = None
+    content = None
+
+    og_title = soup.find("meta", property="og:title")
+    if og_title and og_title.get("content"):
+        title = _clean_periscope_title(og_title["content"])
+
+    og_desc = soup.find("meta", property="og:description")
+    if og_desc and og_desc.get("content"):
+        description = htmllib.unescape(og_desc["content"]).strip()
+
+    og_image = soup.find("meta", property="og:image")
+    if og_image and og_image.get("content"):
+        image_url = htmllib.unescape(og_image["content"]).strip()
+
+    pub_meta = soup.find("meta", property="article:published_time")
+    if pub_meta and pub_meta.get("content"):
+        published_at = _parse_iso_datetime(pub_meta["content"])
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            raw = script.string
+            if not raw:
+                continue
+            data = json.loads(raw.strip())
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("@type") not in ("NewsArticle", "Article", "WebPage", "BlogPosting"):
+                    continue
+                if not title:
+                    title = _clean_periscope_title(str(item.get("headline") or item.get("name") or ""))
+                if not description and item.get("description"):
+                    description = htmllib.unescape(str(item["description"])).strip()
+                if not published_at and item.get("datePublished"):
+                    published_at = _parse_iso_datetime(str(item["datePublished"]))
+                if not image_url:
+                    image_url = _parse_mplusinfo_image(item.get("image"))
+                break
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    if not title:
+        h1 = soup.find("h1")
+        if h1:
+            title = _clean_periscope_title(h1.get_text(strip=True))
+
+    content = _extract_periscope_content(soup, url)
+    if content:
+        content = content.replace("\x00", "")
+
+    if not image_caption:
+        image_caption = extract_image_caption(soup, url, image_url)
+
+    if not description and content:
+        description = content[:300]
+
+    return {
+        "title": title,
+        "description": description or "",
+        "image_url": image_url,
+        "image_caption": image_caption,
+        "published_at": published_at,
+        "content": content,
+    }
+
+
+def _absolutize_media_url(page_url: str, src: str | None) -> str | None:
+    """Résout une URL d'image relative/absolue en URL exploitable.
+
+    Filtre les placeholders/logos/pixels décoratifs.
+    """
+    if not src:
+        return None
+    src = src.strip()
+    if not src or src.startswith("data:") or src.startswith("blob:"):
+        return None
+    if any(p in src.lower() for p in ("placeholder", "logo", "pixel", "loader", "favicon")):
+        return None
+    if src.startswith("//"):
+        return f"https:{src}"
+    if src.startswith("/"):
+        from urllib.parse import urljoin
+
+        return urljoin(page_url, src)
+    if src.startswith("http"):
+        return src
+    return None
+
+
+def _img_url_from_element(img) -> str | None:
+    if not img:
+        return None
+    return (
+        img.get("src")
+        or img.get("data-src")
+        or img.get("data-lazy-src")
+        or img.get("data-original")
+        or img.get("content")
+    )
+
+
+def _is_generic_image_src(url: str) -> bool:
+    """Filtre les images décoratives/génériques souvent répétées."""
+    lower = url.lower()
+    return any(p in lower for p in (
+        "logo", "banner", "icon-", "/icons/", "sprite", "avatar", "pixel",
+        "placeholder", "default", "background", "pattern", "advert", "pub-",
+    ))
+
+
+def _dedupe_images(images: list) -> list:
+    """Déduplique par URL normalisée (sans variantes de résolution)."""
+    seen = set()
+    out = []
+    for img in images:
+        key = _normalize_image_path(img["url"]) or img["url"]
+        key = re.sub(r"(-\d{2,}){1,3}\.(webp|jpg|jpeg|png|gif)$", "", key)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(img)
+    return out
+
+
+def _extract_ebra_images(soup: BeautifulSoup, page_url: str) -> list:
+    """L'Alsace / DNA : figures mainImage (hero + texte).
+
+    Chaque figure a un lien `a.chocolat-image[href]` vers la haute résolution
+    (NW_raw) et la légende est dans le title du lien / l'alt de l'img.
+    """
+    images = []
+    seen = set()
+
+    for figure in soup.find_all("figure", class_="mainImage"):
+        zoom = figure.find("a", class_="chocolat-image") or figure.find("a", href=True)
+        src = None
+        if zoom and zoom.get("href"):
+            src = zoom["href"].strip()
+        img = figure.find("img")
+        if not src and img:
+            src = _absolutize_media_url(page_url, _img_url_from_element(img))
+        if not src:
+            continue
+        if _normalize_image_path(src) in seen:
+            continue
+        seen.add(_normalize_image_path(src))
+
+        caption = None
+        if zoom and zoom.get("title"):
+            caption = _clean_caption(zoom.get("title").strip())
+        if not caption and img and img.get("alt"):
+            caption = _clean_caption(img["alt"].strip())
+        if not caption:
+            figcap = figure.find("figcaption")
+            if figcap:
+                caption = _clean_caption(figcap.get_text(" ", strip=True))
+
+        is_hero = figure is soup.find("figure", class_="mainImage")
+        images.append({"url": src, "caption": caption, "source": "hero" if is_hero else "gallery"})
+
+    return images
+
+
+def _extract_figure_images(soup: BeautifulSoup, page_url: str) -> list:
+    """Extraction générique depuis les <figure> du corps (Periscope, M+, Mag…)."""
+    images = []
+    seen = set()
+    article = soup.find("article") or soup.find("main") or soup
+    for figure in article.find_all("figure"):
+        img = figure.find("img")
+        src = _absolutize_media_url(page_url, _img_url_from_element(img))
+        if not src or _normalize_image_path(src) in seen:
+            continue
+        seen.add(_normalize_image_path(src))
+        caption = None
+        figcap = figure.find("figcaption")
+        if figcap:
+            caption = _clean_caption(figcap.get_text(" ", strip=True))
+        images.append({"url": src, "caption": caption, "source": "gallery"})
+    return images
+
+
+def _extract_article_images(soup: BeautifulSoup, page_url: str) -> list:
+    """Images d'articles génériques (img dans <article>/<main>)."""
+    images = []
+    seen = set()
+    article = soup.find("article") or soup.find("main") or soup
+    for img in article.find_all("img"):
+        src = _absolutize_media_url(page_url, _img_url_from_element(img))
+        if not src or _is_generic_image_src(src) or _normalize_image_path(src) in seen:
+            continue
+        seen.add(_normalize_image_path(src))
+        caption = None
+        figcap = img.find_parent("figure")
+        if figcap:
+            fc = figcap.find("figcaption")
+            if fc:
+                caption = _clean_caption(fc.get_text(" ", strip=True))
+        if not caption:
+            alt = (img.get("alt") or "").strip()
+            caption = _clean_caption(alt)
+        images.append({"url": src, "caption": caption, "source": "gallery"})
+    if not images:
+        images.extend(_extract_figure_images(soup, page_url))
+    return images
+
+
+def extract_article_images(
+    soup: BeautifulSoup,
+    url: str,
+    image_url: str | None = None,
+    image_caption: str | None = None,
+) -> list:
+    """Extrait TOUTES les images d'un article avec leurs légendes.
+
+    Retourne une liste de dicts : {"url", "caption", "source"}.
+    L'image principale (image_url) est toujours placée en premier.
+    """
+    if is_ebra_url(url):
+        images = _extract_ebra_images(soup, url)
+    else:
+        images = _extract_article_images(soup, url)
+
+    if image_url:
+        hero = {"url": image_url, "caption": image_caption, "source": "hero"}
+        images = [hero] + [
+            i for i in images if _normalize_image_path(i["url"]) != _normalize_image_path(image_url)
+        ]
+
+    return _dedupe_images(images)
