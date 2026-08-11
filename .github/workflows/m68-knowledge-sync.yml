@@ -305,6 +305,25 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
+      # Catalogue de la Bibliothèque d'Alsace (bibliothèque départementale) :
+      # 123 notices de la recherche « mulhouse ». Le catalogue bouge peu, mais
+      # les nouveautés locales apparaissent — d'où le dimanche plutôt que le
+      # quotidien (136 requêtes par jour pour rien). Le test est fait ici comme
+      # pour Mérimée plutôt que par un cron dédié : un cron supplémentaire
+      # relancerait TOUTES les étapes de ce workflow.
+      - name: Sync catalogue Bibliothèque d'Alsace — le dimanche
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: |
+          if [ "$(date -u +%u)" = "7" ]; then
+            npx tsx scripts/alsace-catalog-sync.ts
+          else
+            echo "Bibliothèque d'Alsace : hors dimanche, synchronisation ignorée (cadence hebdomadaire)"
+          fi
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
       # Relit le solde de chaque cle du magasin. Sans ce passage, le total de
       # reserve affiche par /jina reste une estimation a 10 M par cle. En
       # profite pour inscrire le secret JINA_API_KEY dans le magasin s'il n'y
