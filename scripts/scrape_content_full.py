@@ -9,15 +9,86 @@ import subprocess
 import html as htmllib
 from curl_cffi import requests
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 from scrape_utils import (
     extract_image_caption,
     extract_article_images,
     fetch_page_caption,
     parse_mplusinfo_article,
+    _absolutize_media_url,
+    _normalize_image_path,
 )
 
 SKIP_PHRASES = ['cookie', 'abonnez', 'newsletter', 'mentions légales', 'politique de confidentialité', 'publicité']
+
+GRDC_SKIP_FRAGMENTS = ["lire dans l'application", "ajoutez-nous", "favoris", "newsletter"]
+
+
+def fetch_grdc_content(page_text, target_url, cookies_dict):
+    """Contenu complet L'Alsace via l'API interne /services/grdc/detail.
+
+    Le texte des articles (payants y compris) n'est pas dans le HTML de la
+    page : il est livré par l'API GRDC appelée en JS, avec pour clé
+    dataLayer[0].dimension38. Retourne (content, images_gallery) ou (None, []).
+    """
+    if "lalsace.fr" not in target_url:
+        return None, []
+    m = re.search(r"['\"]dimension38['\"]\s*:\s*['\"]([0-9a-fA-F-]{8,})['\"]", page_text)
+    if not m:
+        return None, []
+    key = m.group(1)
+    try:
+        host = target_url.split("/")[2]
+        api = f"https://{host}/services/grdc/detail?key={key}"
+        time.sleep(random.uniform(0.5, 1.2))
+        resp = requests.get(api, cookies=cookies_dict, impersonate="chrome120", timeout=30)
+        if resp.status_code != 200:
+            return None, []
+        data = resp.json()
+        html = data.get("html") if isinstance(data, dict) else None
+        if not html:
+            return None, []
+        soup = BeautifulSoup(html, "html.parser")
+        for junk in soup.select(".fullDetailActions, .illustration"):
+            junk.decompose()
+
+        images = []
+        seen_paths = set()
+        for img in soup.find_all("img"):
+            src = img.get("src") or img.get("data-src") or ""
+            src = _absolutize_media_url(target_url, src) if src else None
+            if not src:
+                continue
+            norm = _normalize_image_path(src)
+            if norm in seen_paths:
+                continue
+            seen_paths.add(norm)
+            caption = None
+            figcap = img.find_parent("figure")
+            if figcap:
+                fc = figcap.find("figcaption")
+                if fc:
+                    caption = fc.get_text(" ", strip=True).strip() or None
+            images.append({"url": src, "caption": caption, "source": "gallery"})
+
+        blocks = []
+        body = soup.select_one(".retrievedBodyContent")
+        candidates = body.find_all(["div", "p", "h2", "h3", "h4", "figure"], recursive=True) if body else []
+        for el in candidates:
+            txt = el.get_text("\n", strip=True)
+            if len(txt) > 20 and not any(s in txt.lower() for s in GRDC_SKIP_FRAGMENTS):
+                blocks.append(txt)
+        if not blocks:
+            for el in soup.find_all(["p", "h2", "h3"], recursive=True):
+                txt = el.get_text("\n", strip=True)
+                if len(txt) > 20:
+                    blocks.append(txt)
+        content = "\n\n".join(dict.fromkeys(blocks))
+        if len(content) < 400:
+            return None, []
+        return content, images
+    except Exception:
+        return None, []
 
 # Charger l'environnement
 load_dotenv(".envenv")
@@ -40,6 +111,36 @@ def get_app_config(conn, key):
             return row[0] if row else None
     except:
         return None
+
+RETRY_COOLDOWN_KEY = "SCRAPE_CONTENT_RETRY_COOLDOWNS"
+RETRY_COOLDOWN_HOURS = 6
+
+
+def get_retry_cooldowns(conn):
+    """Cooldowns d'échec par article : {article_id: "YYYY-MM-DDTHH:MM:SS"}."""
+    raw = get_app_config(conn, RETRY_COOLDOWN_KEY)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def persist_retry_cooldowns(conn, cooldowns):
+    if not cooldowns:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                'INSERT INTO "AppConfig" (key, value, "updatedAt") VALUES (%s, %s, NOW()) '
+                'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = NOW()',
+                (RETRY_COOLDOWN_KEY, json.dumps(cooldowns)),
+            )
+        conn.commit()
+    except Exception as e:
+        print(f"[!] Cooldowns de retry non persistés : {e}")
 
 def sync_article_images(conn, article_id, images, image_url, image_caption):
     """Enregistre toutes les images d'un article dans ArticleImage.
@@ -186,9 +287,22 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
             except: pass
 
         # Logique EBRA (L'Alsace, DNA...)
-        if any(x in target_url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr"]):
+        if any(x in target_url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr", "vosgesmatin.fr"]):
             # ... [Logique EBRA existante conservée] ...
             is_video_page = "/videos/" in target_url
+
+            # 1) Contenu complet via l'API GRDC : le texte des articles payants
+            #    n'est pas dans le HTML de la page (rendu JS), GRDC le fournit.
+            if "lalsace.fr" in target_url and not is_video_page:
+                grdc_content, grdc_images = fetch_grdc_content(page_text, target_url, cookies_dict)
+                if grdc_content:
+                    if grdc_images:
+                        existing = {_normalize_image_path(i["url"]) for i in images}
+                        images += [i for i in grdc_images if _normalize_image_path(i["url"]) not in existing]
+                    print(f"    [GRDC] Contenu complet ({len(grdc_content)} chars) : {target_url[:45]}...")
+                    return grdc_content, image_caption, True, None, images
+
+            # 2) Refus du contenu partiel (session non abonnée) : L'Alsace
             if "lalsace.fr" in target_url and not is_connected and not is_video_page:
                 print(f"    [⛔] Contenu partiel refusé (Non connecté) pour : {target_url[:40]}")
                 return None, image_caption, False, "Not Connected (Partial content refused)", images
@@ -405,13 +519,27 @@ def main():
         cur.execute("""
             SELECT id, title, link 
             FROM "Article" 
-            WHERE (content IS NULL OR LENGTH(content) < 150)
+            WHERE (content IS NULL OR LENGTH(content) < 500)
               AND "publishedAt" > NOW() - INTERVAL '24 hours'
             ORDER BY "publishedAt" DESC LIMIT 50
         """)
         articles = cur.fetchall()
         
+        cooldowns = get_retry_cooldowns(conn)
+        
         for i, (art_id, title, link) in enumerate(articles, 1):
+            # Article déjà en échec : sauter tant que le cooldown n'est pas expiré
+            # (évite de retenter en boucle les pages injoignables à chaque run)
+            cooldown_until = cooldowns.get(art_id)
+            if cooldown_until:
+                try:
+                    until = datetime.fromisoformat(cooldown_until)
+                    if datetime.now() < until:
+                        print(f"    [⏳] En cooldown jusqu'à {until:%H:%M}, ignoré : {title[:40]}...")
+                        continue
+                except ValueError:
+                    pass
+                del cooldowns[art_id]
             # On récupère la description actuelle pour le fallback
             cur.execute('SELECT description, "imageUrl", "imageCaption" FROM "Article" WHERE id = %s', (art_id,))
             row_desc = cur.fetchone()
@@ -449,7 +577,7 @@ def main():
                 updated = True
 
             if final_content and len(final_content) >= 150:
-                cur.execute('UPDATE "Article" SET content = %s WHERE id = %s', (final_content, art_id))
+                cur.execute('UPDATE "Article" SET content = %s, "updatedAt" = NOW() WHERE id = %s', (final_content, art_id))
                 updated = True
                 if status != "FALLBACK": stats["success"] += 1
             else:
@@ -459,11 +587,21 @@ def main():
                     print(f"    [⚠️] Contenu trop court ({len(final_content)} chars), ignoré : {title[:40]}...")
                 stats["error"] += 1
 
+            # Marquer les échecs d'un cooldown pour ne plus retenter en boucle
+            # (page injoignable, paywall bloqué, contenu introuvable...)
+            current_len = len(final_content) if final_content else 0
+            if status in ("FAILED", "SESSION_LOST") or current_len < 150:
+                cooldowns[art_id] = (datetime.now() + timedelta(hours=RETRY_COOLDOWN_HOURS)).isoformat()
+            else:
+                cooldowns.pop(art_id, None)
+
             if updated:
                 conn.commit()
             
-            session_details.append({"title": title, "link": link, "status": status, "error": err, "chars": len(final_content) if final_content else 0})
+            session_details.append({"title": title, "link": link, "status": status, "error": err, "chars": current_len})
             print(f"    [{i}/{len(articles)}] {status} | {title[:40]}...")
+
+        persist_retry_cooldowns(conn, cooldowns)
 
         # Rattrapage légendes photo (articles récents sans imageCaption)
         cur.execute("""

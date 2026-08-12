@@ -178,9 +178,9 @@ async function downloadArticleImages() {
   const images = await prisma.articleImage.findMany({
     where: {
       OR: [{ localImage: null }, { localImage: { not: null }, r2Url: null }],
-      article: { publishedAt: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } }
+      Article: { publishedAt: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } }
     },
-    select: { id: true, url: true, article: { select: { link: true } } },
+    select: { id: true, url: true, Article: { select: { link: true } } },
     orderBy: { createdAt: 'desc' }
   });
   console.log(`Images à traiter : ${images.length}`);
@@ -188,7 +188,7 @@ async function downloadArticleImages() {
   let ok = 0;
   let ko = 0;
   for (const img of images) {
-    const filename = await downloadImage(img.url, `gal-${img.id}`, img.article.link);
+    const filename = await downloadImage(img.url, `gal-${img.id}`, img.Article.link);
     if (filename) {
       await prisma.articleImage.update({ where: { id: img.id }, data: { localImage: filename } });
       ok++;

@@ -3,6 +3,10 @@
 Exécuté après le scraping GitHub Actions — connexion directe Supabase,
 sans appeler Vercel.
 
+Seuls les articles modifiés dans les dernières 25 h sont relus : sans ce
+filtre, chaque run re-téléchargeait 250+ contenus complets depuis Supabase,
+ce qui consumait l'egress du projet à chaque exécution.
+
 Usage:
   python scripts/rag_sync_articles.py
   python scripts/rag_sync_articles.py --press-limit 250 --news-limit 40
@@ -192,6 +196,7 @@ def sync_press_articles(cur, limit: int, stats: dict) -> None:
         SELECT id, title, description, content, source, link, "publishedAt"
         FROM "Article"
         WHERE hidden = false
+          AND "updatedAt" > NOW() - INTERVAL '25 hours'
         ORDER BY "updatedAt" DESC
         LIMIT %s
         """,
@@ -236,6 +241,7 @@ def sync_news_articles(cur, limit: int, stats: dict, site_url: str) -> None:
         SELECT id, title, slug, excerpt, content, "publishedAt"
         FROM "NewsArticle"
         WHERE hidden = false AND "statusWorkflow" = 'PUBLISHED'
+          AND "updatedAt" > NOW() - INTERVAL '25 hours'
         ORDER BY "updatedAt" DESC
         LIMIT %s
         """,
