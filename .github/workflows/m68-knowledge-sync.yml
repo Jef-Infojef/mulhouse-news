@@ -39,7 +39,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
 
       - name: Install dependencies
@@ -227,6 +227,56 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
+      - name: Sync bureaux de poste Mulhouse (La Poste)
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/post-offices-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync SIVOM Mulhouse Sud Alsace
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/sivom-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync piscines m2A
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/piscines-m2a-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync pages isolées (Soléa, buralistes, tarifs musées…)
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/standalone-pages-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync PDF isolés (stationnement, marchés, conservatoire…)
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/standalone-pdfs-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync publications sociales des commerces
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/shop-social-sync.ts
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.MULHOUSEGPT_TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.MULHOUSEGPT_TURSO_AUTH_TOKEN }}
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
       - name: Sync répertoire des rues Mulhouse (BAN, data.gouv.fr)
         if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/street-directory-sync.ts
@@ -310,24 +360,12 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
-      # Catalogue de la Bibliothèque d'Alsace (bibliothèque départementale) :
-      # 123 notices de la recherche « mulhouse ». Le catalogue bouge peu, mais
-      # les nouveautés locales apparaissent — d'où le dimanche plutôt que le
-      # quotidien (136 requêtes par jour pour rien). Le test est fait ici comme
-      # pour Mérimée plutôt que par un cron dédié : un cron supplémentaire
-      # relancerait TOUTES les étapes de ce workflow.
-      - name: Sync catalogue Bibliothèque d'Alsace — le dimanche
+      # Catalogue Alsace : bibliotheque.alsace.eu renvoie 403 depuis GitHub
+      # et Vercel (mesuré 2026-08-12). Sync locale uniquement
+      # (`npx tsx scripts/alsace-catalog-sync.ts`).
+      - name: Catalogue Bibliothèque d'Alsace — hors CI
         if: always() && github.event.schedule != '0 3 * * 3'
-        run: |
-          if [ "$(date -u +%u)" = "7" ]; then
-            npx tsx scripts/alsace-catalog-sync.ts
-          else
-            echo "Bibliothèque d'Alsace : hors dimanche, synchronisation ignorée (cadence hebdomadaire)"
-          fi
-        env:
-          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
-          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
-          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+        run: echo "Bibliothèque d'Alsace : 403 depuis les datacenters, sync locale uniquement"
 
       # Relit le solde de chaque cle du magasin. Sans ce passage, le total de
       # reserve affiche par /jina reste une estimation a 10 M par cle. En
