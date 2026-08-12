@@ -6,10 +6,37 @@ import { ChevronLeft, FileText, Download, BookOpen } from 'lucide-react'
 import Link from 'next/link'
 import { Logo } from '@/components/Logo'
 
-// Les PDF (≈136 Mo au total) sont hébergés sur Backblaze B2 plutôt que dans public/
-// pour alléger les déploiements Vercel et économiser la bande passante.
-// Upload : npx tsx scripts/upload_mplus_mag_to_b2.ts
-// Le téléchargement passe par /mplus-mag/download/<fichier> qui redirige vers une URL B2 présignée.
+// Les PDF et les jaquettes sont servis depuis le site officiel M+ (mplusinfo.fr,
+// page « Le Mag »). Les téléchargements passent par /mplus-mag/download/<fichier>
+// qui redirige vers le PDF officiel ; les jaquettes sont des images externes
+// (assets.mulhouse.omerloclients.com), autorisées par le CSP (« img-src https »).
+
+// Jaquettes (couvertures) officielles des numéros, indexées par numéro.
+// Note : les numéros 29 → 33 partagent la même image générique côté mplusinfo.fr.
+const MPLUSINFO_COVER: Record<string, string> = {
+  '36': 'c5f7a79e-b65c-4417-a0a0-6c20a23cd2ed.JPG',
+  '35': '641858d4-ba84-4abf-88f9-521e6ded02ca.JPG',
+  '34': 'b8900c7a-c46d-4732-b03c-f5563a06106e.JPG',
+  '33': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
+  '32': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
+  '31': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
+  '30': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
+  '29': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
+  '28': 'd2366d1a-2ca0-4783-9d9a-e1e5d4a64390.jpg',
+  '27': 'c71d501c-dc62-45a8-8bf8-a98538242d48.jpg',
+  '26': 'ef96dc3a-4c83-4cef-b9aa-b8751eaa3484.jpg',
+  '25': 'f2981791-14b7-4ec1-bc41-a388ef8e1310.jpg',
+  '24': 'a53cad09-31b5-4ad0-8d20-20ab5e9ec812.jpg',
+  '23': '21f76b16-8f45-4b84-a1a1-50aa3b04227d.jpg',
+  '22': 'c76036d3-7bba-4bca-b009-ae750e54d0a9.jpg',
+  '21': '02a8ca82-d2f9-4ffe-89b6-6c4dbea1e7ab.jpg',
+  '20': '3b94ab11-ad20-40fb-afbe-a66c35d67a27.jpg',
+  '19': '93a4f8ed-2036-42c6-b749-50755cd672d0.jpg',
+  '18': 'c290c838-60a5-43bb-9189-d26304124712.jpg',
+  '17': 'ec8c6633-b250-48b7-8af2-f42ab1db8b5d.jpg',
+  '16': '8ccfddd8-9fde-4793-95f5-e6edc2c0d44c.jpg',
+  '15': 'fcd1955e-4358-4d24-a0ac-41ebedf48052.jpg',
+}
 
 const SEASONS: Record<string, string> = {
   printemps: 'Printemps',
@@ -42,6 +69,29 @@ const MAGAZINES = [
   { num: 16, season: 'ete', year: 2021 },
   { num: 15, season: 'printemps', year: 2021 },
 ]
+
+// Composant d'affichage d'une jaquette avec repli sur l'icône si l'image échoue.
+function MagCover({ src, alt }: { src: string; alt: string }) {
+  const [error, setError] = React.useState(false)
+  if (error) {
+    return (
+      <FileText
+        size={80}
+        className="text-red-500/80 dark:text-red-400/60 group-hover:scale-110 transition-transform duration-300"
+      />
+    )
+  }
+  return (
+    // <img> classique (pas next/image) : hôtes distants non autorisés dans ce projet.
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setError(true)}
+      className="h-52 w-40 object-cover object-top rounded-lg shadow-lg ring-1 ring-black/10 dark:ring-white/10 group-hover:scale-105 transition-transform duration-300"
+    />
+  )
+}
 
 export default function MplusMagPage() {
   const containerVariants = {
@@ -113,6 +163,10 @@ export default function MplusMagPage() {
               {MAGAZINES.map((mag) => {
                 const filename = `M_Mag_${mag.num}_${mag.season}_${mag.year}.pdf`
                 const seasonLabel = SEASONS[mag.season] || mag.season
+                const coverId = MPLUSINFO_COVER[String(mag.num)]
+                const coverUrl = coverId
+                  ? `https://assets.mulhouse.omerloclients.com/assets/${coverId}`
+                  : null
 
                 return (
                   <motion.div
@@ -122,10 +176,14 @@ export default function MplusMagPage() {
                   >
                     <div className="bg-gradient-to-br from-red-50 to-amber-50 dark:from-red-950/40 dark:to-amber-950/40 p-8 flex items-center justify-center border-b border-slate-100 dark:border-slate-800">
                       <div className="relative">
-                        <FileText
-                          size={80}
-                          className="text-red-500/80 dark:text-red-400/60 group-hover:scale-110 transition-transform duration-300"
-                        />
+                        {coverUrl ? (
+                          <MagCover src={coverUrl} alt={`N°${mag.num} - ${seasonLabel} ${mag.year}`} />
+                        ) : (
+                          <FileText
+                            size={80}
+                            className="text-red-500/80 dark:text-red-400/60 group-hover:scale-110 transition-transform duration-300"
+                          />
+                        )}
                         <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold rounded-full w-8 h-8 flex items-center justify-center shadow-lg">
                           N°{mag.num}
                         </span>
