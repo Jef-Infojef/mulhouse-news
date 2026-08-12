@@ -468,6 +468,20 @@ Vérif comptage prod : `cinemas` = 3, `movies` = 293, `screenings` = 11 179 (`np
 3. **MulhouseGPT** — ✅ **Adapter directement** (client Convex), suppression de la dépendance `NEWS_DATABASE_URL`.
 4. **Sort des 30+ scripts one-shot** — ✅ **Archivage** `scripts/legacy/` avec doc SQL de substitution.
 
+## 6bis. Bilan écosystème complet (12/08/2026) — qui est sur Convex ?
+
+| Repo | Base | Statut |
+|---|---|---|
+| `mulhouse-news` | Convex `academic-spoonbill-914` | ✅ Migré (site, scrapers, images, backup) |
+| `MulhouseGPT` | Convex (articles/news/sorties/cinémas via pont) + Aiven (RAG) + Turso | ✅ Pont Convex (fallback SQL conservé) |
+| `assocommercants` | Convex (sorties/cinémas, double écriture) + Turso (annuaire) + Aiven | ✅ Miroir Convex ; admin NewsArticle encore Supabase (son propre site) |
+| `mulhouse-sorties` | Convex (sorties) | ✅ Branché (dual-mode, fallback Supabase) |
+| `SuiviProjets` | Convex (monitoring du type `convex`) | ✅ Type de base `convex` + config à jour |
+
+**Laissés volontairement sur leur Supabase séparé (décision validée 12/08/2026) :**
+- `dimanches-mulhousiens` et `Printemps-Mulhousiens` : projet Supabase **distinct** (`xxoaitqwrjwmyulkndgi`, compte `lesdimanchesmulhousiens@gmail.com`), stack complète (auth Supabase + DB + RLS + CLI). **Aucun lien avec le quota migré** (compte séparé de `infojefweb@gmail.com`) → pas de migration prévue.
+- `KnowledgeChunk` Supabase (11 836 lignes) : reliquat historique inutilisé (le RAG est sur Aiven).
+
 ## 7. Définition de fait (acceptance)
 - [ ] Le site lit 100 % Convex, Prisma/Supabase retirés du build
 - [ ] Les scrapers actifs écrivent dans Convex (plus aucun `psycopg2` dans les workflows)
