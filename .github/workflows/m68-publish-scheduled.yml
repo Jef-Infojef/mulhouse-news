@@ -15,7 +15,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout assocommercants (deploy key lecture seule)
         uses: actions/checkout@v4
@@ -50,3 +50,32 @@ jobs:
           NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      # ─── Pont NewsArticle Supabase → Convex (12/08/2026) ──────────────────
+      # publish-scheduled.ts écrit les NewsArticle PUBLISHED dans Supabase ;
+      # le RAG de MulhouseGPT lit désormais `newsArticles` (Convex), restée
+      # vide. Ce step copie les news publiées vers Convex à chaque run
+      # (scripts/sync_news_to_convex.ts, repo public mulhouse-news).
+      - name: Checkout mulhouse-news (script pont Supabase → Convex)
+        uses: actions/checkout@v4
+        with:
+          repository: Jef-Infojef/mulhouse-news
+          path: mulhouse-news
+
+      - name: Install dependencies (mulhouse-news)
+        working-directory: mulhouse-news
+        run: npm ci
+        env:
+          # @prisma/client (postinstall) lance `prisma generate`, qui lit
+          # env("DATABASE_URL") dans prisma/schema.prisma : on lui passe le
+          # pooler Supabase (même base que NEWS_DATABASE_URL).
+          DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+
+      - name: Sync NewsArticle publiées Supabase → Convex
+        if: ${{ secrets.CONVEX_DEPLOY_KEY != '' }}
+        working-directory: mulhouse-news
+        run: npx tsx scripts/sync_news_to_convex.ts
+        env:
+          DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}

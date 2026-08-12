@@ -318,6 +318,29 @@ Note : un log `GITHUB_CRASH` (06:58 encodé ≈ 04:58 UTC réel) et des logs `SM
 
 **Piège rencontré** : nom de module Convex — `news-bridge.js` invalide (tirets interdits) → renommé `news_bridge.ts`. `db.get` lève une erreur sur un id malformé (ne retourne pas null) → try/catch dans `getNewsArticleImagesByIds`.
 
+### Pont NewsArticle (assocommercants) Supabase → Convex — 12/08/2026
+
+**Objectif** : fermer le dernier trou du cutover — les NewsArticle créées par le repo privé assocommercants (`publish-scheduled.ts`) sont écrites dans **Supabase**, mais le RAG de MulhouseGPT et Convex lisent la table `newsArticles` (Convex), restée VIDE. Ce pont copie les news publiées vers Convex à chaque run du workflow m68-publish-scheduled (toutes les 15 min).
+
+**Script créé — `scripts/sync_news_to_convex.ts` :**
+- Lit Supabase (`DATABASE_URL` local OU `NEWS_DATABASE_URL` GitHub, pooler) : `NewsArticle WHERE "statusWorkflow"='PUBLISHED' AND hidden=false` — soit exactement le sous-ensemble lu par le RAG (`news_bridge:getRecentNewsArticles` / `getAllNewsArticles` filtrent hidden=false + PUBLISHED). Une news draft/hidden n'est pas copiée.
+- Lit aussi les liens `NewsArticleTag` de ces articles (`articleId` → `tagId`), importés dans `newsArticleTags` (`newsArticleId` = id Supabase de l'article, `newsTagId` = id Supabase du tag).
+- **Normalisation** : dates Supabase → epoch ms (`toMs`), `null` → champ **omis** (Convex refuse `null` sur `v.optional(...)`) pour excerpt/featuredImage/publishedAt ; `content` null → `""` ; UUID Supabase conservés tels quels dans associationId/authorId et les liens.
+- Appelle `migrations:importNewsArticles` puis `migrations:importNewsArticleTags` par lots dynamiques (~25 lignes, re-découpe à 5 si >200 Ko de payload), via le client HTTP de référence `scripts/convex_client_ts.ts` (endpoints `/api/mutation`, auth deploy key, timeout 90 s). Idempotent : dédup par `(associationId, slug)` et `(newsArticleId, newsTagId)` — un 2e run n'insère que le delta. Limite connue : insert-only (pas de propagation des passages hidden/unpublished, filtrés au niveau des queries RAG).
+
+**Workflow modifié — `.github/workflows/m68-publish-scheduled.yml`** (choice : **option a** — second `actions/checkout` du repo **public** `Jef-Infojef/mulhouse-news` dans `mulhouse-news/`, sans déranger les steps existants d'assocommercants) :
+- 3 steps ajoutés APRÈS « Publish scheduled articles » : checkout mulhouse-news → `npm ci` (avec `DATABASE_URL=NEWS_DATABASE_URL` pour `prisma generate` du postinstall) → `npx tsx scripts/sync_news_to_convex.ts` (`working-directory: mulhouse-news`).
+- Env du step de sync : `DATABASE_URL` (= secret `NEWS_DATABASE_URL`), `CONVEX_DEPLOY_KEY`, `NEXT_PUBLIC_CONVEX_URL` — tous confirmés présents (`gh secret list`). Step conditionnel `if: secrets.CONVEX_DEPLOY_KEY != ''` → skip propre si la clef venait à manquer ; steps existants inchangés. `timeout-minutes` 10 → 15 (marge pour le 2e npm ci).
+
+**Migration initiale + smoke test (12/08/2026, prod `academic-spoonbill-914`) :**
+- Avant : `newsArticles` = 0, `newsArticleTags` = 0 (Convex prod) ; **Supabase `NewsArticle` = 0** (table réellement vide, cohérent avec les compteurs Phase 1/5/6) → **0 news PUBLISHED à migrer**, 0 insérées, 0 déjà présentes.
+- **Smoke test end-to-end validé** (prouve le pont, sans pollution) : 1 NewsArticle PUBLISHED + 1 NewsArticleTag insérés en Supabase → sync : **+1 inséré, 0 déjà présente** / **+1 lien inséré** ; re-run : 0 inséré / 1 déjà présente (idempotence) ; `news_bridge:getRecentNewsArticles` renvoie bien la news de test → puis **nettoyage complet** (article + lien supprimés de Convex via une mutation temporaire déployée puis retirée, et de Supabase) → les deux côtés reviennent à **0**.
+
+**Ce qui reste :**
+- L'app assocommercants écrit toujours en Supabase ; le pont copie vers Convex à chaque run 15 min (insert-only — pas de mise à jour des news déjà copiées si elles passent hidden/unpublished ; les queries RAG filtrent ces cas à la lecture).
+- NewsTag déjà migré (5 lignes, backfill supabaseId fait en Phase 1/6).
+- Sorties/cinéma toujours Supabase (tables absentes du schéma Convex).
+
 ### Phase 4 — Crons & workflows (1–2 semaines)
 - [ ] Crons Convex : `scrapeNews (toutes 15 min)`, `publishScheduled`, `airportSync`, `knowledgeSync`, `scrapeOutings`, `revalidateTags` — remplacent les `schedule:` des workflows
 - [ ] `backup-database.yml` (pg_dump hebdo) → snapshot Convex (`npx convex export` ou API snapshots) → B2 ; `backup-incremental.yml` → export des documents du jour
