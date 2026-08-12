@@ -18,6 +18,7 @@ from scrape_utils import (
     _absolutize_media_url,
     _normalize_image_path,
 )
+import convex_client
 
 SKIP_PHRASES = ['cookie', 'abonnez', 'newsletter', 'mentions légales', 'politique de confidentialité', 'publicité']
 
@@ -97,6 +98,13 @@ load_dotenv(".env")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+# Backend : Convex (cloud) si USE_CONVEX=1 ou CONVEX_DEPLOY_KEY définie.
+USE_CONVEX = convex_client.use_convex()
+if USE_CONVEX:
+    print("[*] Backend: Convex (cloud)")
+else:
+    print("[*] Backend: Supabase (psycopg2)")
+
 def get_db_connection():
     if not DATABASE_URL:
         raise ValueError("DATABASE_URL is not set")
@@ -104,6 +112,8 @@ def get_db_connection():
     return psycopg2.connect(clean_url)
 
 def get_app_config(conn, key):
+    if USE_CONVEX:
+        return convex_client.get_app_config(key)
     try:
         with conn.cursor() as cur:
             cur.execute('SELECT value FROM "AppConfig" WHERE key = %s', (key,))
@@ -132,13 +142,16 @@ def persist_retry_cooldowns(conn, cooldowns):
     if not cooldowns:
         return
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                'INSERT INTO "AppConfig" (key, value, "updatedAt") VALUES (%s, %s, NOW()) '
-                'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = NOW()',
-                (RETRY_COOLDOWN_KEY, json.dumps(cooldowns)),
-            )
-        conn.commit()
+        if USE_CONVEX:
+            convex_client.set_app_config(RETRY_COOLDOWN_KEY, json.dumps(cooldowns))
+        else:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'INSERT INTO "AppConfig" (key, value, "updatedAt") VALUES (%s, %s, NOW()) '
+                    'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = NOW()',
+                    (RETRY_COOLDOWN_KEY, json.dumps(cooldowns)),
+                )
+            conn.commit()
     except Exception as e:
         print(f"[!] Cooldowns de retry non persistés : {e}")
 
@@ -147,9 +160,37 @@ def sync_article_images(conn, article_id, images, image_url, image_caption):
 
     L'image hero (imageUrl BDD) est toujours position 0. Les autres images
     sont ajoutées/actualisées par URL, sans doublon.
+    Convex : article_id = UUID Supabase (supabaseId) ; upsert par (articleId, url).
     """
     if not images and not image_url:
         return False
+
+    if USE_CONVEX:
+        all_images = list(images)
+        if image_url:
+            hero = {"url": image_url, "caption": image_caption, "source": "hero"}
+            all_images = [hero] + [
+                dict(i, source="gallery")
+                for i in all_images
+                if i.get("url") and not _same_img(i["url"], image_url)
+            ]
+        rows = []
+        for position, img in enumerate(all_images):
+            url = (img.get("url") or "").strip()
+            if not url:
+                continue
+            rows.append(
+                {
+                    "articleId": article_id,
+                    "url": url,
+                    "caption": img.get("caption"),
+                    "position": position,
+                    "source": img.get("source") or ("hero" if position == 0 else "gallery"),
+                }
+            )
+        if rows:
+            convex_client.upsert_article_images(rows)
+        return True
 
     changed = False
 
@@ -453,11 +494,12 @@ def main():
     print(f"=== SCRAPER PRODUCTION V2 (WITH LOGS) - {start_time.strftime('%H:%M:%S')} ===")
     
     conn = None
+    cur = None
     session_details = []
     stats = {"success": 0, "error": 0, "is_connected": False}
 
     try:
-        conn = get_db_connection()
+        conn = None if USE_CONVEX else get_db_connection()
         
         # Récupération des nouveaux champs séparés (Priorité 1)
         db_session = get_app_config(conn, "EBRA_SESSION")
@@ -505,7 +547,8 @@ def main():
                     cookies_dict = {".XCONNECT_SESSION": session_val, ".XCONNECTKeepAlive": "2=1", ".XCONNECT": "2=1", "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"}
                 alsace_cookies = "FALLBACK_ACTIVE"
 
-        cur = conn.cursor()
+        if not USE_CONVEX:
+            cur = conn.cursor()
 
         # Vérification connexion initiale
         try:
@@ -516,18 +559,39 @@ def main():
             
         print(f"[*] État initial connexion : {'✅' if stats['is_connected'] else '❌'}")
 
-        cur.execute("""
-            SELECT id, title, link 
-            FROM "Article" 
-            WHERE (content IS NULL OR LENGTH(content) < 500)
-              AND "publishedAt" > NOW() - INTERVAL '24 hours'
-            ORDER BY "publishedAt" DESC LIMIT 50
-        """)
-        articles = cur.fetchall()
+        if USE_CONVEX:
+            articles = convex_client.get_articles_short_content(limit=50, hours=24)
+        else:
+            cur.execute("""
+                SELECT id, title, link 
+                FROM "Article" 
+                WHERE (content IS NULL OR LENGTH(content) < 500)
+                  AND "publishedAt" > NOW() - INTERVAL '24 hours'
+                ORDER BY "publishedAt" DESC LIMIT 50
+            """)
+            articles = cur.fetchall()
         
         cooldowns = get_retry_cooldowns(conn)
         
-        for i, (art_id, title, link) in enumerate(articles, 1):
+        for i, article in enumerate(articles, 1):
+            if USE_CONVEX:
+                art_id = article["link"]
+                title = article["title"]
+                link = article["link"]
+                current_desc = article.get("description")
+                current_image_url = article.get("imageUrl")
+                current_image_caption = article.get("imageCaption")
+                supabase_id = article.get("supabaseId")
+            else:
+                art_id, title, link = article
+                # On récupère la description actuelle pour le fallback
+                cur.execute('SELECT description, "imageUrl", "imageCaption" FROM "Article" WHERE id = %s', (art_id,))
+                row_desc = cur.fetchone()
+                current_desc = row_desc[0] if row_desc else None
+                current_image_url = row_desc[1] if row_desc else None
+                current_image_caption = row_desc[2] if row_desc else None
+                supabase_id = None
+
             # Article déjà en échec : sauter tant que le cooldown n'est pas expiré
             # (évite de retenter en boucle les pages injoignables à chaque run)
             cooldown_until = cooldowns.get(art_id)
@@ -540,12 +604,6 @@ def main():
                 except ValueError:
                     pass
                 del cooldowns[art_id]
-            # On récupère la description actuelle pour le fallback
-            cur.execute('SELECT description, "imageUrl", "imageCaption" FROM "Article" WHERE id = %s', (art_id,))
-            row_desc = cur.fetchone()
-            current_desc = row_desc[0] if row_desc else None
-            current_image_url = row_desc[1] if row_desc else None
-            current_image_caption = row_desc[2] if row_desc else None
 
             # Tentative d'extraction du contenu complet
             content, image_caption, active, err, images = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
@@ -553,7 +611,11 @@ def main():
             # Enregistrement de toutes les images (hero + galerie) dans ArticleImage
             images_changed = False
             if images:
-                images_changed = sync_article_images(conn, art_id, images, current_image_url, current_image_caption)
+                # Convex : articleId doit être l'UUID Supabase (supabaseId),
+                # clé de jointure de articleImages côté Convex.
+                image_article_id = supabase_id if USE_CONVEX else art_id
+                if image_article_id:
+                    images_changed = sync_article_images(conn, image_article_id, images, current_image_url, current_image_caption)
             
             status = "SUCCESS" if content else "FAILED"
             
@@ -570,14 +632,24 @@ def main():
             
             updated = images_changed
             if image_caption:
-                cur.execute(
-                    'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
-                    (image_caption, art_id),
-                )
+                if USE_CONVEX:
+                    convex_client.upsert_article({"link": art_id, "imageCaption": image_caption})
+                else:
+                    cur.execute(
+                        'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
+                        (image_caption, art_id),
+                    )
                 updated = True
 
             if final_content and len(final_content) >= 150:
-                cur.execute('UPDATE "Article" SET content = %s, "updatedAt" = NOW() WHERE id = %s', (final_content, art_id))
+                if USE_CONVEX:
+                    convex_client.upsert_article({
+                        "link": art_id,
+                        "content": final_content,
+                        "updatedAt": int(time.time() * 1000),
+                    })
+                else:
+                    cur.execute('UPDATE "Article" SET content = %s, "updatedAt" = NOW() WHERE id = %s', (final_content, art_id))
                 updated = True
                 if status != "FALLBACK": stats["success"] += 1
             else:
@@ -595,7 +667,7 @@ def main():
             else:
                 cooldowns.pop(art_id, None)
 
-            if updated:
+            if updated and not USE_CONVEX:
                 conn.commit()
             
             session_details.append({"title": title, "link": link, "status": status, "error": err, "chars": current_len})
@@ -604,29 +676,40 @@ def main():
         persist_retry_cooldowns(conn, cooldowns)
 
         # Rattrapage légendes photo (articles récents sans imageCaption)
-        cur.execute("""
-            SELECT id, link FROM "Article"
-            WHERE "imageCaption" IS NULL
-              AND "imageUrl" IS NOT NULL AND "imageUrl" <> ''
-              AND "publishedAt" > NOW() - INTERVAL '14 days'
-              AND (
-                link LIKE '%lalsace.fr%' OR link LIKE '%dna.fr%'
-                OR link LIKE '%estrepublicain.fr%' OR link LIKE '%vosgesmatin.fr%'
-              )
-            ORDER BY "publishedAt" DESC LIMIT 30
-        """)
-        caption_rows = cur.fetchall()
+        if USE_CONVEX:
+            caption_rows = convex_client.get_articles_missing_captions(limit=30)
+        else:
+            cur.execute("""
+                SELECT id, link FROM "Article"
+                WHERE "imageCaption" IS NULL
+                  AND "imageUrl" IS NOT NULL AND "imageUrl" <> ''
+                  AND "publishedAt" > NOW() - INTERVAL '14 days'
+                  AND (
+                    link LIKE '%lalsace.fr%' OR link LIKE '%dna.fr%'
+                    OR link LIKE '%estrepublicain.fr%' OR link LIKE '%vosgesmatin.fr%'
+                  )
+                ORDER BY "publishedAt" DESC LIMIT 30
+            """)
+            caption_rows = cur.fetchall()
         if caption_rows:
             print(f"\n[*] Rattrapage légendes photo : {len(caption_rows)} articles...")
             caption_ok = 0
-            for art_id, link in caption_rows:
+            for row in caption_rows:
+                if USE_CONVEX:
+                    art_id, link = row["link"], row["link"]
+                else:
+                    art_id, link = row
                 caption_result = fetch_page_caption(link, cookies_dict, alsace_cookies is not None)
                 if caption_result.caption:
-                    cur.execute(
-                        'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
-                        (caption_result.caption, art_id),
-                    )
-                    conn.commit()
+                    if USE_CONVEX:
+                        convex_client.upsert_article({"link": art_id, "imageCaption": caption_result.caption})
+                    else:
+                        cur.execute(
+                            'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
+                            (caption_result.caption, art_id),
+                        )
+                    if not USE_CONVEX:
+                        conn.commit()
                     caption_ok += 1
             print(f"    Légendes récupérées : {caption_ok}/{len(caption_rows)}")
 
@@ -639,19 +722,41 @@ def main():
         if any(d["status"] == "SESSION_LOST" for d in session_details): status_final = "SESSION_LOST"
 
         try:
-            cur.execute("""
-                INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "isConnected", "articlesCount", "successCount", "errorCount", details)
-                VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (start_time, finished_at, status_final, stats["is_connected"], len(articles), stats["success"], stats["error"], json.dumps(session_details)))
-            conn.commit()
+            if USE_CONVEX:
+                convex_client.insert_scraping_log(
+                    started_at=start_time,
+                    finished_at=finished_at,
+                    status=status_final,
+                    is_connected=stats["is_connected"],
+                    articles_count=len(articles),
+                    success_count=stats["success"],
+                    error_count=stats["error"],
+                    details=json.dumps(session_details),
+                )
+            else:
+                cur.execute("""
+                    INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "isConnected", "articlesCount", "successCount", "errorCount", details)
+                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (start_time, finished_at, status_final, stats["is_connected"], len(articles), stats["success"], stats["error"], json.dumps(session_details)))
+                conn.commit()
             print(f"\n✅ Log enregistré en base de données. Statut: {status_final}")
         except Exception as log_err:
-            conn.rollback()
+            if not USE_CONVEX:
+                conn.rollback()
             print(f"\n[!] Log non enregistré (table absente?) : {log_err}")
 
     except Exception as e:
         print(f"❌ Erreur critique : {e}")
-        if conn:
+        if USE_CONVEX:
+            try:
+                convex_client.insert_scraping_log(
+                    started_at=start_time,
+                    status="FAILED",
+                    error_message=str(e),
+                )
+            except Exception:
+                pass
+        elif conn:
             try:
                 conn.rollback()
                 cur = conn.cursor()

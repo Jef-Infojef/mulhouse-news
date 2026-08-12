@@ -92,13 +92,50 @@ Vercel (Next.js, lectures/écritures admin)         GitHub Actions (scrapers)
 - [ ] Retirer Prisma & `DATABASE_URL` du build Vercel — **reporté Phase 3** (les scripts GitHub Actions utilisent encore Prisma via `scripts/*.ts`)
 
 ### Phase 3 — Scrapers & syncs Python (3–4 semaines, le gros morceau)
-- [ ] Créer le module Python `convex_client.py` (POST sur les endpoints mutations, retry, auth token)
-- [ ] Port des **scrapers actifs** (ceux des workflows) :
-  `scrape_and_seed.py`, `scrape_mplusinfo.py`, `scrape_periscope_seed.py`, `scrape_mag_m2a.py`, `scrape_content_full.py` (incl. cooldowns AppConfig → mutation `setRetryCooldown`), `scrape_outings.py`, `scrape_news.py`, `publish-scheduled.ts` (via assocommercants)
-- [ ] `rag_sync_articles.py` : lit Convex (queries) + écrit Aiven (SQL inchangé)
-- [ ] `log_github_failure.py` / `check_ebra_cookie.py` : port en mutations
-- [ ] Scripts one-shot (`rescue_*`, `repair_*`, `backfill_*`, 30+) : **ne pas porter** — conserver une fenêtre de compatibilité (doublon `SUPABASE_URL` sur les scripts concernés) ou archivage dans `scripts/legacy/` ; documenter l'alternative (SQL via Convex dashboard/Supabase export)
+- [x] Créer le module Python `convex_client.py` (POST sur les endpoints mutations, retry, auth token)
+- [x] Port des **scrapers actifs** (ceux des workflows) :
+  `scrape_and_seed.py`, `scrape_mplusinfo.py`, `scrape_periscope_seed.py`, `scrape_mag_m2a.py`, `scrape_content_full.py` (incl. cooldowns AppConfig → mutation `setAppConfig`), `scrape_outings.py`, `scrape_news.py`, `publish-scheduled.ts` (via assocommercants)
+- [x] `rag_sync_articles.py` : lit Convex (queries) + écrit Aiven (SQL inchangé)
+- [x] `log_github_failure.py` / `check_ebra_cookie.py` : port en mutations
+- [x] Scripts one-shot (`rescue_*`, `repair_*`, `backfill_*`, 30+) : **ne pas porter** — archivage dans `scripts/legacy/` (127 fichiers) ; documenter l'alternative (SQL via Convex dashboard/Supabase export)
 - [ ] Compatibilité MulhouseGPT : pont `NEWS_DATABASE_URL` → soit MulhouseGPT lit l'API Convex (client TS), soit on maintient un sync BDD → Supabase lecteur temporaire
+
+### Phase 3 — avancement (12/08/2026)
+
+**Fichiers créés / modifiés :**
+- `convex/scrapers.ts` — **nouveau** : fonctions Convex consommées par les scrapers Python (HTTP `/api/query` + `/api/mutation`, auth `Authorization: Convex <deploy key>`)
+- `scripts/convex_client.py` — **nouveau** : client Python typé des helpers (upsert_article, get_article_links, get_articles_short_content, app_config, insert_scraping_log, get_recent_articles_with_content, delete_article_by_link…)
+- `scripts/legacy/` — **nouveau** : 127 scripts one-shot archivés (`rescue_*`, `repair_*`, `backfill_*`, `diagnose_*`, `decode_*`, `fix_*`, `report_*`, `stats_*`, `monthly_balance_*`, `view_*`, scrapers historiques…) + `README.md` expliquant leur usage Supabase
+- Portés en **dual-mode** (`USE_CONVEX=1`/`CONVEX_DEPLOY_KEY` → Convex, sinon psycopg2) : `scrape_and_seed.py`, `scrape_mplusinfo.py`, `scrape_periscope_seed.py`, `scrape_mag_m2a.py`, `scrape_content_full.py`, `rag_sync_articles.py`, `log_github_failure.py`, `check_ebra_cookie.py`
+- `convex/_generated/` — régénéré (module `scrapers`)
+
+**Fonctions Convex créées (chemins publics, `convex/scrapers.ts`) :**
+- Mutations : `scrapers:upsertArticle` (dédup `link`, patch partiel + `supabaseId`), `scrapers:upsertArticleImages` (dédup `(articleId, url)`), `scrapers:upsertArticleGoogleTags`, `scrapers:insertScrapingLog`, `scrapers:deleteArticleByLink` (cascade images/tags)
+- Queries : `scrapers:getArticleByLink`, `scrapers:getArticleLinks` (paginée, filtre `source`), `scrapers:getArticlesShortContent` (hidden=false, content court/null, X heures), `scrapers:getArticleByTitleRecent`, `scrapers:getArticleByImage`, `scrapers:getArticlesMissingCaptions`, `scrapers:getNewsTags`, `scrapers:getRecentArticlesWithContent` (RAG)
+- Réutilisées depuis `convex/app.ts` (déjà en place) : `app:getAppConfig`, `app:setAppConfig`, `app:deleteAppConfig`
+- **NB API** : l'endpoint `/api/execute` du plan n'existe pas en Convex v1.43 — les appels passent par `/api/query` (queries) et `/api/mutation` (mutations), corps `{"path", "format":"json", "args"}`. Convex rejette `null` sur `v.optional(v.string())` → les helpers Python omettent les champs `None`.
+
+**Scripts non portés et pourquoi :**
+- `scrape_outings.py` (+ `outing_scrape_utils.py`) : tables `Outing`/`OutingCategory`/`OutingTag`/`ScrapeLog` **absentes du schéma Convex** (non migrées en Phase 1) → reste 100 % Supabase, à porter dans une phase ultérieure si les tables sorties sont migrées
+- `scrape_news.py` : n'existe pas dans le repo (whitelist mentionnée mais fichier absent)
+- Scripts TS `download_images.ts` / `sync_to_b2.ts` : **hors périmètre Phase 3 bis** — continuent de tourner sur Prisma/Supabase (appelés par `scrape_content_full.py`, inchangés)
+- Scripts one-shot archivés dans `scripts/legacy/` : restent utilisables contre Supabase (voir `scripts/legacy/README.md`)
+- Workflows m68-* : référence des scripts `.ts` d'un autre repo (MulhouseGPT), non concernés
+
+**Dual-mode `USE_CONVEX`** — exemple de bloc (même pattern dans chaque script porté) :
+```python
+import convex_client
+USE_CONVEX = convex_client.use_convex()   # True si CONVEX_DEPLOY_KEY + URL définies
+...
+if USE_CONVEX:
+    convex_client.upsert_article({...})
+else:
+    cur.execute('INSERT INTO "Article" (...) VALUES (...)')
+```
+
+**Reste à faire (Phase 3 bis / Phase 4) :**
+- Phase 3 bis : porter `download_images.ts` / `sync_to_b2.ts` (Prisma → Convex) pour retirer `DATABASE_URL` du build
+- Phase 4 : ajouter les secrets GHA `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` et `USE_CONVEX=1` aux workflows `scrape-news.yml`, `scrape-outings.yml`, `check-ebra-cookie.yml` ; décider du sort de `scrape_outings.py` (tables sorties)
 
 ### Phase 4 — Crons & workflows (1–2 semaines)
 - [ ] Crons Convex : `scrapeNews (toutes 15 min)`, `publishScheduled`, `airportSync`, `knowledgeSync`, `scrapeOutings`, `revalidateTags` — remplacent les `schedule:` des workflows

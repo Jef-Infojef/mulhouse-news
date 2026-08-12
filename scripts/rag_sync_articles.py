@@ -1,11 +1,18 @@
 """Sync actualités BDD → KnowledgeChunk (RAG assistant IA).
 
-Exécuté après le scraping GitHub Actions — connexion directe Supabase,
-sans appeler Vercel.
+Exécuté après le scraping GitHub Actions — lecture depuis Convex (Phase 3)
+ou Supabase (fallback), écriture KnowledgeChunk en SQL (inchangé).
 
 Seuls les articles modifiés dans les dernières 25 h sont relus : sans ce
-filtre, chaque run re-téléchargeait 250+ contenus complets depuis Supabase,
+filtre, chaque run re-téléchargeait 250+ contenus complets depuis la BDD,
 ce qui consumait l'egress du projet à chaque exécution.
+
+Backend :
+  • USE_CONVEX=1 (ou CONVEX_DEPLOY_KEY définie) → articles presse lus depuis
+    Convex (getRecentArticlesWithContent) ; NewsArticle n'est PAS syncé (table
+    vide côté Convex, documenté) ; l'écriture KnowledgeChunk reste en SQL sur
+    DATABASE_URL (Aiven).
+  • Sinon → comportement historique (Article + NewsArticle depuis Supabase).
 
 Usage:
   python scripts/rag_sync_articles.py
@@ -26,12 +33,21 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import Json
 
+import convex_client
+
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 _root = os.path.dirname(_script_dir)
 for _env in (".envenv", ".env.local", ".env"):
     load_dotenv(os.path.join(_root, _env))
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+
+# Backend : Convex (cloud) si USE_CONVEX=1 ou CONVEX_DEPLOY_KEY définie.
+USE_CONVEX = convex_client.use_convex()
+if USE_CONVEX:
+    print("[*] Backend lecture articles presse: Convex (cloud)")
+else:
+    print("[*] Backend lecture articles presse: Supabase (psycopg2)")
 
 MAX_CHUNK_CHARS = 3000
 OVERLAP_CHARS = 200
@@ -91,12 +107,19 @@ def chunk_text(text: str) -> list[tuple[int, str]]:
 
 
 def format_press_article(row: dict) -> str | None:
+    pub = row.get("publishedAt")
+    if USE_CONVEX and isinstance(pub, (int, float)):
+        pub_str = datetime.fromtimestamp(pub / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+    elif isinstance(pub, datetime):
+        pub_str = pub.strftime("%Y-%m-%d")
+    else:
+        pub_str = ""
     parts = [
         f"Titre: {row['title']}",
         f"Source: {row['source']}" if row.get("source") else None,
         f"Résumé: {row['description']}" if row.get("description") else None,
         f"Contenu: {row['content']}" if row.get("content") else None,
-        f"Publié le: {row['publishedAt'].strftime('%Y-%m-%d')}",
+        f"Publié le: {pub_str}" if pub_str else None,
     ]
     body = "\n".join(p for p in parts if p)
     return body if len(body) >= 40 else None
@@ -191,6 +214,37 @@ def upsert_document(
 
 
 def sync_press_articles(cur, limit: int, stats: dict) -> None:
+    if USE_CONVEX:
+        # Lecture Convex : articles récents hidden=false avec contenu (25h).
+        # `id` = supabaseId (sourceId stable du RAG) ; le tri SQL par updatedAt
+        # est approché par un scan borné côté Convex (voir scrapers.ts).
+        rows = convex_client.get_recent_articles_with_content(limit=limit, hours=25)
+        for article in rows:
+            body = format_press_article(article)
+            if not body:
+                stats["skipped"] += 1
+                continue
+            try:
+                upsert_document(
+                    cur,
+                    source_type="article",
+                    source_id=article["id"],
+                    title=article["title"],
+                    content=body,
+                    url=article["link"],
+                    metadata={
+                        "source": article["source"] or "",
+                        "publishedAt": datetime.fromtimestamp(
+                            article["publishedAt"] / 1000, tz=timezone.utc
+                        ).isoformat(),
+                    },
+                    stats=stats,
+                )
+            except Exception as exc:
+                stats["errors"] += 1
+                print(f"  [ERR] article {article['id']}: {exc}", file=sys.stderr)
+        return
+
     cur.execute(
         """
         SELECT id, title, description, content, source, link, "publishedAt"
@@ -295,7 +349,10 @@ def main() -> int:
         cur = conn.cursor()
         ensure_fts_index(cur)
         sync_press_articles(cur, args.press_limit, stats)
-        sync_news_articles(cur, args.news_limit, stats, site_url)
+        if not USE_CONVEX:
+            # En mode Convex, NewsArticle n'est pas syncé : la table est vide
+            # côté Convex (documenté) et l'écriture Aiven reste en SQL.
+            sync_news_articles(cur, args.news_limit, stats, site_url)
         conn.commit()
     finally:
         conn.close()

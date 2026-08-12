@@ -14,6 +14,7 @@ from scrape_utils import (
     is_mulhouse_related,
     parse_periscope_article,
 )
+import convex_client
 
 load_dotenv(".env.local")
 load_dotenv(".env")
@@ -30,6 +31,13 @@ SKIP_PATH_PARTS = (
     "/wp-content/",
     "/wp-json/",
 )
+
+# Backend : Convex (cloud) si USE_CONVEX=1 ou CONVEX_DEPLOY_KEY définie.
+USE_CONVEX = convex_client.use_convex()
+if USE_CONVEX:
+    print("[*] Backend: Convex (cloud)")
+else:
+    print("[*] Backend: Supabase (psycopg2)")
 
 
 def get_db_connection():
@@ -123,11 +131,34 @@ def fetch_sitemap_entries(days: int | None) -> list[dict]:
 
 
 def get_existing_links(cur) -> set[str]:
+    """Links déjà en base pour la source (Convex : filtre par source exacte)."""
+    if USE_CONVEX:
+        return set(convex_client.get_article_links(source=SOURCE))
     cur.execute('SELECT link FROM "Article" WHERE link LIKE %s', ("%le-periscope.info%",))
     return {row[0] for row in cur.fetchall()}
 
 
 def insert_article(cur, data: dict) -> str | None:
+    """Insère un article (Convex : upsert par link avec UUID Supabase frais)."""
+    if USE_CONVEX:
+        import uuid as uuid_mod
+        import time as time_mod
+        supabase_id = str(uuid_mod.uuid4())
+        convex_client.upsert_article(
+            {
+                "title": data["title"],
+                "link": data["link"],
+                "imageUrl": data.get("image_url"),
+                "imageCaption": data.get("image_caption"),
+                "source": SOURCE,
+                "description": data.get("description") or "",
+                "publishedAt": int(data["published_at"].timestamp() * 1000),
+                "content": data.get("content"),
+                "updatedAt": int(time_mod.time() * 1000),
+                "supabaseId": supabase_id,
+            }
+        )
+        return supabase_id
     cur.execute(
         """
         INSERT INTO "Article" (
@@ -163,6 +194,17 @@ def _json_safe_stats(stats: dict) -> str:
 
 
 def log_scraping(cur, conn, stats: dict, status: str):
+    if USE_CONVEX:
+        convex_client.insert_scraping_log(
+            started_at=stats["started_at"],
+            finished_at=datetime.now(),
+            status=status,
+            articles_count=stats["processed"],
+            success_count=stats["inserted"],
+            error_count=stats["errors"],
+            details=_json_safe_stats(stats),
+        )
+        return
     cur.execute(
         """
         INSERT INTO "ScrapingLog" (
@@ -263,13 +305,16 @@ def seed_missing_articles(cur, conn, days: int | None, limit: int | None, dry_ru
                     "content": content,
                 },
             )
-            conn.commit()
+            if conn:
+                conn.commit()
             stats["inserted"] += 1
             print(f"   ✅ Inséré Mulhouse ({len(content)} chars): {title[:70]}")
         except psycopg2.errors.UniqueViolation:
-            conn.rollback()
+            if conn:
+                conn.rollback()
         except Exception as exc:
-            conn.rollback()
+            if conn:
+                conn.rollback()
             stats["errors"] += 1
             print(f"   ❌ Erreur insertion: {exc}")
 
@@ -292,8 +337,8 @@ def main():
     days = args.days if args.days > 0 else None
 
     print("[*] Démarrage du scraper dédié le-periscope.info...")
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn = None if USE_CONVEX else get_db_connection()
+    cur = conn.cursor() if conn else None
 
     try:
         stats = seed_missing_articles(cur, conn, days, limit, args.dry_run)
@@ -308,8 +353,10 @@ def main():
             status = "SUCCESS" if stats["errors"] == 0 else "WARNING"
             log_scraping(cur, conn, stats, status)
     finally:
-        cur.close()
-        conn.close()
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 
 if __name__ == "__main__":

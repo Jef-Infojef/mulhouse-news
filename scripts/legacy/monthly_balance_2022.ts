@@ -1,12 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient({
-  datasources: {
-    db: {
-      url: "process.env.DATABASE_URL || """
-    },
-  },
-});
+const prisma = new PrismaClient();
 
 async function main() {
   const stats: any = await prisma.$queryRaw`
@@ -16,14 +10,14 @@ async function main() {
       SUM(CASE WHEN "imageUrl" IS NOT NULL AND "imageUrl" <> '' THEN 1 ELSE 0 END) as with_image,
       SUM(CASE WHEN "description" IS NOT NULL AND "description" <> '' THEN 1 ELSE 0 END) as with_desc
     FROM "Article"
-    WHERE "publishedAt" >= '2021-01-01' AND "publishedAt" <= '2021-12-31'
+    WHERE "publishedAt" >= '2022-01-01' AND "publishedAt" <= '2022-12-31'
     GROUP BY month
     ORDER BY month ASC;
   `;
 
-  console.log('--- Bilan Mensuel 2021 ---');
+  console.log('--- Bilan Mensuel 2022 ---');
   if (stats.length === 0) {
-    console.log('Aucun article trouvé pour l\'année 2021.');
+    console.log('Aucun article trouvé pour l\'année 2022.');
   } else {
     console.log('┌─────────┬────────┬────────┬────────┬────────┐');
     console.log('│ Mois    │ Total  │ Photos │ % Img  │ Descr. │');

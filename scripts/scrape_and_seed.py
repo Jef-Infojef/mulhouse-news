@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 import re
 import html
-from datetime import datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from googlenewsdecoder import gnewsdecoder
 import psycopg2
@@ -18,6 +18,7 @@ import random
 from urllib.parse import urljoin
 import unicodedata
 from scrape_utils import extract_image_caption
+import convex_client
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -28,6 +29,14 @@ if not DATABASE_URL:
     print("DEBUG: DATABASE_URL is missing!")
 else:
     print(f"DEBUG: DATABASE_URL found (length: {len(DATABASE_URL)})")
+
+# Backend : Convex (cloud) si USE_CONVEX=1 ou CONVEX_DEPLOY_KEY définie,
+# sinon Supabase (psycopg2) comme avant la Phase 3.
+USE_CONVEX = convex_client.use_convex()
+if USE_CONVEX:
+    print("[*] Backend: Convex (cloud)")
+else:
+    print("[*] Backend: Supabase (psycopg2)")
 
 def build_google_news_url(query: str) -> str:
     """Construit une URL RSS Google News standardisée."""
@@ -150,9 +159,14 @@ def fetch_content_data(url, fetch_title=False):
     return img, desc, title, caption
 
 def load_tags(cur):
-    """Charge tous les tags depuis la DB et retourne une liste de (id, name, slug, keywords)."""
-    cur.execute('SELECT id, name, slug FROM "NewsTag"')
-    rows = cur.fetchall()
+    """Charge tous les tags depuis le backend et retourne [(id, name, slug, keywords)].
+    Convex : id = supabaseId (cuid) des newsTags ; Supabase : id de la table NewsTag."""
+    if USE_CONVEX:
+        rows = convex_client.get_news_tags()
+        db_rows = [(t["id"], t["name"], t["slug"]) for t in rows]
+    else:
+        cur.execute('SELECT id, name, slug FROM "NewsTag"')
+        db_rows = cur.fetchall()
     
     # Mapping tag slug -> mots-clés pour la détection automatique
     TAG_KEYWORDS = {
@@ -194,7 +208,7 @@ def load_tags(cur):
     }
     
     tags = []
-    for tag_id, name, slug in rows:
+    for tag_id, name, slug in db_rows:
         keywords = TAG_KEYWORDS.get(slug, [name.lower()])
         tags.append({'id': tag_id, 'name': name, 'slug': slug, 'keywords': keywords})
     
@@ -224,7 +238,13 @@ def detect_tags(title, description, tags):
 
 
 def assign_tags_to_article(cur, article_id, tag_ids):
-    """Insère les liens article <-> tag dans ArticleGoogleTag."""
+    """Insère les liens article <-> tag dans ArticleGoogleTag.
+    article_id est l'UUID Supabase d'origine (supabaseId côté Convex)."""
+    if USE_CONVEX:
+        rows = [{"articleId": article_id, "tagId": tag_id} for tag_id in tag_ids]
+        if rows:
+            convex_client.upsert_article_google_tags(rows)
+        return
     for tag_id in tag_ids:
         try:
             cur.execute("""
@@ -240,14 +260,16 @@ def main():
     print(f"[*] Démarrage Mulhouse Actu Multi-Scraper - {datetime.now().strftime('%H:%M:%S')}")
     
     conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-    except Exception as e:
-        print(f"[!] Erreur DB: {e}")
-        return
+    cur = None
+    if not USE_CONVEX:
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+        except Exception as e:
+            print(f"[!] Erreur DB: {e}")
+            return
     
-    # Chargement des tags depuis la DB
+    # Chargement des tags depuis le backend
     tags = load_tags(cur)
     print(f"[*] {len(tags)} tags chargés: {[t['name'] for t in tags]}")
 
@@ -328,11 +350,18 @@ def main():
             if not raw_link: continue
 
             # 1. Vérification rapide par titre AVANT décodage (pour économiser les requêtes Google)
-            cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (title,))
-            if cur.fetchone():
-                titles_seen_this_run.add(normalized_title)
-                stats["duplicates_title"] += 1
-                continue
+            if USE_CONVEX:
+                existing_by_title = convex_client.get_article_by_title_recent(title, 48)
+                if existing_by_title:
+                    titles_seen_this_run.add(normalized_title)
+                    stats["duplicates_title"] += 1
+                    continue
+            else:
+                cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (title,))
+                if cur.fetchone():
+                    titles_seen_this_run.add(normalized_title)
+                    stats["duplicates_title"] += 1
+                    continue
 
             # 2. Décodage (uniquement pour Google)
             if feed['is_google']:
@@ -346,11 +375,18 @@ def main():
                 real_url = raw_link
 
             # 3. Vérifier doublon final (Lien)
-            cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
-            if cur.fetchone():
-                titles_seen_this_run.add(normalized_title)
-                stats["duplicates_link"] += 1
-                continue
+            if USE_CONVEX:
+                existing_by_link = convex_client.get_article_by_link(real_url)
+                if existing_by_link:
+                    titles_seen_this_run.add(normalized_title)
+                    stats["duplicates_link"] += 1
+                    continue
+            else:
+                cur.execute("SELECT id FROM \"Article\" WHERE link = %s", (real_url,))
+                if cur.fetchone():
+                    titles_seen_this_run.add(normalized_title)
+                    stats["duplicates_link"] += 1
+                    continue
 
             # 4. Récupération Meta et Insertion
             print(f"    [+] Nouveau ({feed['name']}): {title[:60]}...")
@@ -368,18 +404,47 @@ def main():
 
             # Doublon image
             if img:
-                cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\"::date = %s::date", (img, parsedate_to_datetime(pub_date_str).date()))
-                if cur.fetchone():
-                    continue
+                pub_date = parsedate_to_datetime(pub_date_str)
+                if USE_CONVEX:
+                    if pub_date.tzinfo is None:
+                        pub_date = pub_date.replace(tzinfo=timezone.utc)
+                    utc_day_start = pub_date.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                    start_ms = int(utc_day_start.timestamp() * 1000)
+                    end_ms = start_ms + 24 * 3600 * 1000
+                    if convex_client.get_article_by_image(img, start_ms, end_ms):
+                        continue
+                else:
+                    cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\"::date = %s::date", (img, pub_date.date()))
+                    if cur.fetchone():
+                        continue
 
             try:
-                cur.execute("""
-                    INSERT INTO "Article" (id, title, link, "imageUrl", "imageCaption", source, description, "publishedAt", "updatedAt")
-                    VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, NOW())
-                    RETURNING id
-                """, (title, real_url, img, caption, source, desc, parsedate_to_datetime(pub_date_str)))
-                article_row = cur.fetchone()
-                article_id = article_row[0] if article_row else None
+                if USE_CONVEX:
+                    # Nouvel article : on génère un UUID Supabase frais (nécessaire
+                    # pour joindre tags/images côté Convex) puis upsert par link.
+                    import uuid as uuid_mod
+                    supabase_id = str(uuid_mod.uuid4())
+                    row = {
+                        "title": title,
+                        "link": real_url,
+                        "imageUrl": img,
+                        "imageCaption": caption,
+                        "source": source,
+                        "description": desc,
+                        "publishedAt": int(parsedate_to_datetime(pub_date_str).timestamp() * 1000),
+                        "updatedAt": int(time.time() * 1000),
+                        "supabaseId": supabase_id,
+                    }
+                    convex_client.upsert_article(row)
+                    article_id = supabase_id
+                else:
+                    cur.execute("""
+                        INSERT INTO "Article" (id, title, link, "imageUrl", "imageCaption", source, description, "publishedAt", "updatedAt")
+                        VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, NOW())
+                        RETURNING id
+                    """, (title, real_url, img, caption, source, desc, parsedate_to_datetime(pub_date_str)))
+                    article_row = cur.fetchone()
+                    article_id = article_row[0] if article_row else None
                 
                 # Détection et assignation automatique des tags
                 if article_id and tags:
@@ -389,11 +454,13 @@ def main():
                         tag_names = [t['name'] for t in tags if t['id'] in matched_tag_ids]
                         print(f"      [🏷️] Tags: {', '.join(tag_names)}")
                 
-                conn.commit()
+                if not USE_CONVEX:
+                    conn.commit()
                 new_count += 1
                 stats["inserted_articles"].append({"title": title, "link": real_url, "source": source})
             except Exception as e:
-                conn.rollback()
+                if not USE_CONVEX:
+                    conn.rollback()
                 print(f"      [!] Erreur insertion: {e}")
 
     print(f"\n[*] Terminé. {new_count} articles ajoutés au total.")
@@ -406,18 +473,32 @@ def main():
 
         details = json.dumps(stats)
         
-        cur.execute("""
-            INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "articlesCount", "successCount", "errorCount", details)
-            VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s::jsonb)
-        """, (start_time, finished_at, status, stats["total_rss_items"], new_count, stats["google_decode_errors"], details))
-        conn.commit()
+        if USE_CONVEX:
+            convex_client.insert_scraping_log(
+                started_at=start_time,
+                finished_at=finished_at,
+                status=status,
+                articles_count=stats["total_rss_items"],
+                success_count=new_count,
+                error_count=stats["google_decode_errors"],
+                details=details,
+            )
+        else:
+            cur.execute("""
+                INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "articlesCount", "successCount", "errorCount", details)
+                VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """, (start_time, finished_at, status, stats["total_rss_items"], new_count, stats["google_decode_errors"], details))
+            conn.commit()
         print("[*] Log sauvegardé en DB.")
     except Exception as e:
         print(f"[!] Erreur sauvegarde log: {e}")
-        conn.rollback()
+        if not USE_CONVEX and conn:
+            conn.rollback()
 
-    cur.close()
-    conn.close()
+    if cur:
+        cur.close()
+    if conn:
+        conn.close()
 
 if __name__ == "__main__":
     main()

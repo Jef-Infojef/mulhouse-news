@@ -10,6 +10,7 @@
 
 import type * as app from "../app.js";
 import type * as migrations from "../migrations.js";
+import type * as scrapers from "../scrapers.js";
 import type * as stats from "../stats.js";
 
 import type {
@@ -21,6 +22,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   app: typeof app;
   migrations: typeof migrations;
+  scrapers: typeof scrapers;
   stats: typeof stats;
 }>;
 

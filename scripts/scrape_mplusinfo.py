@@ -10,6 +10,7 @@ from curl_cffi import requests
 from dotenv import load_dotenv
 
 from scrape_utils import fetch_mplusinfo_page, parse_mplusinfo_article
+import convex_client
 
 load_dotenv(".env.local")
 load_dotenv(".env")
@@ -18,6 +19,13 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 SOURCE = "mplusinfo.fr"
 SITEMAP_URL = "https://www.mplusinfo.fr/sitemap_contents.xml"
 SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+# Backend : Convex (cloud) si USE_CONVEX=1 ou CONVEX_DEPLOY_KEY définie.
+USE_CONVEX = convex_client.use_convex()
+if USE_CONVEX:
+    print("[*] Backend: Convex (cloud)")
+else:
+    print("[*] Backend: Supabase (psycopg2)")
 
 
 def get_db_connection():
@@ -63,11 +71,33 @@ def fetch_sitemap_entries(days: int | None) -> list[dict]:
 
 
 def get_existing_links(cur) -> set[str]:
+    """Links déjà en base pour la source (Convex : filtre par source exacte)."""
+    if USE_CONVEX:
+        return set(convex_client.get_article_links(source=SOURCE))
     cur.execute('SELECT link FROM "Article" WHERE link LIKE %s', ("%mplusinfo.fr%",))
     return {row[0] for row in cur.fetchall()}
 
 
 def insert_article(cur, data: dict) -> str | None:
+    """Insère un article (Convex : upsert par link avec UUID Supabase frais)."""
+    if USE_CONVEX:
+        import uuid as uuid_mod
+        supabase_id = str(uuid_mod.uuid4())
+        convex_client.upsert_article(
+            {
+                "title": data["title"],
+                "link": data["link"],
+                "imageUrl": data.get("image_url"),
+                "imageCaption": data.get("image_caption"),
+                "source": SOURCE,
+                "description": data.get("description") or "",
+                "publishedAt": int(data["published_at"].timestamp() * 1000),
+                "content": data.get("content"),
+                "updatedAt": int(__import__("time").time() * 1000),
+                "supabaseId": supabase_id,
+            }
+        )
+        return supabase_id
     cur.execute(
         """
         INSERT INTO "Article" (
@@ -93,6 +123,20 @@ def insert_article(cur, data: dict) -> str | None:
 
 
 def update_article_content(cur, article_id: str, content: str, image_caption: str | None):
+    """Met à jour content (et imageCaption si absent) d'un article."""
+    if USE_CONVEX:
+        # Convex : on passe par le link de l'article (dédup par link), l'id
+        # étant l'UUID Supabase. imageCaption COALESCE(imageCaption, %s) est
+        # reproduit côté mutation en ne fournissant le champ que s'il est absent.
+        convex_client.upsert_article(
+            {
+                "link": article_id,
+                "content": content,
+                "imageCaption": image_caption,
+                "updatedAt": int(__import__("time").time() * 1000),
+            }
+        )
+        return
     cur.execute(
         """
         UPDATE "Article"
@@ -116,6 +160,17 @@ def _json_safe_stats(stats: dict) -> str:
 
 
 def log_scraping(cur, conn, stats: dict, status: str):
+    if USE_CONVEX:
+        convex_client.insert_scraping_log(
+            started_at=stats["started_at"],
+            finished_at=datetime.now(),
+            status=status,
+            articles_count=stats["processed"],
+            success_count=stats["inserted"] + stats["updated"],
+            error_count=stats["errors"],
+            details=_json_safe_stats(stats),
+        )
+        return
     cur.execute(
         """
         INSERT INTO "ScrapingLog" (
@@ -137,7 +192,18 @@ def log_scraping(cur, conn, stats: dict, status: str):
     conn.commit()
 
 
-def backfill_missing_content(cur, conn, limit: int | None, dry_run: bool) -> dict:
+def _get_missing_content_rows(cur, limit: int | None) -> list[tuple]:
+    """Articles de la source au contenu court, triés publishedAt desc.
+    Convex : scan des récents de la source (approx. du SQL `link LIKE`).
+    Retourne (article_id, title, link) — en mode Convex article_id = link
+    (la mise à jour Convex est indexée par link)."""
+    if USE_CONVEX:
+        rows = convex_client.get_articles_short_content(limit=limit or 100, hours=24 * 365)
+        out = []
+        for a in rows:
+            if a["source"] == SOURCE:
+                out.append((a["link"], a["title"], a["link"]))
+        return out
     query = """
         SELECT id, title, link
         FROM "Article"
@@ -149,7 +215,11 @@ def backfill_missing_content(cur, conn, limit: int | None, dry_run: bool) -> dic
         query += f" LIMIT {int(limit)}"
 
     cur.execute(query)
-    rows = cur.fetchall()
+    return cur.fetchall()
+
+
+def backfill_missing_content(cur, conn, limit: int | None, dry_run: bool) -> dict:
+    rows = _get_missing_content_rows(cur, limit)
     stats = {
         "mode": "backfill_content",
         "processed": 0,
@@ -183,11 +253,13 @@ def backfill_missing_content(cur, conn, limit: int | None, dry_run: bool) -> dic
 
         try:
             update_article_content(cur, article_id, content, parsed.get("image_caption"))
-            conn.commit()
+            if not USE_CONVEX:
+                conn.commit()
             stats["updated"] += 1
             print(f"   ✅ Contenu mis à jour ({len(content)} chars)")
         except Exception as exc:
-            conn.rollback()
+            if not USE_CONVEX:
+                conn.rollback()
             stats["errors"] += 1
             print(f"   ❌ Erreur BDD: {exc}")
 
@@ -262,18 +334,21 @@ def seed_missing_articles(cur, conn, days: int | None, limit: int | None, dry_ru
                     "content": parsed.get("content"),
                 },
             )
-            conn.commit()
+            if conn:
+                conn.commit()
             stats["inserted"] += 1
             content_len = len(parsed.get("content") or "")
             print(f"   ✅ Inséré ({content_len} chars)")
             if not article_id:
                 stats["errors"] += 1
         except psycopg2.errors.UniqueViolation:
-            conn.rollback()
+            if conn:
+                conn.rollback()
             stats["skipped"] += 1
             print("   ↪ Déjà présent (doublon)")
         except Exception as exc:
-            conn.rollback()
+            if conn:
+                conn.rollback()
             stats["errors"] += 1
             print(f"   ❌ Erreur insertion: {exc}")
 
@@ -301,8 +376,8 @@ def main():
     days = args.days if args.days > 0 else None
 
     print("[*] Démarrage du scraper dédié mplusinfo.fr...")
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn = None if USE_CONVEX else get_db_connection()
+    cur = conn.cursor() if conn else None
 
     try:
         if args.backfill_content:
@@ -319,8 +394,10 @@ def main():
             status = "SUCCESS" if stats["errors"] == 0 else "WARNING"
             log_scraping(cur, conn, stats, status)
     finally:
-        cur.close()
-        conn.close()
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 
 if __name__ == "__main__":
