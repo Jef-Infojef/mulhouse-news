@@ -35,6 +35,9 @@ jobs:
         id: cookie_check
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
         run: |
           python scripts/check_ebra_cookie.py
           echo "cookie_ok=true" >> "$GITHUB_OUTPUT"

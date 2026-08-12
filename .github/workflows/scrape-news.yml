@@ -42,48 +42,64 @@ jobs:
 
       - name: Run Scraper Script (Discovery)
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
         run: |
           python scripts/scrape_and_seed.py
 
       - name: Run mplusinfo.fr scraper
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
         run: |
           python scripts/scrape_mplusinfo.py --days 14
 
       - name: Run le-periscope.info scraper
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
         run: |
           python scripts/scrape_periscope_seed.py --days 14
 
       - name: Run m2A le mag scraper
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
         run: |
           python scripts/scrape_mag_m2a.py --days 14
 
       - name: Run Full Content & Image Scraper
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ALSACE_COOKIES: ${{ secrets.ALSACE_COOKIES }}
           B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
           B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
           B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
           B2_PUBLIC_URL: ${{ secrets.B2_PUBLIC_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
         run: |
           python scripts/scrape_content_full.py
 
       - name: Sync RAG index (direct Supabase, sans Vercel)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
         run: python scripts/rag_sync_articles.py
 
       - name: Log failure to DB
         if: failure()
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
         run: |
           python scripts/log_github_failure.py

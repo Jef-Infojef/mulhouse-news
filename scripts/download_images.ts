@@ -1,8 +1,14 @@
-import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
+import * as convex from './convex_client_ts';
 
-const prisma = new PrismaClient();
+// Phase 4 : accès DB portés Prisma → Convex (scripts/convex_client_ts.ts).
+// La logique réseau (téléchargement, extensions, temps limite) est inchangée.
+// Les noms de fichiers restent basés sur `supabaseId` (ex-cuid Prisma) pour
+// les articles : stabilité des clés B2 et des valeurs localImage existantes.
+// Les images de galerie n'ont pas d'UUID Supabase propre chez Convex : nom
+// `gal-<_id Convex>`.
+
 const IMAGE_DIR = path.join(process.cwd(), 'public', 'article-images');
 
 if (!fs.existsSync(IMAGE_DIR)) {
@@ -110,30 +116,14 @@ async function downloadImage(url: string, id: string, articleLink?: string): Pro
 }
 
 async function main() {
-  console.log('--- Démarrage du téléchargement des images ---');
-  
-  const articles = await prisma.article.findMany({
-    where: {
-      imageUrl: { not: null, notIn: ['', 'null'] },
-      OR: [
-        { localImage: null },
-        // Orphelin : localImage en base mais jamais uploadé sur B2 (fichier local perdu sur runner éphémère)
-        { localImage: { not: null }, r2Url: null },
-      ],
-      publishedAt: {
-        gte: new Date(Date.now() - 48 * 60 * 60 * 1000) // 48h
-      }
-    },
-    select: {
-      id: true,
-      imageUrl: true,
-      link: true
-    },
-    orderBy: {
-      publishedAt: 'desc'
-    }
-  });
+  if (!convex.useConvex()) {
+    console.error('ERREUR : scripts images portés sur Convex (Phase 4) — définir CONVEX_DEPLOY_KEY et NEXT_PUBLIC_CONVEX_URL.');
+    process.exit(1);
+  }
 
+  console.log('--- Démarrage du téléchargement des images (Convex) ---');
+  
+  const articles = await convex.getImagesToDownload();
   console.log(`Articles à traiter : ${articles.length}`);
 
   let success = 0;
@@ -145,12 +135,9 @@ async function main() {
     
     await Promise.all(batch.map(async (article) => {
       try {
-        const filename = await downloadImage(article.imageUrl!, article.id, article.link);
+        const filename = await downloadImage(article.imageUrl, article.supabaseId ?? article.id, article.link);
         if (filename) {
-          await prisma.article.update({
-            where: { id: article.id },
-            data: { localImage: filename }
-          });
+          await convex.updateArticleLocalImage(article.id, filename);
           success++;
         } else {
           failed++;
@@ -175,22 +162,15 @@ async function main() {
 
 async function downloadArticleImages() {
   console.log('\n--- Téléchargement des images de galerie (ArticleImage) ---');
-  const images = await prisma.articleImage.findMany({
-    where: {
-      OR: [{ localImage: null }, { localImage: { not: null }, r2Url: null }],
-      Article: { publishedAt: { gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } }
-    },
-    select: { id: true, url: true, Article: { select: { link: true } } },
-    orderBy: { createdAt: 'desc' }
-  });
+  const images = await convex.getArticleImagesToDownload();
   console.log(`Images à traiter : ${images.length}`);
 
   let ok = 0;
   let ko = 0;
   for (const img of images) {
-    const filename = await downloadImage(img.url, `gal-${img.id}`, img.Article.link);
+    const filename = await downloadImage(img.url, `gal-${img.id}`, img.articleLink);
     if (filename) {
-      await prisma.articleImage.update({ where: { id: img.id }, data: { localImage: filename } });
+      await convex.updateArticleImageLocalImage(img.id, filename);
       ok++;
     } else {
       ko++;
@@ -200,5 +180,4 @@ async function downloadArticleImages() {
 }
 
 main()
-  .catch((e) => console.error(e))
-  .finally(async () => await prisma.$disconnect());
+  .catch((e) => console.error(e));

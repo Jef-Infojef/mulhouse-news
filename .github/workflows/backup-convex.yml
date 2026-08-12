@@ -1,0 +1,97 @@
+name: Sauvegarde Convex - Hebdomadaire
+
+# Export de la base Convex (dev:friendly-chicken-952) via la deploy key
+# (`npx convex export`), upload vers B2 sous convex-exports/<date>/, purge des
+# exports de plus de 8 semaines.
+# AJOUT progressif : les backups Supabase (backup-database.yml /
+# backup-incremental.yml) sont conservés pendant le cutover.
+
+on:
+  schedule:
+    # Chaque dimanche à 2h UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch: # Permet de lancer manuellement
+
+permissions:
+  contents: read
+
+jobs:
+  backup-convex:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Créer le nom du fichier de sauvegarde
+        id: backup-file
+        run: |
+          BACKUP_DATE=$(date +%Y-%m-%d_%H-%M-%S)
+          echo "filename=convex-${BACKUP_DATE}.zip" >> $GITHUB_OUTPUT
+          echo "date=${BACKUP_DATE}" >> $GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      - name: Exporter la base Convex
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: |
+          if [ -z "$CONVEX_DEPLOY_KEY" ]; then
+            echo "::error::Secret GitHub CONVEX_DEPLOY_KEY absent ou vide — export Convex impossible."
+            exit 1
+          fi
+
+          npx convex export --path convex-backup.zip
+
+          echo "Taille du fichier d'export :"
+          ls -lh convex-backup.zip
+
+          FILE_SIZE=$(stat -c%s convex-backup.zip 2>/dev/null || echo 0)
+          if [ "$FILE_SIZE" -lt 1000 ]; then
+            echo "::error::Le fichier d'export est vide ou trop petit. Échec probable de convex export."
+            exit 1
+          fi
+
+      - name: Configurer les credentials B2
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.B2_APPLICATION_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.B2_APPLICATION_KEY }}
+          aws configure set default.region us-west-002
+
+      - name: Uploader vers B2 Cloud Storage (convex-exports/<date>/)
+        env:
+          B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+          B2_BACKUP_BUCKET: mulhouse-news-backups-private
+        run: |
+          BACKUP_DATE=$(date +%Y-%m-%d)
+          aws s3 cp convex-backup.zip \
+            s3://$B2_BACKUP_BUCKET/convex-exports/$BACKUP_DATE/${{ steps.backup-file.outputs.filename }} \
+            --endpoint-url=https://$B2_ENDPOINT
+
+      - name: Nettoyer les anciens exports Convex (garder 8 semaines)
+        env:
+          B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+          B2_BACKUP_BUCKET: mulhouse-news-backups-private
+        run: |
+          aws s3 ls s3://$B2_BACKUP_BUCKET/convex-exports/ \
+            --endpoint-url=https://$B2_ENDPOINT --recursive > convex-export-list.txt || true
+
+          CUTOFF_DATE=$(date -d '56 days ago' +%Y-%m-%d)
+
+          while IFS= read -r line; do
+            FILE_KEY=$(echo "$line" | awk '{print $4}')
+            FILE_DATE=$(echo "$FILE_KEY" | grep -oP 'convex-exports/\K[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+
+            if [ ! -z "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
+              echo "Suppression : $FILE_KEY"
+              aws s3 rm s3://$B2_BACKUP_BUCKET/$FILE_KEY \
+                --endpoint-url=https://$B2_ENDPOINT || true
+            fi
+          done < convex-export-list.txt

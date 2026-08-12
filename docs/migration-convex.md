@@ -118,7 +118,7 @@ Vercel (Next.js, lectures/écritures admin)         GitHub Actions (scrapers)
 **Scripts non portés et pourquoi :**
 - `scrape_outings.py` (+ `outing_scrape_utils.py`) : tables `Outing`/`OutingCategory`/`OutingTag`/`ScrapeLog` **absentes du schéma Convex** (non migrées en Phase 1) → reste 100 % Supabase, à porter dans une phase ultérieure si les tables sorties sont migrées
 - `scrape_news.py` : n'existe pas dans le repo (whitelist mentionnée mais fichier absent)
-- Scripts TS `download_images.ts` / `sync_to_b2.ts` : **hors périmètre Phase 3 bis** — continuent de tourner sur Prisma/Supabase (appelés par `scrape_content_full.py`, inchangés)
+- Scripts TS `download_images.ts` / `sync_to_b2.ts` : **portés sur Convex en Phase 4** (`convex/images.ts` + `scripts/convex_client_ts.ts`), appelés par `scrape_content_full.py` via Convex (plus de Prisma)
 - Scripts one-shot archivés dans `scripts/legacy/` : restent utilisables contre Supabase (voir `scripts/legacy/README.md`)
 - Workflows m68-* : référence des scripts `.ts` d'un autre repo (MulhouseGPT), non concernés
 
@@ -134,8 +134,47 @@ else:
 ```
 
 **Reste à faire (Phase 3 bis / Phase 4) :**
-- Phase 3 bis : porter `download_images.ts` / `sync_to_b2.ts` (Prisma → Convex) pour retirer `DATABASE_URL` du build
-- Phase 4 : ajouter les secrets GHA `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` et `USE_CONVEX=1` aux workflows `scrape-news.yml`, `scrape-outings.yml`, `check-ebra-cookie.yml` ; décider du sort de `scrape_outings.py` (tables sorties)
+- [x] Phase 3 bis : porter `download_images.ts` / `sync_to_b2.ts` (Prisma → Convex) — fait (voir Phase 4)
+- [x] Phase 4 : secrets GHA `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` et `USE_CONVEX=1` sur `scrape-news.yml` + `check-ebra-cookie.yml` ; `scrape-outings.yml` conservé en Supabase (tables sorties absentes du schéma Convex)
+
+### Phase 4 — avancement (12/08/2026)
+
+**Fichiers créés / modifiés :**
+- `convex/images.ts` — **nouveau** : fonctions Convex des scripts TS d'images (Phase 3 bis / Phase 4)
+  - Queries : `images:getImagesToDownload` (articles à télécharger, fenêtre récente, paginée — `startMs` passé par le client pour la stabilité du cursor), `images:getArticleImagesToDownload` (galerie, jointure JS par `supabaseId`), `images:getImagesToUpload`, `images:getArticleImagesToUpload` (localImage non vide ET r2Url vide ; scans bornés indexés by_publishedAt + filtre JS — un filtre Convex sur toute la table dépassait la limite de lecture de 16 Mo)
+  - Mutations : `images:updateArticleLocalImage`, `images:updateArticleImageLocalImage`, `images:updateArticleR2Url`, `images:updateArticleImageR2Url` (patch par `_id` Convex)
+  - Pièges Convex rencontrés : `q.eq(field, null)` ne matche que le `null` explicite (pas le champ absent `undefined`) ; `.filter()` + `.paginate()` renvoyait des pages vides incohérentes → `.filter()` + `.take()` ou scans indexés + filtre JS
+- `scripts/convex_client_ts.ts` — **nouveau** : client HTTP TS équivalent à `convex_client.py` (endpoints `/api/query` + `/api/mutation`, auth `Authorization: Convex <deploy_key>`, omission des champs optionnels null/undefined, helpers typés `getImagesToDownload`, `updateArticleLocalImage`…)
+- `scripts/download_images.ts` — **réécrit** : Prisma → Convex ; logique réseau intacte ; nom de fichier conservé basé sur `supabaseId` (ex-cuid) pour les articles, `gal-<_id Convex>` pour la galerie
+- `scripts/sync_to_b2.ts` — **réécrit** : Prisma → Convex ; upload B2 intact ; patch `r2Url` via mutations
+- `.github/workflows/scrape-news.yml` — **basculé Convex** : `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` + `USE_CONVEX=1` sur tous les steps Python (scrape_and_seed, scrape_mplusinfo, scrape_periscope_seed, scrape_mag_m2a, scrape_content_full, Sync RAG index, Log failure) ; `DATABASE_URL` retiré des steps Python purs (fallback Supabase mort pendant la bascule, l'absence expose les erreurs de config) mais **conservé** sur `Generate Prisma Client` (requis par `prisma generate`) et `Sync RAG index` (écriture KnowledgeChunk Aiven en SQL inchangé) ; step `Log failure` garde `DATABASE_URL` en filet de secours
+- `.github/workflows/check-ebra-cookie.yml` — **basculé Convex** : mêmes env ajoutés au step de vérification (`check_ebra_cookie.py` lit AppConfig via Convex) ; `DATABASE_URL` conservé en fallback (workflow diagnostique)
+- `.github/workflows/backup-convex.yml` — **nouveau** : export Convex hebdo (dimanche 2h + dispatch) via `npx convex export --path convex-backup.zip` (deploy key), upload B2 `mulhouse-news-backups-private/convex-exports/<date>/`, purge > 8 semaines ; **additif** — `backup-database.yml`/`backup-incremental.yml` (pg_dump Supabase) conservés pendant le cutover
+- Secrets GitHub : `CONVEX_DEPLOY_KEY` (déjà en place) + `NEXT_PUBLIC_CONVEX_URL` **créé** (`https://friendly-chicken-952.convex.cloud`)
+
+**Commandes d'export Convex validées** (`npx convex export --help`) :
+- `npx convex export --path dir/` (répertoire) ou `--path snapshot.zip` (fichier ZIP)
+- `--include-file-storage` (fichiers du file storage), `--prod`, `--deployment <deployment>`
+- Testé contre le cloud avec la deploy key : `npx convex export --path convex-backup.zip` → snapshot créé puis téléchargé (ZIP ~41 Mo, JSONL par table)
+
+**Décisions workflows :**
+| Workflow | Décision | Raison |
+|---|---|---|
+| `scrape-news.yml` | **Basculé Convex** (`USE_CONVEX=1` partout) | Tous les scripts portés (dont images TS) ; `DATABASE_URL` ne reste que pour `prisma generate` + RAG Aiven |
+| `check-ebra-cookie.yml` | **Basculé Convex** (AppConfig lu via Convex) | `check_ebra_cookie.py` porté ; fallback Supabase conservé |
+| `scrape-outings.yml` | **Reste Supabase** | `scrape_outings.py` non porté : tables `Outing`/`OutingCategory`/`OutingTag`/`ScrapeLog` absentes du schéma Convex |
+
+**Tests Phase 4 (smoke test + run réel) :**
+- Smoke test temporaire (`scripts/_tmp_phase4_images.ts`, supprimé) : queries/updates validées contre le cloud — `getImagesToDownload`/`getArticleImagesToDownload` renvoient des `id` (_id Convex) et `supabaseId` cohérents ; `updateArticleLocalImage`/`updateArticleR2Url`/`updateArticleImageLocalImage` patch correctement un article/image de test (créé puis supprimé via `scrapers:upsertArticle`/`deleteArticleByLink`, cascade images vérifiée)
+- `download_images.ts` exécuté en réel : 1 article + 75 images de galerie téléchargés, `localImage` patché dans Convex
+- `sync_to_b2.ts` exécuté en réel : upload B2 OK, `r2Url` patché dans Convex
+
+**Ce qui reste (Phase 4 / cutover) :**
+- `scrape-outings.yml` en Supabase jusqu'à migration des tables sorties
+- Workflows m68-* : scripts TS d'un autre repo (MulhouseGPT), non concernés
+- Migration **prod** Convex (le dev `friendly-chicken-952` est la cible actuelle)
+- Retrait des backups pg_dump (`backup-database.yml`/`backup-incremental.yml`) au cutover final
+- Phase 5 : double écriture 1 semaine, bascule lectures, fin de vie Supabase
 
 ### Phase 4 — Crons & workflows (1–2 semaines)
 - [ ] Crons Convex : `scrapeNews (toutes 15 min)`, `publishScheduled`, `airportSync`, `knowledgeSync`, `scrapeOutings`, `revalidateTags` — remplacent les `schedule:` des workflows
