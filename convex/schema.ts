@@ -140,4 +140,54 @@ export default defineSchema({
     .index("by_slug", ["slug"])
     .index("by_associationId", ["associationId"])
     .index("by_supabaseId", ["supabaseId"]),
+
+  // ─── Sorties (agenda) — port Supabase → Convex (12/08/2026) ─────────────────
+  // Mêmes conventions que les collections existantes : les clés de liaison
+  // (associationId, outingId, categoryId) et les `supabaseId` restent en
+  // v.string() (UUID Supabase d'origine, jamais des v.id() Convex). Les dates
+  // Prisma → v.number() (epoch ms) ; les timestamps createdAt/updatedAt en
+  // optionnel pour tolérer les imports antérieurs à leur ajout.
+  // NB : OutingTag n'a PAS d'id dans Prisma (PK composite (outingId,
+  // categoryId)) — `supabaseId` est donc un UUID v5 déterministe calculé sur le
+  // couple, identique côté migration (TS) et côté scraper (Python) pour rester
+  // stable et rejouable.
+
+  outings: defineTable({
+    supabaseId: v.string(), // UUID Supabase d'origine (id de la ligne Outing)
+    associationId: v.string(),
+    title: v.string(),
+    description: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+    date: v.number(), // epoch ms (début de l'événement)
+    endDate: v.optional(v.number()),
+    location: v.optional(v.string()),
+    price: v.optional(v.string()),
+    link: v.optional(v.string()),
+    hidden: v.boolean(),
+    createdAt: v.optional(v.number()),
+    updatedAt: v.optional(v.number()),
+  })
+    .index("by_date", ["date"])
+    .index("by_hidden_date", ["hidden", "date"])
+    .index("by_supabaseId", ["supabaseId"]),
+
+  outingCategories: defineTable({
+    supabaseId: v.string(), // UUID Supabase d'origine (id de la ligne OutingCategory)
+    associationId: v.string(),
+    name: v.string(),
+    slug: v.string(),
+    color: v.optional(v.string()),
+    createdAt: v.optional(v.number()),
+    updatedAt: v.optional(v.number()),
+  })
+    .index("by_supabaseId", ["supabaseId"])
+    .index("by_slug", ["slug"]),
+
+  outingTags: defineTable({
+    supabaseId: v.string(), // UUID v5 déterministe (outingId:categoryId), pas d'id Prisma
+    outingId: v.string(), // supabaseId de l'Outing (UUID Supabase d'origine)
+    categoryId: v.string(), // supabaseId de l'OutingCategory (UUID Supabase d'origine)
+  })
+    .index("by_outingId", ["outingId"])
+    .index("by_categoryId", ["categoryId"]),
 });

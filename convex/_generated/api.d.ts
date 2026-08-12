@@ -12,6 +12,7 @@ import type * as app from "../app.js";
 import type * as images from "../images.js";
 import type * as migrations from "../migrations.js";
 import type * as news_bridge from "../news_bridge.js";
+import type * as outings from "../outings.js";
 import type * as scrapers from "../scrapers.js";
 import type * as stats from "../stats.js";
 
@@ -26,6 +27,7 @@ declare const fullApi: ApiFromModules<{
   images: typeof images;
   migrations: typeof migrations;
   news_bridge: typeof news_bridge;
+  outings: typeof outings;
   scrapers: typeof scrapers;
   stats: typeof stats;
 }>;

@@ -30,8 +30,15 @@ jobs:
 
       - name: Scrape agendas (M+ Info, m2A le mag, JDS.fr)
         env:
+          # Double écriture : Supabase (chemin primaire — assocommercants.fr
+          # sert encore les sorties depuis Supabase) + Convex (miroir RAG).
+          # DATABASE_URL reste donc REQUIS ; USE_CONVEX=1 active le miroir
+          # Convex dans outing_scrape_utils (voir scripts/outing_scrape_utils.py).
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ASSOCIATION_ID: ${{ secrets.ASSOCIATION_ID }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: "1"
         run: |
           python scripts/scrape_outings.py --source all --past-days=7 --ahead-days=120
 

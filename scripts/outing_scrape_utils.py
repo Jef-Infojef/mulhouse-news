@@ -1,10 +1,22 @@
-"""Utilitaires partagés pour le scraping d'agenda (Outing / Sorties)."""
+"""Utilitaires partagés pour le scraping d'agenda (Outing / Sorties).
+
+Backend dual-mode (12/08/2026) : quand `convex_client.use_convex()` est vrai
+(USE_CONVEX=1 / CONVEX_DEPLOY_KEY définie), les écritures sorties passent en
+DOUBLE ÉCRITURE — Supabase (requête SQL, chemin primaire) ET Convex (miroir).
+Décision documentée : assocommercants.fr sert encore les sorties depuis
+Supabase, retirer l'écriture SQL priverait le site de ses données ; le miroir
+Convex alimente le RAG MulhouseGPT et prépare le cutover. Le miroir est
+non-bloquant : si Convex répond en erreur, le run continue (la donnée Supabase
+est déjà écrite) et l'erreur est tracée sur stderr. Sans config Convex, le
+comportement SQL historique est inchangé.
+"""
 from __future__ import annotations
 
 import html as htmllib
 import json
 import os
 import re
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -12,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg2
 from curl_cffi import requests
+
+import convex_client
 
 FETCH_HEADERS = {
     "User-Agent": (
@@ -70,6 +84,69 @@ def get_db_connection():
 
 def new_id() -> str:
     return str(uuid.uuid4())
+
+
+def stable_tag_id(outing_id: str, category_id: str) -> str:
+    """UUID v5 déterministe du couple (outingId, categoryId).
+
+    OutingTag n'a pas d'id dans Prisma (PK composite) : le supabaseId Convex
+    est donc un UUID v5 calculé sur le couple, identique à celui généré par
+    scripts/migrate_outings_to_convex.ts (namespace URL) — stable entre les
+    runs et cohérent entre migration et scraping."""
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{outing_id}:{category_id}"))
+
+
+def _mirror_convex_safe(label: str, fn) -> None:
+    """Exécute un appel miroir Convex sans faire échouer le run si Convex
+    répond en erreur. Supabase est le chemin primaire (assocommercants.fr lit
+    Supabase) : le miroir ne doit jamais empêcher la donnée SQL d'être écrite."""
+    try:
+        fn()
+    except convex_client.ConvexError as exc:
+        print(f"[convex-mirror] {label} : {exc}", file=sys.stderr)
+
+
+def _mirror_outings_convex(
+    association_id: str,
+    category_id: str | None,
+    event: ParsedEvent,
+    outing_id: str,
+) -> None:
+    """Miroir Convex d'une sortie + son lien catégorie (double écriture).
+
+    Voir la doc en tête de module (décision 12/08/2026). La sortie porte le
+    même `supabaseId` que la ligne Supabase (UUID généré par la requête SQL) :
+    les deux écritures restent synchronisées sur la même clé de liaison."""
+    _mirror_convex_safe(
+        f"upsert_outing {outing_id}",
+        lambda: convex_client.upsert_outing(
+            {
+                "supabaseId": outing_id,
+                "associationId": association_id,
+                "title": event.title,
+                "description": event.description,
+                "imageUrl": event.image_url,
+                "date": convex_client.to_epoch_ms(event.date),
+                "endDate": convex_client.to_epoch_ms(event.end_date),
+                "location": event.location,
+                "price": event.price,
+                "link": event.link,
+                "hidden": False,
+                "updatedAt": int(datetime.now(timezone.utc).timestamp() * 1000),
+            }
+        ),
+    )
+    if category_id:
+        _mirror_convex_safe(
+            f"upsert_outing_tag {outing_id}",
+            lambda: convex_client.upsert_outing_tag(
+                {
+                    "supabaseId": stable_tag_id(outing_id, category_id),
+                    "outingId": outing_id,
+                    "categoryId": category_id,
+                }
+            ),
+        )
 
 
 def sleep_ms(ms: int) -> None:
@@ -230,15 +307,30 @@ def ensure_category(
     )
     row = cur.fetchone()
     if row:
-        return row[0]
+        category_id = row[0]
+    else:
+        category_id = new_id()
+        cur.execute(
+            """
+            INSERT INTO "OutingCategory" (id, "associationId", name, slug, color, "createdAt", "updatedAt")
+            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+            """,
+            (category_id, association_id, name, slug, color),
+        )
 
-    category_id = new_id()
-    cur.execute(
-        """
-        INSERT INTO "OutingCategory" (id, "associationId", name, slug, color, "createdAt", "updatedAt")
-        VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-        """,
-        (category_id, association_id, name, slug, color),
+    # Miroir Convex (double écriture, non bloquant) : la catégorie garde le
+    # même supabaseId (UUID Supabase) que la ligne SQL.
+    _mirror_convex_safe(
+        f"upsert_outing_category {slug}",
+        lambda: convex_client.upsert_outing_category(
+            {
+                "supabaseId": category_id,
+                "associationId": association_id,
+                "name": name,
+                "slug": slug,
+                "color": color,
+            }
+        ),
     )
     return category_id
 
@@ -299,29 +391,35 @@ def upsert_outing(
                 """,
                 (outing_id, category_id),
             )
-        return "updated"
-
-    outing_id = new_id()
-    cur.execute(
-        """
-        INSERT INTO "Outing" (
-            id, "associationId", title, description, "imageUrl", date, "endDate",
-            location, price, link, hidden, "createdAt", "updatedAt"
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-        """,
-        (outing_id, association_id, *data),
-    )
-    if category_id:
+        result = "updated"
+    else:
+        outing_id = new_id()
         cur.execute(
             """
-            INSERT INTO "OutingTag" ("outingId", "categoryId")
-            VALUES (%s, %s)
-            ON CONFLICT DO NOTHING
+            INSERT INTO "Outing" (
+                id, "associationId", title, description, "imageUrl", date, "endDate",
+                location, price, link, hidden, "createdAt", "updatedAt"
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             """,
-            (outing_id, category_id),
+            (outing_id, association_id, *data),
         )
-    return "inserted"
+        if category_id:
+            cur.execute(
+                """
+                INSERT INTO "OutingTag" ("outingId", "categoryId")
+                VALUES (%s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (outing_id, category_id),
+            )
+        result = "inserted"
+
+    # Miroir Convex (double écriture, non bloquant) : la sortie garde le même
+    # supabaseId (UUID Supabase) que la ligne SQL.
+    if convex_client.use_convex():
+        _mirror_outings_convex(association_id, category_id, event, outing_id)
+    return result
 
 
 def log_scrape(

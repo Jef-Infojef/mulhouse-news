@@ -296,3 +296,99 @@ export const importAppConfig = mutation({
     return { inserted, skipped: rows.length - inserted };
   },
 });
+
+// ─── Sorties (Outing / OutingCategory / OutingTag) — port 12/08/2026 ─────────
+// Dédup par supabaseId (UUID Supabase d'origine = PK de Outing/OutingCategory).
+// Pour OutingTag (pas d'id Prisma, PK composite (outingId, categoryId)), le
+// `supabaseId` est un UUID v5 déterministe calculé côté script de migration —
+// dédup par ce supabaseId équivaut donc à une dédup par couple.
+
+export const importOutings = mutation({
+  args: {
+    rows: v.array(
+      v.object({
+        supabaseId: v.string(),
+        associationId: v.string(),
+        title: v.string(),
+        description: v.optional(v.string()),
+        imageUrl: v.optional(v.string()),
+        date: v.number(),
+        endDate: v.optional(v.number()),
+        location: v.optional(v.string()),
+        price: v.optional(v.string()),
+        link: v.optional(v.string()),
+        hidden: v.boolean(),
+        createdAt: v.optional(v.number()),
+        updatedAt: v.optional(v.number()),
+      })
+    ),
+  },
+  handler: async (ctx, { rows }) => {
+    let inserted = 0;
+    for (const row of rows) {
+      const existing = await ctx.db
+        .query("outings")
+        .withIndex("by_supabaseId", (q) => q.eq("supabaseId", row.supabaseId))
+        .first();
+      if (existing) continue;
+      await ctx.db.insert("outings", row);
+      inserted++;
+    }
+    return { inserted, skipped: rows.length - inserted };
+  },
+});
+
+export const importOutingCategories = mutation({
+  args: {
+    rows: v.array(
+      v.object({
+        supabaseId: v.string(),
+        associationId: v.string(),
+        name: v.string(),
+        slug: v.string(),
+        color: v.optional(v.string()),
+        createdAt: v.optional(v.number()),
+        updatedAt: v.optional(v.number()),
+      })
+    ),
+  },
+  handler: async (ctx, { rows }) => {
+    let inserted = 0;
+    for (const row of rows) {
+      const existing = await ctx.db
+        .query("outingCategories")
+        .withIndex("by_supabaseId", (q) => q.eq("supabaseId", row.supabaseId))
+        .first();
+      if (existing) continue;
+      await ctx.db.insert("outingCategories", row);
+      inserted++;
+    }
+    return { inserted, skipped: rows.length - inserted };
+  },
+});
+
+export const importOutingTags = mutation({
+  args: {
+    rows: v.array(
+      v.object({
+        supabaseId: v.string(), // UUID v5 déterministe (outingId:categoryId)
+        outingId: v.string(), // supabaseId de l'Outing
+        categoryId: v.string(), // supabaseId de l'OutingCategory
+      })
+    ),
+  },
+  handler: async (ctx, { rows }) => {
+    let inserted = 0;
+    for (const row of rows) {
+      const existing = await ctx.db
+        .query("outingTags")
+        .withIndex("by_outingId", (q) => q.eq("outingId", row.outingId))
+        .filter((q) => q.eq(q.field("categoryId"), row.categoryId))
+        .first();
+      if (existing) continue;
+      await ctx.db.insert("outingTags", row);
+      inserted++;
+    }
+    return { inserted, skipped: rows.length - inserted };
+  },
+});

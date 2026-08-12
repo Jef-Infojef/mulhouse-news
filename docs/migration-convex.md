@@ -318,6 +318,46 @@ Note : un log `GITHUB_CRASH` (06:58 encodé ≈ 04:58 UTC réel) et des logs `SM
 
 **Piège rencontré** : nom de module Convex — `news-bridge.js` invalide (tirets interdits) → renommé `news_bridge.ts`. `db.get` lève une erreur sur un id malformé (ne retourne pas null) → try/catch dans `getNewsArticleImagesByIds`.
 
+### Port des sorties vers Convex — 12/08/2026
+
+**Objectif** : migrer les sorties (Outing / OutingCategory / OutingTag) de Supabase vers Convex pour que Supabase ne serve plus ces données. Les sorties restent en double écriture le temps du cutover (assocommercants.fr lit encore Supabase).
+
+**Schéma ajouté (`convex/schema.ts`) :**
+- `outings` : supabaseId (UUID Supabase = clé de liaison), associationId, title, description?, imageUrl?, date (epoch ms), endDate?, location?, price?, link?, hidden (bool), createdAt?, updatedAt? — index `by_date`, `by_hidden_date`, `by_supabaseId`.
+- `outingCategories` : supabaseId, associationId, name, slug, color? — index `by_supabaseId`, `by_slug`.
+- `outingTags` : supabaseId, outingId (supabaseId de l'Outing), categoryId (supabaseId de la catégorie) — index `by_outingId`, `by_categoryId`.
+- NB OutingTag : pas d'id dans Prisma (PK composite `(outingId, categoryId)`) → `supabaseId` = UUID v5 déterministe du couple (identique côté migration TS et scraper Python).
+- Refs en `v.string()` (UUID Supabase d'origine), jamais de `v.id()` — même convention que les autres collections.
+
+**Fonctions Convex ajoutées (`convex/outings.ts`, déployées sur prod `academic-spoonbill-914`) :**
+- Mutations : `upsertOuting` (dédup supabaseId, patch partiel des champs fournis), `upsertOutingCategory` (dédup supabaseId), `upsertOutingTag` (dédup `(outingId, categoryId)` + patch du supabaseId si différent), `deleteOutingBySupabaseId` (cascade manuelle des tags, cohérent avec `deleteArticleByLink`).
+- Queries : `getRecentOutings` (hidden=false, date ∈ [maintenant, maintenant+90j], tri date asc, LIMIT 3000, catégories jointes en JS via outingTags+outingCategories → `{id: supabaseId, ..., categories:[{name}]}`), `getOutingCategories`.
+- Mutations d'import idempotentes dans `convex/migrations.ts` : `importOutings`, `importOutingCategories`, `importOutingTags` (chacune `{inserted, skipped}`).
+
+**Migration des données (`scripts/migrate_outings_to_convex.ts`, prod, rejouable/idempotente) :**
+
+| Table | Supabase | Convex insérés | déjà présents |
+|---|---|---|---|
+| Outing | 5 564 | +5 564 | 0 (2e passage : 5 564) |
+| OutingCategory | 18 | +18 | 0 (2e passage : 18) |
+| OutingTag | 5 538 | +5 538 | 0 (2e passage : 5 538) |
+
+**Port du scraper sorties (double écriture) — décision documentée dans `scripts/outing_scrape_utils.py` :**
+- Quand `USE_CONVEX=1` / `CONVEX_DEPLOY_KEY` définie, `ensure_category` et `upsert_outing` écrivent **Supabase ET Convex** : la requête SQL reste le chemin primaire (assocommercants.fr sert encore les sorties depuis Supabase — retirer l'écriture SQL priverait le site de ses données) ; le miroir Convex alimente le RAG MulhouseGPT et prépare le cutover. Même `supabaseId` des deux côtés.
+- Le miroir est **non bloquant** : si Convex répond en erreur, le run continue (donnée Supabase déjà écrite) et l'erreur est tracée sur stderr (`_mirror_convex_safe`).
+- Helpers Python ajoutés dans `scripts/convex_client.py` : `upsert_outing`, `upsert_outing_category`, `upsert_outing_tag`, `get_outing_categories`, `get_recent_outings`, `delete_outing_by_supabase_id`.
+- `scrape_outings.py` : **inchangé** — le dual-mode est centralisé dans outing_scrape_utils (c'est le helper qui bascule).
+- `log_scrape` reste SQL (ScrapeLog pas dans le périmètre).
+
+**Workflow `.github/workflows/scrape-outings.yml` :** ajout `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` + `USE_CONVEX=1` au step de scraping ; `DATABASE_URL` **conservé** (requis pour la double écriture, il n'est plus retiré).
+
+**Pont RAG MulhouseGPT (repo B) :**
+- `lib/convex-news.ts` — `fetchRecentOutings()` (query `outings:getRecentOutings`, timestamps epoch ms, `id` = supabaseId).
+- `lib/rag/indexer.ts` — `indexOutings()` : quand `useConvexNews()`, lit via `fetchRecentOutings` (conversion epoch ms → Date, catégories → `tags:[{category:{name}}]` = contrat de `formatOutingDocument`) ; sinon SQL inchangé. Feature catalogue Bibliothèque d'Alsace intacte. Typecheck repo B OK.
+- Workflows m68-* : `m68-full-index.yml` et `m68-knowledge-sync.yml` avaient déjà `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` (12/08) → rien à faire.
+
+**Ce qui reste sur Supabase (et pourquoi) :** cinémas (Cinema/Screening), ScrapeLog (non migré), KnowledgeChunk historique inutilisé (RAG = Aiven), admin assocommercants (écrit NewsArticle en Supabase, copié vers Convex par le pont 15 min).
+
 ### Pont NewsArticle (assocommercants) Supabase → Convex — 12/08/2026
 
 **Objectif** : fermer le dernier trou du cutover — les NewsArticle créées par le repo privé assocommercants (`publish-scheduled.ts`) sont écrites dans **Supabase**, mais le RAG de MulhouseGPT et Convex lisent la table `newsArticles` (Convex), restée VIDE. Ce pont copie les news publiées vers Convex à chaque run du workflow m68-publish-scheduled (toutes les 15 min).
@@ -339,7 +379,7 @@ Note : un log `GITHUB_CRASH` (06:58 encodé ≈ 04:58 UTC réel) et des logs `SM
 **Ce qui reste :**
 - L'app assocommercants écrit toujours en Supabase ; le pont copie vers Convex à chaque run 15 min (insert-only — pas de mise à jour des news déjà copiées si elles passent hidden/unpublished ; les queries RAG filtrent ces cas à la lecture).
 - NewsTag déjà migré (5 lignes, backfill supabaseId fait en Phase 1/6).
-- Sorties/cinéma toujours Supabase (tables absentes du schéma Convex).
+- Sorties migrées le 12/08 (voir section « Port des sorties vers Convex ») ; cinéma toujours Supabase (tables absentes du schéma Convex).
 
 ### Phase 4 — Crons & workflows (1–2 semaines)
 - [ ] Crons Convex : `scrapeNews (toutes 15 min)`, `publishScheduled`, `airportSync`, `knowledgeSync`, `scrapeOutings`, `revalidateTags` — remplacent les `schedule:` des workflows

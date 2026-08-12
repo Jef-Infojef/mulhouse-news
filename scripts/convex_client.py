@@ -77,6 +77,10 @@ _STRIP_NONE_KEYS = {
     "publishedAt", "scrapedAt", "createdAt", "updatedAt", "content",
     "localImage", "r2Url", "hidden", "supabaseId",
     "caption", "position", "finishedAt", "errorMessage", "details",
+    # Sorties (outings / outingCategories / outingTags)
+    "date", "endDate", "location", "price", "link",
+    "associationId", "slug", "color", "name",
+    "outingId", "categoryId",
 }
 
 
@@ -220,6 +224,53 @@ def upsert_article_google_tags(rows: list[dict]) -> dict:
 def get_news_tags() -> list[dict]:
     """Tous les tags : [{"id": <supabaseId>, "name", "slug"}]."""
     return _call("scrapers:getNewsTags", {}, mutation=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sorties / agenda (module convex/outings.ts)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def upsert_outing(row: dict) -> dict:
+    """Insère ou met à jour une sortie (dédup par supabaseId, UUID Supabase).
+
+    `row` attend : supabaseId, associationId, title, date (datetime → epoch ms
+    automatique) + optionnels description, imageUrl, endDate, location, price,
+    link, hidden, createdAt, updatedAt. Les champs absents/None ne sont pas
+    écrasés sur une sortie existante."""
+    return _call("outings:upsertOuting", {"row": _strip_none(row)}, mutation=True)
+
+
+def upsert_outing_category(row: dict) -> dict:
+    """Insère ou met à jour une catégorie (dédup par supabaseId).
+
+    `row` : supabaseId, associationId, name, slug + optionnels color, createdAt,
+    updatedAt."""
+    return _call("outings:upsertOutingCategory", {"row": _strip_none(row)}, mutation=True)
+
+
+def upsert_outing_tag(row: dict) -> dict:
+    """Insère le lien sortie↔catégorie (dédup par (outingId, categoryId)).
+
+    `row` : supabaseId (UUID v5 déterministe du couple), outingId (supabaseId
+    de la sortie), categoryId (supabaseId de la catégorie)."""
+    return _call("outings:upsertOutingTag", {"row": _strip_none(row)}, mutation=True)
+
+
+def get_outing_categories() -> list[dict]:
+    """Toutes les catégories : [{"supabaseId", "name", "slug", "color"}]."""
+    return _call("outings:getOutingCategories", {}, mutation=False)
+
+
+def get_recent_outings(limit: int = 3000) -> list[dict]:
+    """Sorties à venir (hidden=false, 90 j) triées par date asc — pont RAG.
+    `id` = supabaseId ; `categories` = [{"name", ...}]."""
+    res = _call("outings:getRecentOutings", {"limit": limit}, mutation=False)
+    return res["outings"]
+
+
+def delete_outing_by_supabase_id(supabase_id: str) -> dict:
+    """Supprime une sortie + ses tags (cascade manuelle)."""
+    return _call("outings:deleteOutingBySupabaseId", {"supabaseId": supabase_id}, mutation=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
