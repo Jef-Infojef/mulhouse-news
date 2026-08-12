@@ -9,6 +9,7 @@
  */
 
 import type * as app from "../app.js";
+import type * as cinemas from "../cinemas.js";
 import type * as images from "../images.js";
 import type * as migrations from "../migrations.js";
 import type * as news_bridge from "../news_bridge.js";
@@ -24,6 +25,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   app: typeof app;
+  cinemas: typeof cinemas;
   images: typeof images;
   migrations: typeof migrations;
   news_bridge: typeof news_bridge;

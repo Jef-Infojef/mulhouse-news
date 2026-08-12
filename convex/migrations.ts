@@ -392,3 +392,102 @@ export const importOutingTags = mutation({
     return { inserted, skipped: rows.length - inserted };
   },
 });
+
+// ─── Cinémas (Cinema / Movie / Screening) — port 12/08/2026 ────────────────
+// Dédup par supabaseId = id Prisma Supabase d'origine (Cinema.id cuid,
+// Movie.id `movie-<allocineId>`, Screening.id `scr-...`). Idempotentes : un 2e
+// passage ne réinsère pas les lignes déjà présentes.
+
+export const importCinemas = mutation({
+  args: {
+    rows: v.array(
+      v.object({
+        supabaseId: v.string(),
+        name: v.string(),
+        slug: v.string(),
+        allocineId: v.string(),
+        address: v.optional(v.string()),
+        website: v.optional(v.string()),
+      })
+    ),
+  },
+  handler: async (ctx, { rows }) => {
+    let inserted = 0;
+    for (const row of rows) {
+      const existing = await ctx.db
+        .query("cinemas")
+        .withIndex("by_supabaseId", (q) => q.eq("supabaseId", row.supabaseId))
+        .first();
+      if (existing) continue;
+      await ctx.db.insert("cinemas", row);
+      inserted++;
+    }
+    return { inserted, skipped: rows.length - inserted };
+  },
+});
+
+export const importMovies = mutation({
+  args: {
+    rows: v.array(
+      v.object({
+        supabaseId: v.string(),
+        allocineId: v.number(),
+        title: v.string(),
+        originalTitle: v.optional(v.string()),
+        synopsis: v.optional(v.string()),
+        posterUrl: v.optional(v.string()),
+        trailerUrl: v.optional(v.string()),
+        runtime: v.optional(v.string()),
+        genres: v.optional(v.string()),
+        director: v.optional(v.string()),
+        cast: v.optional(v.string()),
+        ageRating: v.optional(v.string()),
+        userRating: v.optional(v.number()),
+        pressRating: v.optional(v.number()),
+        updatedAt: v.optional(v.number()),
+      })
+    ),
+  },
+  handler: async (ctx, { rows }) => {
+    let inserted = 0;
+    for (const row of rows) {
+      const existing = await ctx.db
+        .query("movies")
+        .withIndex("by_supabaseId", (q) => q.eq("supabaseId", row.supabaseId))
+        .first();
+      if (existing) continue;
+      await ctx.db.insert("movies", row);
+      inserted++;
+    }
+    return { inserted, skipped: rows.length - inserted };
+  },
+});
+
+export const importScreenings = mutation({
+  args: {
+    rows: v.array(
+      v.object({
+        supabaseId: v.string(),
+        cinemaId: v.string(), // supabaseId du Cinema (id Prisma Cinema)
+        movieId: v.string(), // supabaseId du Movie (id Prisma Movie)
+        startsAt: v.number(), // epoch ms
+        diffusionVersion: v.string(),
+        projection: v.string(),
+        bookingUrl: v.optional(v.string()),
+      })
+    ),
+  },
+  handler: async (ctx, { rows }) => {
+    let inserted = 0;
+    for (const row of rows) {
+      const existing = await ctx.db
+        .query("screenings")
+        .withIndex("by_supabaseId", (q) => q.eq("supabaseId", row.supabaseId))
+        .first();
+      if (existing) continue;
+      await ctx.db.insert("screenings", row);
+      inserted++;
+    }
+    return { inserted, skipped: rows.length - inserted };
+  },
+});

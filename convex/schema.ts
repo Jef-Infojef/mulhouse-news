@@ -190,4 +190,62 @@ export default defineSchema({
   })
     .index("by_outingId", ["outingId"])
     .index("by_categoryId", ["categoryId"]),
+
+  // ─── Cinémas — port Supabase → Convex (12/08/2026) ─────────────────────────
+  // Mêmes conventions que le reste du schéma : les refs (cinemaId, movieId) et
+  // les `supabaseId` restent en v.string() (id Prisma d'origine, jamais de
+  // v.id() Convex). Le `supabaseId` de chaque collection est l'**id Prisma**
+  // Supabase : Cinema.id (cuid), Movie.id (`movie-<allocineId>`),
+  // Screening.id (`scr-<cinemaId>-<movieId>-...`) — c'est la clé qui rend le
+  // miroir scraper cohérent (le scraper écrit Supabase en premier puis
+  // réplique en Convex avec ces mêmes ids).
+  // Dates Prisma → v.number() (epoch ms). `runtime` reste une string (valeur
+  // texte Allociné stockée telle quelle en Supabase, consommée telle quelle par
+  // le site assocommercants).
+
+  cinemas: defineTable({
+    supabaseId: v.string(), // id Prisma Cinema (cuid)
+    name: v.string(),
+    slug: v.string(),
+    allocineId: v.string(), // allocineId Prisma (String, unique)
+    address: v.optional(v.string()),
+    website: v.optional(v.string()),
+  })
+    .index("by_supabaseId", ["supabaseId"])
+    .index("by_allocineId", ["allocineId"])
+    .index("by_slug", ["slug"]),
+
+  movies: defineTable({
+    supabaseId: v.string(), // id Prisma Movie (`movie-<allocineId>`)
+    allocineId: v.number(), // allocineId Prisma (Int, unique)
+    title: v.string(),
+    originalTitle: v.optional(v.string()),
+    synopsis: v.optional(v.string()),
+    posterUrl: v.optional(v.string()),
+    trailerUrl: v.optional(v.string()),
+    runtime: v.optional(v.string()), // durée (texte Allociné)
+    genres: v.optional(v.string()),
+    director: v.optional(v.string()),
+    cast: v.optional(v.string()),
+    ageRating: v.optional(v.string()),
+    userRating: v.optional(v.number()),
+    pressRating: v.optional(v.number()),
+    updatedAt: v.optional(v.number()),
+  })
+    .index("by_supabaseId", ["supabaseId"])
+    .index("by_allocineId", ["allocineId"]),
+
+  screenings: defineTable({
+    supabaseId: v.string(), // id Prisma Screening (`scr-<cinemaId>-<movieId>-...`)
+    cinemaId: v.string(), // supabaseId du Cinema (id Prisma Cinema)
+    movieId: v.string(), // supabaseId du Movie (id Prisma Movie)
+    startsAt: v.number(), // epoch ms
+    diffusionVersion: v.string(), // VF | VO | VOST | VFST
+    projection: v.string(), // 2D | 3D | IMAX | 4DX
+    bookingUrl: v.optional(v.string()),
+  })
+    .index("by_supabaseId", ["supabaseId"])
+    .index("by_cinemaId", ["cinemaId"])
+    .index("by_movieId", ["movieId"])
+    .index("by_startsAt", ["startsAt"]),
 });

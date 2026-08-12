@@ -381,6 +381,46 @@ Note : un log `GITHUB_CRASH` (06:58 encodé ≈ 04:58 UTC réel) et des logs `SM
 - NewsTag déjà migré (5 lignes, backfill supabaseId fait en Phase 1/6).
 - Sorties migrées le 12/08 (voir section « Port des sorties vers Convex ») ; cinéma toujours Supabase (tables absentes du schéma Convex).
 
+### Port des cinémas vers Convex — 12/08/2026
+
+**Objectif** : migrer Cinema/Movie/Screening de Supabase vers Convex pour que Supabase ne serve plus ces données. Les cinémas restent en double écriture le temps du cutover (assocommercants.fr lit encore Supabase ; le miroir alimente le RAG MulhouseGPT et prépare la bascule).
+
+**Schéma ajouté (`convex/schema.ts`) :**
+- `cinemas` : supabaseId (= **id Prisma Cinema**, cuid), name, slug, allocineId (string), address?, website? — index `by_supabaseId`, `by_allocineId`, `by_slug`.
+- `movies` : supabaseId (= **id Prisma Movie** `movie-<allocineId>`), allocineId (number), title, originalTitle?, synopsis?, posterUrl?, trailerUrl?, runtime? (**string** — texte Allociné stocké tel quel en Supabase, consommé tel quel par le site), genres?, director?, cast?, ageRating?, userRating?, pressRating?, updatedAt? — index `by_supabaseId`, `by_allocineId`.
+- `screenings` : supabaseId (= **id Prisma Screening** `scr-<cinemaId>-<movieId>-...`), cinemaId (supabaseId du Cinema), movieId (supabaseId du Movie), startsAt (epoch ms), diffusionVersion, projection, bookingUrl? — index `by_supabaseId`, `by_cinemaId`, `by_movieId`, `by_startsAt`.
+- **Convention ids** : `supabaseId` = ids Prisma d'origine (pas des UUID) — c'est la clé qui rend le miroir scraper cohérent entre les deux stores sans table de mapping.
+
+**Fonctions Convex ajoutées (`convex/cinemas.ts`, déployées sur prod `academic-spoonbill-914`) :**
+- Mutations : `upsertCinema` (dédup supabaseId, patch du supabaseId si allocineId trouvé), `upsertMovie` (dédup supabaseId puis allocineId), `replaceScreeningsForCinemaDay` (delete cinéma/jour + insert batch, retourne `{deleted, inserted}`), `deleteCinemaBySupabaseId` (définitif, cascade screenings — films conservés, cohérent avec `deleteOutingBySupabaseId`).
+- Queries : `getCinemas` (id = supabaseId), `getScreeningsWithMovieCinema` (startsAt >= maintenant par défaut, bornes `fromMs`/`toMs` optionnelles, limit ≤ 20000, film + cinéma joints en JS, liste plate avec `movie` complet — le client regroupe par `movie.id`).
+- Mutations d'import idempotentes dans `convex/migrations.ts` : `importCinemas`, `importMovies`, `importScreenings` (chacune `{inserted, skipped}`).
+
+**Migration des données (`scripts/migrate_cinemas_to_convex.ts`, prod, rejouable/idempotente) :**
+
+| Table | Supabase | Convex insérés | déjà présents |
+|---|---|---|---|
+| Cinema | 3 | +3 | 0 (2e passage : 3) |
+| Movie | 293 | +293 | 0 (2e passage : 293) |
+| Screening | 11 179 | +11 179 | 0 (2e passage : 11 179) |
+
+Vérif comptage prod : `cinemas` = 3, `movies` = 293, `screenings` = 11 179 (`npx convex data` + dédup de la migration au 2e passage). **Piège rencontré** : `cast` est un mot réservé PostgreSQL → quote `"cast"` dans la liste de colonnes de la requête `Movie`.
+
+**Port du scraper cinéma (REPO C assocommercants, double écriture) :**
+- `lib/convex-cinema.ts` — **nouveau** : client HTTP Convex (endpoints `/api/query` + `/api/mutation`, auth deploy key, omission des null sur les optionnels) + helpers `upsertCinema`, `upsertMovie`, `replaceScreeningsForCinemaDay`, `deleteCinemaScreeningsDay`, `getCinemas`, `getScreeningsWithMovieCinema`. Active quand `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` définis.
+- `lib/cinema-scraper.ts` — miroir **non bloquant** : activé quand `CONVEX_DEPLOY_KEY` définie, erreurs tracées sur `console.error` sans faire échouer le run (Supabase reste primaire). **Mapping des ids** : en Convex, `cinemaId`/`movieId` des screenings sont les **supabaseId = ids Prisma** — le scraper réplique `cinema.id` (cuid) et `movie.id` (`movie-<allocineId>`) tels quels ; le `screening.deleteMany` par jour → `replaceScreeningsForCinemaDay(cinema.id, date, séances du jour)` (delete + insert atomiques ; liste vide = reset propre du jour). Jobs collectés puis `Promise.allSettled` en fin de run.
+- `.github/workflows/cinema-scrape.yml` : `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` ajoutés au step « Scrape cinema showtimes » (`NEWS_DATABASE_URL` conservé).
+
+**Ponts caches (fallback SQL conservé) :**
+- REPO C `lib/cinema-cache.ts` : quand `useConvexCinema()` → `getCinemas` + `getScreeningsWithMovieCinema` (fenêtre du jour `[dayStart, dayEnd]`) ; sinon Prisma inchangé. Shape consommé par le site conservé (runtime string, allocineId number, startsAt ISO). Logique `unstable_cache`/tags inchangée.
+- REPO B (MulhouseGPT) : `lib/convex-cinema.ts` — **nouveau** (lectures `fetchCinemas`/`fetchScreeningsWithMovieCinema`) + `lib/cinema-cache.ts` adapté avec fallback `getNewsPool()` SQL. Interface `CinemaMovie` élargie (`allocineId`/`runtime` en `string | number | null`) pour tolérer les deux sources. Le RAG `lib/rag/cinema-search.ts` (même shape) continue de fonctionner.
+
+**Tests :**
+- Smoke test (script temporaire `scripts/_tmp_cinema_test.py`, supprimé) : upsert cinéma/film/séance de test en prod, lecture via `getScreeningsWithMovieCinema` (film joint OK), `deleteCinemaBySupabaseId` (cascade séances vérifiée) + nettoyage du film via une mutation **temporaire** `deleteMovieBySupabaseId` (déployée puis retirée) → prod propre.
+- Typecheck : REPO A `npx tsc --noEmit` exit 0 ; REPO B `npx tsc --noEmit` exit 0 ; REPO C — erreurs **préexistantes** uniquement dans `.next/dev/types/routes.d.ts` (fichier généré par le dev server), aucun des fichiers cinéma/convex concerné.
+
+**Ce qui reste sur Supabase (et pourquoi) :** ScrapeLog (non migré), KnowledgeChunk historique inutilisé (RAG = Aiven), admin assocommercants NewsArticle (écrit en Supabase, copié vers Convex par le pont 15 min).
+
 ### Phase 4 — Crons & workflows (1–2 semaines)
 - [ ] Crons Convex : `scrapeNews (toutes 15 min)`, `publishScheduled`, `airportSync`, `knowledgeSync`, `scrapeOutings`, `revalidateTags` — remplacent les `schedule:` des workflows
 - [ ] `backup-database.yml` (pg_dump hebdo) → snapshot Convex (`npx convex export` ou API snapshots) → B2 ; `backup-incremental.yml` → export des documents du jour
