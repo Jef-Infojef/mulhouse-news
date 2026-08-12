@@ -1,0 +1,6 @@
+# Artefacts locaux Convex / base dev (jamais à uploader vers Vercel)
+.convex/local
+
+# Backups et exports locaux
+convex-backup.zip
+backups/

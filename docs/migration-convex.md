@@ -230,6 +230,48 @@ Note : un log `GITHUB_CRASH` (06:58 encodé ≈ 04:58 UTC réel) et des logs `SM
 - Retrait des backups pg_dump (`backup-database.yml` / `backup-incremental.yml`).
 - Suivi des quotas Convex (Starter : calls/egress/bandwidth) pendant le cutover (cf. Phase 0).
 
+### Phase 6 — Migration PROD Convex (12/08/2026) — cutover final ✅ FAITE
+
+**Déploiement prod :**
+- Déploiement **prod** : `academic-spoonbill-914` → `https://academic-spoonbill-914.convex.cloud` (créé automatiquement par Convex comme *default production deployment* ; le nom `prod` est réservé comme alias et la création explicite renvoie « DeploymentAlreadyExists » — on utilise donc le default prod).
+- Code poussé sur prod : `npx convex deploy` (deploy key prod) → **« Deployed Convex functions »** — schéma + index (29) + fonctions (app, scrapers, images, migrations, stats) OK, aucun index supprimé.
+- Deploy key prod CI : `npx convex deployment token create github-actions --deployment academic-spoonbill-914` → ligne `prod:academic-spoonbill-914|<token>` sauvegardée dans `C:\Users\HP\AppData\Local\Temp\opencode\convex-deploy-key-prod.txt` (jamais affichée en clair).
+- Le dev `friendly-chicken-952` reste disponible comme **sandbox** (sa deploy key `dev:friendly-chicken-952|<token>` est toujours dans `convex-deploy-key-github-actions.txt`).
+
+**Migration des données (Supabase → prod) :** `scripts/migrate_supabase_to_convex.ts` (env : `NEXT_PUBLIC_CONVEX_URL`=url prod, `CONVEX_DEPLOY_KEY`=key prod, `DATABASE_URL` de `.env`) — 68 927 lignes insérées, backfill supabaseId OK (déjà présent lors de l'import). Vérif `scripts/migrate_check.ts` : **0 écart** partout.
+
+**Compteurs Supabase vs PROD (après migration, 12/08 ~07:05 UTC) :**
+
+| Table | Supabase | PROD Convex | Diff | Statut |
+|---|---|---|---|---|
+| Article | 27 104 | 27 104 | +0 | OK |
+| ArticleImage | 28 078 | 28 078 | +0 | OK |
+| ScrapingLog | 11 540 | 11 540 | +0 | OK |
+| AppConfig | 3 | 3 | +0 | OK |
+| WeatherHistory | absente | 0 | — | OK |
+| ArticleGoogleTag | 2 197 | 2 197 | +0 | OK |
+| NewsArticle | 0 | 0 | +0 | OK |
+| NewsArticleTag | 0 | 0 | +0 | OK |
+| NewsTag | 5 | 5 | +0 | OK |
+
+**Secrets basculés (sans valeurs) :**
+- **GitHub** (repo `Jef-Infojef/mulhouse-news`) : `CONVEX_DEPLOY_KEY` ← key prod (`prod:academic-spoonbill-914|...`) ; `NEXT_PUBLIC_CONVEX_URL` ← url prod. Confirmé indirectement : le run `Scrape Mulhouse News` post-bascule a écrit dans **prod**.
+- **Vercel** (projet `mulhouse-actu`) : `NEXT_PUBLIC_CONVEX_URL` = url prod sur **Production, Preview, Development** (suppression des 3 anciennes valeurs dev puis recréation via l'API v9 ; `vercel env ls` OK).
+
+**Validation :**
+- **Vercel prod** : nouveau déploiement `mulhouse-actu-cff9grhiq-...` READY (1 min), alias `https://mulhouse-actu.vercel.app` → HTTP 200 ; les 6 premiers titres de la page correspondent **exactement** aux articles `app:getLatestArticles` sur **prod** (hôpital été surchauffe, météo 12/08, bombe synagogue, Jeudis du parc, fausse alerte ici.fr, que faire après 18h).
+- **Scrape sur prod** : `workflow_dispatch` run `31572954322` → **SUCCESS** (3m34s). Confirmation écriture prod : log `scrapingLogs` du 12/08 07:14 UTC + nouvel article « barrage de Michelbach » (`getLatestArticles` prod, publishedAt 07:05 UTC).
+- **Backup sur prod** : `workflow_dispatch` « Sauvegarde Convex - Hebdomadaire » run `31572997774` → **SUCCESS** (10 steps : export prod + upload B2 `convex-exports/2026-08-12/` + purge).
+
+**Fichiers créés :**
+- `.vercelignore` — **nouveau** : ignore `.convex/local` (sqlite local 218 Mo qui dépassait la limite d'upload Vercel de 100 Mo) + exports locaux. Sans ce fichier, `vercel --prod` échouait avec « File size limit exceeded (100 MB) ».
+
+**Ce qui reste après la bascule :**
+- `scrape-outings.yml` : `scrape_outings.py` toujours sur Supabase (tables `Outing`/`OutingCategory`/`OutingTag`/`ScrapeLog` absentes du schéma Convex).
+- Workflows `m68-*` (MulhouseGPT, autre repo) : lisent encore `NEWS_DATABASE_URL` (Supabase) en SQL — adaptation au client Convex non exécutée.
+- Retrait des backups pg_dump (`backup-database.yml` / `backup-incremental.yml`) et downgrade Supabase Free.
+- Fin de vie Supabase : données conservées jusqu'à validation complète de la semaine de double écriture.
+
 ### Phase 4 — Crons & workflows (1–2 semaines)
 - [ ] Crons Convex : `scrapeNews (toutes 15 min)`, `publishScheduled`, `airportSync`, `knowledgeSync`, `scrapeOutings`, `revalidateTags` — remplacent les `schedule:` des workflows
 - [ ] `backup-database.yml` (pg_dump hebdo) → snapshot Convex (`npx convex export` ou API snapshots) → B2 ; `backup-incremental.yml` → export des documents du jour
