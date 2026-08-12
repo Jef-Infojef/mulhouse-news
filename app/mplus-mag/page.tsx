@@ -11,17 +11,21 @@ import { Logo } from '@/components/Logo'
 // qui redirige vers le PDF officiel ; les jaquettes sont des images externes
 // (assets.mulhouse.omerloclients.com), autorisées par le CSP (« img-src https »).
 
-// Jaquettes (couvertures) officielles des numéros, indexées par numéro.
-// Note : les numéros 29 → 33 partagent la même image générique côté mplusinfo.fr.
+// Jaquettes (couvertures) des numéros.
+// - La plupart viennent de mplusinfo.fr (page « Le Mag ») : URLs externes
+//   assets.mulhouse.omerloclients.com, autorisées par le CSP (« img-src https »).
+// - Les numéros 29 → 33 n'ont pas de couverture distincte publiée sur le site :
+//   on a extrait la vraie jaquette (1re page) de chaque PDF, hébergée en local
+//   dans /public/mplus-mag/covers/ (chemin relatif → servi par Vercel).
 const MPLUSINFO_COVER: Record<string, string> = {
   '36': 'c5f7a79e-b65c-4417-a0a0-6c20a23cd2ed.JPG',
   '35': '641858d4-ba84-4abf-88f9-521e6ded02ca.JPG',
   '34': 'b8900c7a-c46d-4732-b03c-f5563a06106e.JPG',
-  '33': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
-  '32': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
-  '31': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
-  '30': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
-  '29': 'aa90bc6c-bedc-4622-977e-716c718c244a.jpg',
+  '33': '/mplus-mag/covers/cover33.jpg',
+  '32': '/mplus-mag/covers/cover32.jpg',
+  '31': '/mplus-mag/covers/cover31.jpg',
+  '30': '/mplus-mag/covers/cover30.jpg',
+  '29': '/mplus-mag/covers/cover29.jpg',
   '28': 'd2366d1a-2ca0-4783-9d9a-e1e5d4a64390.jpg',
   '27': 'c71d501c-dc62-45a8-8bf8-a98538242d48.jpg',
   '26': 'ef96dc3a-4c83-4cef-b9aa-b8751eaa3484.jpg',
@@ -165,7 +169,9 @@ export default function MplusMagPage() {
                 const seasonLabel = SEASONS[mag.season] || mag.season
                 const coverId = MPLUSINFO_COVER[String(mag.num)]
                 const coverUrl = coverId
-                  ? `https://assets.mulhouse.omerloclients.com/assets/${coverId}`
+                  ? coverId.startsWith('/')
+                    ? coverId
+                    : `https://assets.mulhouse.omerloclients.com/assets/${coverId}`
                   : null
 
                 return (
