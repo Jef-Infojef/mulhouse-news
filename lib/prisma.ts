@@ -1,15 +1,21 @@
-import { PrismaClient } from '@prisma/client'
+import { ConvexHttpClient } from 'convex/browser'
 
-const prismaClientSingleton = () => {
-  return new PrismaClient()
+// Phase 2 de la migration Convex : le client d'accès aux données applicatives
+// est désormais Convex (cloud) et plus Prisma/Supabase.
+//
+// Le paquet Prisma et `prisma generate` restent dans le build tant que les
+// scripts GitHub Actions (scripts/*.ts, Phase 3) n'ont pas migré : le retrait
+// complet de Prisma du build interviendra après la Phase 3.
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL
+
+if (!convexUrl) {
+  throw new Error(
+    'NEXT_PUBLIC_CONVEX_URL est manquante : définissez-la dans .env.local ' +
+      '(URL du déploiement Convex cloud, ex. https://friendly-chicken-952.convex.cloud).'
+  )
 }
 
-declare global {
-  var prisma: undefined | ReturnType<typeof prismaClientSingleton>
-}
+export const convex = new ConvexHttpClient(convexUrl)
 
-const prisma = globalThis.prisma ?? prismaClientSingleton()
-
-export default prisma
-
-if (process.env.NODE_ENV !== 'production') globalThis.prisma = prisma
+export default convex

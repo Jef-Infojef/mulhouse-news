@@ -1,0 +1,54 @@
+name: Deploy Convex
+
+# Comment installer le secret CI (à faire UNE fois dans GitHub) :
+#   1. Générer une deploy key ciblant le déploiement cloud dev :
+#        npx convex deployment token create github-actions --deployment friendly-chicken-952
+#      (déploiement : dev:friendly-chicken-952 = https://friendly-chicken-952.convex.cloud)
+#      La CLI affiche la clé UNE seule fois : `dev:friendly-chicken-952|<token>`.
+#   2. GitHub → Settings → Secrets and variables → Actions → New repository secret :
+#        Name  = CONVEX_DEPLOY_KEY
+#        Value = la clé complète affichée à l'étape 1 (avec le préfixe
+#                `dev:friendly-chicken-952|`, c'est le format attendu par la CLI).
+#   3. Sans ce secret, ce workflow s'arrête proprement (exit 0) avec un warning ;
+#      il ne casse pas les autres workflows / PRs.
+# NB : contrairement à CONVEX_DEPLOYMENT (choix de déploiement), la deploy key
+# scope tous les `npx convex*` à la cible embarquée dans la clé — aucun autre
+# secret Convex n'est nécessaire.
+# NB : `npx convex deploy --push` n'existe pas ; en CI on utilise `npx convex
+# deploy` avec CONVEX_DEPLOY_KEY.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check CONVEX_DEPLOY_KEY
+        run: |
+          if [ -z "$CONVEX_DEPLOY_KEY" ]; then
+            echo "::warning::Secret GitHub CONVEX_DEPLOY_KEY absent ou vide — déploiement Convex ignoré."
+            echo "Pour l'activer : Settings > Secrets and variables > Actions > New repository secret"
+            echo "  Name  = CONVEX_DEPLOY_KEY"
+            echo "  Value = sortie de : npx convex deployment token create github-actions --deployment friendly-chicken-952"
+            exit 0
+          fi
+          echo "CONVEX_DEPLOY_KEY présent — déploiement vers la cible embarquée dans la clé (dev:friendly-chicken-952)."
+
+      - name: Deploy Convex
+        if: ${{ env.CONVEX_DEPLOY_KEY != '' }}
+        run: npx convex deploy
