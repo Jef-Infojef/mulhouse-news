@@ -69,6 +69,11 @@ jobs:
           NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          # Les articles presse vivent désormais dans Convex (scrapers Phase 4) :
+          # le RAG les lit via lib/convex-news.ts. NEWS_DATABASE_URL reste en
+          # fallback + Cinema/Outing.
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
 
       - name: Sync sorties à venir (RAG)
         if: always() && github.event.schedule != '0 3 * * 3'

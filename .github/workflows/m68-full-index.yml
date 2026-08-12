@@ -38,6 +38,11 @@ env:
   JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
   FRANCE_TRAVAIL_CLIENT_ID: ${{ secrets.FRANCE_TRAVAIL_CLIENT_ID }}
   FRANCE_TRAVAIL_CLIENT_SECRET: ${{ secrets.FRANCE_TRAVAIL_CLIENT_SECRET }}
+  # Articles presse/actualités lus via Convex (scrapers Phase 4) — le job
+  # core-articles (sources article,news_article) en a besoin ; NEWS_DATABASE_URL
+  # reste en fallback + Cinema/Outing (outings-sync).
+  CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+  NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
 
 permissions:
   contents: read

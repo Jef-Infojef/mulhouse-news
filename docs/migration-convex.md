@@ -272,6 +272,52 @@ Note : un log `GITHUB_CRASH` (06:58 encodé ≈ 04:58 UTC réel) et des logs `SM
 - Retrait des backups pg_dump (`backup-database.yml` / `backup-incremental.yml`) et downgrade Supabase Free.
 - Fin de vie Supabase : données conservées jusqu'à validation complète de la semaine de double écriture.
 
+### Pont RAG MulhouseGPT (Convex) — 12/08/2026
+
+**Objectif** : brancher le moteur RAG de MulhouseGPT sur Convex pour les données presse/actualités (les scrapers écrivent Convex depuis la Phase 4 ; Supabase n'est plus alimenté). Cinema/Outing restent sur Supabase.
+
+**Queries Convex ajoutées (`convex/news_bridge.ts`, déployées sur prod `academic-spoonbill-914`) :**
+| Query | Rôle |
+|---|---|
+| `news_bridge:getArticleById` | Article complet par `supabaseId` (content inclus) → `indexPressArticleById` |
+| `news_bridge:getRecentPressArticles` | Approx. `hidden=false ORDER BY updatedAt DESC LIMIT n` (scan borné index by_hidden_publishedAt + filtre JS) → `indexRecentPressArticles` |
+| `news_bridge:getRecentNewsArticles` | Approx. `hidden=false AND statusWorkflow='PUBLISHED' ORDER BY updatedAt DESC` (table NewsArticle VIDE) → `indexRecentNewsArticles` |
+| `news_bridge:getNewsArticleById` | Actualité interne par `_id` → `indexNewsArticleById` |
+| `news_bridge:getArticleImagesByArticleIds` | Images de galerie (articleImages) par `articleId` (UUID Supabase), `bestUrl = r2Url ?? localImage ?? url` → enrichissement des citations |
+| `news_bridge:getNewsArticleImagesByIds` | Images news (NewsArticle vide → `[]`, pas de collection d'images dédiée dans le schéma) |
+| `news_bridge:getAllArticleIds` | Pagination des ids (id=supabaseId) pour purge/archive |
+| `news_bridge:getArticlesPage` | Page d'articles complets (content inclus) pour `indexArticles` (1 appel/page, pas 1 appel/article) |
+| `news_bridge:getAllNewsArticles` | Pagination des actualités internes publiées pour `indexNewsArticles` |
+
+**Repo B (MulhouseGPT) — fichiers créés/modifiés (working tree non commité PRÉSERVÉ) :**
+- `lib/convex-news.ts` — **nouveau** : client HTTP Convex (endpoints `/api/query`, auth `Authorization: Convex <deploy_key>`, omission des champs undefined, timestamps epoch ms) + helpers typés des queries ci-dessus. Exporte `useConvexNews()` (vrai si `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` définis).
+- `lib/news-db.ts` — pool Supabase **conservé** (Cinema/Outing + fallback) ; ré-export de `useConvexNews()`.
+- `lib/rag/indexer.ts` — `indexArticles`, `indexRecentPressArticles`, `indexPressArticleById`, `indexNewsArticles`, `indexRecentNewsArticles`, `indexNewsArticleById` : lisent Convex quand `useConvexNews()`, sinon fallback Supabase. `syncArticlesToRag()` inchangé (délègue aux fonctions adaptées). Feature catalogue Bibliothèque d'Alsace (`indexAlsaceLibraryCatalog`, sections `alsace_*`) **intacte**.
+- `lib/rag/news-search.ts` — `fetchRecentNews` et `attachCitationImages` : Convex quand actif, fallback Supabase.
+
+**Conversion Convex → formatters RAG** (faite AVANT d'appeler les formatters) : `publishedAt` epoch ms → `Date` (`new Date(ms)`), `id` = `supabaseId` (UUID Supabase d'origine) fourni directement par les queries — `formatArticleDocument`/`formatNewsArticleDocument` reçoivent ainsi leur contrat habituel (`id`, `publishedAt: Date`).
+
+**Ce qui reste sur Supabase (et pourquoi) :**
+- Cinema (`lib/cinema-cache.ts`) : tables `Cinema`/`Screenings` absentes du schéma Convex.
+- Outings (`scripts/outings-sync.ts` → `indexOutings`) : table `Outing` non migrée.
+- Archive presse `scripts/archive-articles-sync.ts` : one-shot Supabase conservé (pont archive trop lourd en appels HTTP ; `indexArticles` en Convex couvre l'index complet via `getArticlesPage`).
+- `db-check-airport.ts` = `RAG_DATABASE_URL` (Aiven), non concerné.
+
+**Workflows modifiés (repo A) :**
+- `m68-knowledge-sync.yml` — step « Sync articles presse (RAG) » : ajout `CONVEX_DEPLOY_KEY` + `NEXT_PUBLIC_CONVEX_URL` (en gardant `NEWS_DATABASE_URL` pour fallback + Cinema/Outing).
+- `m68-full-index.yml` — bloc `env:` workflow : ajout des 2 variables Convex (job core-articles `article,news_article`).
+- `m68-publish-scheduled.yml` — **non modifié** : exécute le code assocommercants (`publish-scheduled.ts`, écrit NewsArticle via Supabase) ; pas de sync RAG news. Documenté comme limitation : NewsArticle est lu côté Convex (vide) tant que rien n'y est alimenté.
+
+**Secrets GitHub confirmés (`gh secret list`)** : `CONVEX_DEPLOY_KEY` (prod), `NEXT_PUBLIC_CONVEX_URL`, `NEWS_DATABASE_URL`, `MULHOUSEGPT_NEWS_DATABASE_URL` présents.
+
+**Tests :**
+- Smoke queries Convex (script temporaire supprimé) : `getRecentPressArticles` OK (id=supabaseId + content), `getArticleById` OK, `getRecentNewsArticles` = [] (attendu), `getAllArticleIds` = 55 pages / 27 105 ids, `getArticleImagesByArticleIds` OK (bestUrl B2), `getArticlesPage`/`getAllNewsArticles` OK.
+- Typecheck repo A : `npx tsc --noEmit` exit 0.
+- Typecheck repo B : `npx tsc --noEmit` exit 0 (aucune nouvelle erreur).
+- Test d'intégration limité (script temporaire supprimé) : `syncArticlesToRag()` via Convex prod → **56 chunks indexés, 0 erreur, 0 embed** (Jina désactivé pour le test).
+
+**Piège rencontré** : nom de module Convex — `news-bridge.js` invalide (tirets interdits) → renommé `news_bridge.ts`. `db.get` lève une erreur sur un id malformé (ne retourne pas null) → try/catch dans `getNewsArticleImagesByIds`.
+
 ### Phase 4 — Crons & workflows (1–2 semaines)
 - [ ] Crons Convex : `scrapeNews (toutes 15 min)`, `publishScheduled`, `airportSync`, `knowledgeSync`, `scrapeOutings`, `revalidateTags` — remplacent les `schedule:` des workflows
 - [ ] `backup-database.yml` (pg_dump hebdo) → snapshot Convex (`npx convex export` ou API snapshots) → B2 ; `backup-incremental.yml` → export des documents du jour
