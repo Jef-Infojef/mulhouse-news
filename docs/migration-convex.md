@@ -176,6 +176,60 @@ else:
 - Retrait des backups pg_dump (`backup-database.yml`/`backup-incremental.yml`) au cutover final
 - Phase 5 : double écriture 1 semaine, bascule lectures, fin de vie Supabase
 
+### Phase 5 — avancement (12/08/2026) — validation du cutover (réel + compteurs + backup)
+
+**1. Validation prod (Vercel)**
+
+- Dernier déploiement **production READY** : commit `9fb1a7c` (Phase 4), deploy `mulhouse-actu-jukzofgci-jef-infojefs-projects.vercel.app`, alias `https://mulhouse-actu.vercel.app`, créé le 12/08 à 08:13 (build 30 s, aucun échec). Le déploiement précédent (`50be17b` fix Telegram, 07:52) est aussi READY.
+- Page d'accueil `https://mulhouse-actu.vercel.app` → **HTTP 200**, contient les titres d'articles récents (JSON-LD 18 items).
+- **Les données affichées viennent bien de Convex** : les 4 premiers titres de la page correspondent exactement aux articles Convex récents (`app:getLatestArticles` sur `friendly-chicken-952`, 200 articles) : barrage de Michelbach, hôpital été en surchauffe, météo du 12/08, bombe à la synagogue (canular).
+- Route admin : `/admin` → 404 (pas de page index ; les routes réelles sont `/admin/logs`, `/admin/logos`, `/admin/logos2` → **200**). Aucun 500.
+- Recherche : **pas de route dédiée — recherche côté client** (`components/HomeClient.tsx` → server action `getLatestArticles(query)` → FTS Convex title/description/source). Testée via l'API Convex : « Michelbach » → 5 résultats pertinents.
+
+**2. Compteurs Supabase vs Convex (`npx tsx scripts/migrate_check.ts`, 12/08 08:40)**
+
+| Table | Supabase | Convex | Diff | Statut |
+|---|---|---|---|---|
+| Article | 27 104 | 27 105 | +1 | OK (écart <1 %) |
+| ArticleImage | 28 078 | 28 082 | +4 | OK (écart <1 %) |
+| ScrapingLog | 11 540 | 11 549 | +9 | ~ (±5 %, scraper actif) |
+| AppConfig | 3 | 4 | +1 | ÉCART attendu (clé `EBRA_COOKIE` écrite côté Convex) |
+| WeatherHistory | absente | 0 | — | OK (absente des 2 côtés) |
+| ArticleGoogleTag | 2 197 | 2 197 | +0 | OK |
+| NewsArticle | 0 | 0 | +0 | OK |
+| NewsArticleTag | 0 | 0 | +0 | OK |
+| NewsTag | 5 | 5 | +0 | OK |
+
+Interprétation : **Convex ≥ Supabase partout** — direction voulue (scrapers écrivent Convex uniquement depuis la Phase 4, Supabase figé). Le +1 AppConfig = clé `EBRA_COOKIE` présente côté Convex seulement (les scrapers ne réécrivent plus Supabase). Le +1 Article / +4 ArticleImage = nouveaux articles écrits par les runs Convex du 12/08 (run manuel `workflow_dispatch` 06:18 UTC validé : 4 articles + RAG ; logs SUCCESS « seed » + PARTIAL 3 ok/1 err dans Convex).
+Note : un log `GITHUB_CRASH` (06:58 encodé ≈ 04:58 UTC réel) et des logs `SMOKE`/`SMOKE_TEST` existent dans Convex — artefacts du test local Phase 4 (horloge Paris UTC+2 : `datetime.now()` naïf encodé comme UTC par `to_epoch_ms`) ; les runs `scrape-news` récents (06:22 et 06:18 UTC) sont tous **SUCCESS**.
+
+**3. Backup Convex → B2 (workflow « Sauvegarde Convex - Hebdomadaire »)**
+
+- `workflow_dispatch` lancé → run `31570702693` : **conclusion success** (10 steps OK : export, upload, purge).
+- Fichier B2 confirmé (liste S3 B2, endpoint eu-central-003) : `mulhouse-news-backups-private/convex-exports/2026-08-12/convex-2026-08-12_06-37-44.zip` — 41 459 844 octets (~41 Mo).
+- **Aucune correction apportée** au workflow (test vert du premier coup).
+
+**4. Images / galeries en base Convex (snapshot export du 12/08)**
+
+- `articles` : 27 105 dont **26 507 avec `imageUrl`**, **19 908 avec `localImage`** (téléchargées), **19 892 avec `r2Url`** (uploadées B2) → pipeline images actif ; backlog d'upload : 16 articles (localImage sans r2Url).
+- `articleImages` (galeries) : 28 082 dont **91 avec `localImage` + `r2Url`** (galeries des articles récents 48h traitées ; le reste se fait par fenêtre de fraîcheur, pas un blocage).
+- Export vérifié localement (`npx convex export --path …`) : ZIP ~41 Mo, JSONL par table cohérent.
+
+**5. Ce qui reste lié à Supabase (donc PAS de fin de vie complète) et pourquoi**
+
+- `scrape-outings.yml` : `scrape_outings.py` non porté — tables `Outing`/`OutingCategory`/`OutingTag`/`ScrapeLog` **absentes du schéma Convex** (non migrées en Phase 1).
+- Workflows `m68-*` (MulhouseGPT, autre repo) : lisent `NEWS_DATABASE_URL` (Supabase) en SQL pour leurs syncs RAG — décision « adapter » (client Convex) **non encore exécutée**.
+- `backup-database.yml` / `backup-incremental.yml` (pg_dump Supabase) : conservés tant que Supabase vit (le backup-convex est additif).
+- Site : **lecture 100 % Convex** (fait en Phase 2, revalidé en prod ici).
+
+**6. Points durs restants pour le cutover final**
+
+- Migration **prod** Convex : création d'un déploiement de production + secrets (le dev `friendly-chicken-952` reste la cible).
+- Port de `scrape_outings.py` ou migration des tables sorties vers Convex.
+- Adaptation **MulhouseGPT** : suppression de la dépendance `NEWS_DATABASE_URL`, lectures via le client Convex.
+- Retrait des backups pg_dump (`backup-database.yml` / `backup-incremental.yml`).
+- Suivi des quotas Convex (Starter : calls/egress/bandwidth) pendant le cutover (cf. Phase 0).
+
 ### Phase 4 — Crons & workflows (1–2 semaines)
 - [ ] Crons Convex : `scrapeNews (toutes 15 min)`, `publishScheduled`, `airportSync`, `knowledgeSync`, `scrapeOutings`, `revalidateTags` — remplacent les `schedule:` des workflows
 - [ ] `backup-database.yml` (pg_dump hebdo) → snapshot Convex (`npx convex export` ou API snapshots) → B2 ; `backup-incremental.yml` → export des documents du jour
