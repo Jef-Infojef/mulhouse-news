@@ -64,13 +64,13 @@ jobs:
             start_ts=$(printf '%s' "$job_info" | cut -f2)
             end_ts=$(printf '%s' "$job_info" | cut -f3)
             duree=$(python3 -c "
-import sys
-from datetime import datetime
-s=datetime.fromisoformat('$start_ts'.replace('Z','+00:00'))
-e=datetime.fromisoformat('$end_ts'.replace('Z','+00:00'))
-d=int((e-s).total_seconds())
-print(f'{d//60}m{d%60:02d}s' if d>=60 else f'{d}s')
-" 2>/dev/null || echo "duree inconnue")
+            import sys
+            from datetime import datetime
+            s=datetime.fromisoformat('$start_ts'.replace('Z','+00:00'))
+            e=datetime.fromisoformat('$end_ts'.replace('Z','+00:00'))
+            d=int((e-s).total_seconds())
+            print(f'{d//60}m{d%60:02d}s' if d>=60 else f'{d}s')
+            " 2>/dev/null || echo "duree inconnue")
           else
             job_name=""
             duree=""
