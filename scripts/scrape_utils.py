@@ -19,6 +19,31 @@ class CaptionFetchResult:
 EBRA_DOMAINS = ("lalsace.fr", "dna.fr", "estrepublicain.fr", "vosgesmatin.fr")
 
 
+def fetch_sitemap_xml(url: str, retries: int = 3, timeout: int = 60) -> str:
+    """Télécharge un sitemap XML avec retries sur erreurs 5xx / réseau.
+
+    Les 502/503 transitoires (WAF, Cloudflare, surcharge) ne doivent pas faire
+    échouer un run : on réessaie avec backoff avant d'abandonner.
+    """
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(url, timeout=timeout, impersonate="chrome110")
+            if resp.status_code < 500 and resp.status_code != 429:
+                return resp.text
+            last_error = f"HTTP {resp.status_code}"
+        except Exception as exc:
+            last_error = str(exc) or exc.__class__.__name__
+        if attempt < retries:
+            delay = 3 * attempt
+            print(
+                f"   ⚠️ Sitemap {url} : {last_error} — "
+                f"nouvelle tentative dans {delay}s ({attempt}/{retries})"
+            )
+            time.sleep(delay)
+    raise RuntimeError(f"Sitemap {url} : {last_error} après {retries} tentatives")
+
+
 def is_ebra_url(url: str) -> bool:
     return any(d in url for d in EBRA_DOMAINS)
 

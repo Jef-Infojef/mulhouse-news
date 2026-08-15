@@ -6,11 +6,11 @@ from datetime import datetime, timedelta, timezone
 from xml.etree import ElementTree as ET
 
 import psycopg2
-from curl_cffi import requests
 from dotenv import load_dotenv
 
 from scrape_utils import (
     fetch_periscope_page,
+    fetch_sitemap_xml,
     is_mulhouse_related,
     parse_periscope_article,
 )
@@ -58,9 +58,7 @@ def is_article_url(url: str) -> bool:
 
 
 def fetch_post_sitemap_urls() -> list[str]:
-    index_resp = requests.get(SITEMAP_INDEX, timeout=60, impersonate="chrome110")
-    index_resp.raise_for_status()
-    index_root = ET.fromstring(index_resp.text)
+    index_root = ET.fromstring(fetch_sitemap_xml(SITEMAP_INDEX))
 
     sitemap_urls = []
     for loc in index_root.findall(".//sm:loc", SITEMAP_NS):
@@ -69,9 +67,7 @@ def fetch_post_sitemap_urls() -> list[str]:
 
     article_urls = []
     for sitemap_url in sitemap_urls:
-        resp = requests.get(sitemap_url, timeout=60, impersonate="chrome110")
-        resp.raise_for_status()
-        root = ET.fromstring(resp.text)
+        root = ET.fromstring(fetch_sitemap_xml(sitemap_url))
         for url_el in root.findall("sm:url", SITEMAP_NS):
             loc_el = url_el.find("sm:loc", SITEMAP_NS)
             if loc_el is None or not loc_el.text:
@@ -84,9 +80,7 @@ def fetch_post_sitemap_urls() -> list[str]:
 
 
 def fetch_sitemap_entries(days: int | None) -> list[dict]:
-    index_resp = requests.get(SITEMAP_INDEX, timeout=60, impersonate="chrome110")
-    index_resp.raise_for_status()
-    index_root = ET.fromstring(index_resp.text)
+    index_root = ET.fromstring(fetch_sitemap_xml(SITEMAP_INDEX))
 
     sitemap_urls = []
     for loc in index_root.findall(".//sm:loc", SITEMAP_NS):
@@ -99,9 +93,7 @@ def fetch_sitemap_entries(days: int | None) -> list[dict]:
 
     entries = []
     for sitemap_url in sitemap_urls:
-        resp = requests.get(sitemap_url, timeout=60, impersonate="chrome110")
-        resp.raise_for_status()
-        root = ET.fromstring(resp.text)
+        root = ET.fromstring(fetch_sitemap_xml(sitemap_url))
         for url_el in root.findall("sm:url", SITEMAP_NS):
             loc_el = url_el.find("sm:loc", SITEMAP_NS)
             if loc_el is None or not loc_el.text:

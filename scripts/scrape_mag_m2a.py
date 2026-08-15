@@ -6,10 +6,9 @@ from datetime import datetime, timedelta, timezone
 from xml.etree import ElementTree as ET
 
 import psycopg2
-from curl_cffi import requests
 from dotenv import load_dotenv
 
-from scrape_utils import fetch_mag_m2a_page, parse_mag_m2a_article
+from scrape_utils import fetch_mag_m2a_page, fetch_sitemap_xml, parse_mag_m2a_article
 import convex_client
 
 load_dotenv(".env.local")
@@ -65,9 +64,7 @@ def is_article_url(url: str) -> bool:
 
 
 def fetch_sitemap_entries(days: int | None) -> list[dict]:
-    index_resp = requests.get(SITEMAP_INDEX, timeout=60, impersonate="chrome110")
-    index_resp.raise_for_status()
-    index_root = ET.fromstring(index_resp.text)
+    index_root = ET.fromstring(fetch_sitemap_xml(SITEMAP_INDEX))
 
     sitemap_urls = []
     for loc in index_root.findall(".//sm:loc", SITEMAP_NS):
@@ -80,9 +77,7 @@ def fetch_sitemap_entries(days: int | None) -> list[dict]:
 
     entries = []
     for sitemap_url in sitemap_urls:
-        resp = requests.get(sitemap_url, timeout=60, impersonate="chrome110")
-        resp.raise_for_status()
-        root = ET.fromstring(resp.text)
+        root = ET.fromstring(fetch_sitemap_xml(sitemap_url))
         for url_el in root.findall("sm:url", SITEMAP_NS):
             loc_el = url_el.find("sm:loc", SITEMAP_NS)
             if loc_el is None or not loc_el.text:

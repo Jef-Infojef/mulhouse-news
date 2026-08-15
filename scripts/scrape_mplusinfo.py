@@ -6,10 +6,9 @@ from datetime import datetime, timedelta, timezone
 from xml.etree import ElementTree as ET
 
 import psycopg2
-from curl_cffi import requests
 from dotenv import load_dotenv
 
-from scrape_utils import fetch_mplusinfo_page, parse_mplusinfo_article
+from scrape_utils import fetch_mplusinfo_page, fetch_sitemap_xml, parse_mplusinfo_article
 import convex_client
 
 load_dotenv(".env.local")
@@ -36,9 +35,7 @@ def get_db_connection():
 
 
 def fetch_sitemap_entries(days: int | None) -> list[dict]:
-    resp = requests.get(SITEMAP_URL, timeout=60, impersonate="chrome110")
-    resp.raise_for_status()
-    root = ET.fromstring(resp.text)
+    root = ET.fromstring(fetch_sitemap_xml(SITEMAP_URL))
 
     cutoff = None
     if days and days > 0:
