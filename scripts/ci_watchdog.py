@@ -16,7 +16,9 @@ import log_convex_io as io
 
 MAX_SCRAPE_AGE_MIN = 90
 MAX_KNOWLEDGE_AGE_H = 36
-IO_DAY_WARN_GB = 4.0
+# 4 Go faisait sonner tout le 16/08 : le jour restait à 5,45 Go (fuite
+# .take(500) déjà stoppée, ~2 Mo/scrape depuis). Plafond disable = 8 Go/j.
+IO_DAY_WARN_GB = 6.0
 IO_MONTH_WARN_GB = 36.0  # 80 % du plafond disable 45 Go
 
 
