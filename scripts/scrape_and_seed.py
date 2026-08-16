@@ -349,14 +349,9 @@ def main():
 
             if not raw_link: continue
 
-            # 1. Vérification rapide par titre AVANT décodage (pour économiser les requêtes Google)
-            if USE_CONVEX:
-                existing_by_title = convex_client.get_article_by_title_recent(title, 48)
-                if existing_by_title:
-                    titles_seen_this_run.add(normalized_title)
-                    stats["duplicates_title"] += 1
-                    continue
-            else:
+            # 1. Dédup titre (SQL uniquement). Convex : by_link plus bas,
+            # un document, pas un scan de 500 articles complets par item RSS.
+            if not USE_CONVEX:
                 cur.execute("SELECT id FROM \"Article\" WHERE title = %s AND \"publishedAt\" > NOW() - INTERVAL '48 hours'", (title,))
                 if cur.fetchone():
                     titles_seen_this_run.add(normalized_title)
@@ -402,21 +397,12 @@ def main():
                 print(f"      [ℹ️] Titre corrigé: {fetched_title[:50]}...")
                 title = fetched_title
 
-            # Doublon image
-            if img:
+            # Doublon image : SQL uniquement. Convex s'en remet au dédup by_link.
+            if img and not USE_CONVEX:
                 pub_date = parsedate_to_datetime(pub_date_str)
-                if USE_CONVEX:
-                    if pub_date.tzinfo is None:
-                        pub_date = pub_date.replace(tzinfo=timezone.utc)
-                    utc_day_start = pub_date.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-                    start_ms = int(utc_day_start.timestamp() * 1000)
-                    end_ms = start_ms + 24 * 3600 * 1000
-                    if convex_client.get_article_by_image(img, start_ms, end_ms):
-                        continue
-                else:
-                    cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\"::date = %s::date", (img, pub_date.date()))
-                    if cur.fetchone():
-                        continue
+                cur.execute("SELECT id FROM \"Article\" WHERE \"imageUrl\" = %s AND \"publishedAt\"::date = %s::date", (img, pub_date.date()))
+                if cur.fetchone():
+                    continue
 
             try:
                 if USE_CONVEX:

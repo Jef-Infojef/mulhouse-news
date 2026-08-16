@@ -2,7 +2,9 @@ name: Scrape Mulhouse News
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Exécution toutes les 5 minutes
+    # 15 min : le */5 + scans Convex de 500–2000 articles complets par run
+    # vidait le Database I/O du plan gratuit (plusieurs Go/jour, coupure 16/08).
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:

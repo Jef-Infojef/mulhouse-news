@@ -307,7 +307,7 @@ export const getArticlesShortContent = query({
       .query("articles")
       .withIndex("by_hidden_publishedAt", (q) => q.eq("hidden", false))
       .order("desc")
-      .take(Math.max(limit * 10, 100));
+      .take(Math.min(Math.max(limit * 2, 40), 80));
     const articles = [];
     for (const doc of candidates) {
       if (doc.publishedAt < cutoff) continue;
@@ -334,12 +334,14 @@ export const getArticleByTitleRecent = query({
   args: { title: v.string(), hours: v.optional(v.number()) },
   handler: async (ctx, { title, hours }) => {
     const cutoff = Date.now() - (hours ?? 48) * 3600_000;
+    // Index by_title : 1–N docs du même titre, pas un scan de 500 articles
+    // complets (content inclus) à chaque item RSS — ça vidait le Database I/O
+    // Convex (plusieurs Go/jour, déploiement coupé le 2026-08-16).
     const candidates = await ctx.db
       .query("articles")
-      .withIndex("by_publishedAt")
-      .order("desc")
-      .take(500);
-    const doc = candidates.find((d) => d.title === title && d.publishedAt >= cutoff);
+      .withIndex("by_title", (q) => q.eq("title", title))
+      .take(20);
+    const doc = candidates.find((d) => d.publishedAt >= cutoff);
     if (!doc) return null;
     return {
       id: doc._id,
@@ -356,12 +358,9 @@ export const getArticleByImage = query({
   handler: async (ctx, { imageUrl, startMs, endMs }) => {
     const candidates = await ctx.db
       .query("articles")
-      .withIndex("by_publishedAt")
-      .order("desc")
-      .take(500);
-    const doc = candidates.find(
-      (d) => d.imageUrl === imageUrl && d.publishedAt >= startMs && d.publishedAt <= endMs
-    );
+      .withIndex("by_imageUrl", (q) => q.eq("imageUrl", imageUrl))
+      .take(20);
+    const doc = candidates.find((d) => d.publishedAt >= startMs && d.publishedAt <= endMs);
     if (!doc) return null;
     return {
       id: doc._id,
@@ -384,7 +383,7 @@ export const getArticlesMissingCaptions = query({
       .query("articles")
       .withIndex("by_publishedAt")
       .order("desc")
-      .take(500);
+      .take(80);
     const rows = [];
     for (const doc of candidates) {
       const hasImage = doc.imageUrl !== undefined && doc.imageUrl !== null && doc.imageUrl !== "";
@@ -424,7 +423,7 @@ export const getRecentArticlesWithContent = query({
       .query("articles")
       .withIndex("by_hidden_publishedAt", (q) => q.eq("hidden", false))
       .order("desc")
-      .take(Math.max(limit * 8, 500));
+      .take(Math.min(Math.max(limit * 2, 40), 120));
     const articles = [];
     for (const doc of candidates) {
       if (typeof doc.updatedAt !== "number" || doc.updatedAt < cutoff) continue;

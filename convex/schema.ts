@@ -40,6 +40,9 @@ export default defineSchema({
     .index("by_hidden_publishedAt", ["hidden", "publishedAt"])
     .index("by_source", ["source"])
     .index("by_supabaseId", ["supabaseId"])
+    .index("by_title", ["title"])
+    .index("by_imageUrl", ["imageUrl"])
+    .index("by_updatedAt", ["updatedAt"])
     // Recherche FTS remplaçant les `contains` Prisma (title/description/source).
     // `content` reste volontairement exclu (décision existante côté sécurité).
     .searchIndex("search_title", { searchField: "title", filterFields: ["hidden"] })

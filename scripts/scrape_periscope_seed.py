@@ -122,10 +122,12 @@ def fetch_sitemap_entries(days: int | None) -> list[dict]:
     return entries
 
 
-def get_existing_links(cur) -> set[str]:
-    """Links déjà en base pour la source (Convex : filtre par source exacte)."""
+def get_existing_links(cur, urls: list[str] | None = None) -> set[str]:
+    """Links déjà en base. Convex : lookup by_link sur le sitemap, pas tout l'historique."""
     if USE_CONVEX:
-        return set(convex_client.get_article_links(source=SOURCE))
+        if not urls:
+            return set()
+        return {url for url in urls if convex_client.get_article_by_link(url)}
     cur.execute('SELECT link FROM "Article" WHERE link LIKE %s', ("%le-periscope.info%",))
     return {row[0] for row in cur.fetchall()}
 
@@ -220,7 +222,7 @@ def log_scraping(cur, conn, stats: dict, status: str):
 
 def seed_missing_articles(cur, conn, days: int | None, limit: int | None, dry_run: bool) -> dict:
     entries = fetch_sitemap_entries(days)
-    existing = get_existing_links(cur)
+    existing = get_existing_links(cur, [entry["url"] for entry in entries])
     missing = [entry for entry in entries if entry["url"] not in existing]
 
     if limit:

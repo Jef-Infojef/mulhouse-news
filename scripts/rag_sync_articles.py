@@ -332,7 +332,7 @@ def sync_news_articles(cur, limit: int, stats: dict, site_url: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync actualités → RAG (KnowledgeChunk)")
-    parser.add_argument("--press-limit", type=int, default=250)
+    parser.add_argument("--press-limit", type=int, default=40)
     parser.add_argument("--news-limit", type=int, default=40)
     args = parser.parse_args()
 

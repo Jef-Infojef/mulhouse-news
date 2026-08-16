@@ -67,10 +67,13 @@ def fetch_sitemap_entries(days: int | None) -> list[dict]:
     return entries
 
 
-def get_existing_links(cur) -> set[str]:
-    """Links déjà en base pour la source (Convex : filtre par source exacte)."""
+def get_existing_links(cur, urls: list[str] | None = None) -> set[str]:
+    """Links déjà en base. Convex : lookup by_link sur les URLs du sitemap
+    (pas une pagination de tout l'historique source — plusieurs Go I/O/jour)."""
     if USE_CONVEX:
-        return set(convex_client.get_article_links(source=SOURCE))
+        if not urls:
+            return set()
+        return {url for url in urls if convex_client.get_article_by_link(url)}
     cur.execute('SELECT link FROM "Article" WHERE link LIKE %s', ("%mplusinfo.fr%",))
     return {row[0] for row in cur.fetchall()}
 
@@ -195,7 +198,7 @@ def _get_missing_content_rows(cur, limit: int | None) -> list[tuple]:
     Retourne (article_id, title, link) — en mode Convex article_id = link
     (la mise à jour Convex est indexée par link)."""
     if USE_CONVEX:
-        rows = convex_client.get_articles_short_content(limit=limit or 100, hours=24 * 365)
+        rows = convex_client.get_articles_short_content(limit=limit or 20, hours=48)
         out = []
         for a in rows:
             if a["source"] == SOURCE:
@@ -265,7 +268,7 @@ def backfill_missing_content(cur, conn, limit: int | None, dry_run: bool) -> dic
 
 def seed_missing_articles(cur, conn, days: int | None, limit: int | None, dry_run: bool) -> dict:
     entries = fetch_sitemap_entries(days)
-    existing = get_existing_links(cur)
+    existing = get_existing_links(cur, [entry["url"] for entry in entries])
     missing = [entry for entry in entries if entry["url"] not in existing]
 
     if limit:
