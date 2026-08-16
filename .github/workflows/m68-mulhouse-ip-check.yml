@@ -1,0 +1,46 @@
+name: M68 Mulhouse.fr IP Check
+
+# Vérifie si les IPs GitHub Actions atteignent www.mulhouse.fr
+# (sitemap / accueil / un PDF). Témoin m2a.fr pour distinguer un
+# blocage ciblé d'une panne réseau du runner.
+# city-sync quotidien passe par Vercel tant que ce job est rouge.
+
+on:
+  schedule:
+    # Tous les jours 5h UTC — après le knowledge-sync (2h30)
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Tester mulhouse.fr depuis l'IP du runner
+        id: probe
+        continue-on-error: true
+        run: python scripts/check_github_ip_mulhouse.py
+
+      # Manuel seulement : un Telegram quotidien « toujours bloqué » serait du bruit.
+      - name: Notifier Telegram (lancement manuel)
+        if: github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/telegram
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: ${{ steps.probe.outcome == 'success' && 'ok' || 'alerte' }}
+          title: ${{ steps.probe.outcome == 'success' && 'mulhouse.fr joignable depuis GitHub' || 'mulhouse.fr bloqué depuis GitHub' }}
+          body: ${{ env.MULHOUSE_IP_BODY }}
+
+      - name: Échouer le job si bloqué
+        if: steps.probe.outcome == 'failure'
+        run: exit 1
