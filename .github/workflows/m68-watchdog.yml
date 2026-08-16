@@ -1,0 +1,54 @@
+name: M68 Watchdog
+
+# Détecte ce que Telegram-sur-échec ne voit pas :
+#   • un cron qui n'a plus de run vert (YAML invalide, Actions off, quota)
+#   • Database I/O Convex qui s'approche du plafond avant la coupure
+#
+# Constaté le 2026-08-16 : knowledge-sync mort 4 jours sans alerte ;
+# scrape-news en échec Convex I/O, visibles seulement une fois le job rouge.
+
+on:
+  schedule:
+    - cron: "20 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Contrôler crons + I/O Convex
+        id: check
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: python scripts/ci_watchdog.py
+
+      - name: Notifier Telegram
+        if: steps.check.outcome == 'failure'
+        uses: ./.github/actions/telegram
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: alerte
+          title: Watchdog — cron ou I/O Convex
+          body: ${{ env.WATCHDOG_BODY }}
+
+      - name: Échouer le job si alerte
+        if: steps.check.outcome == 'failure'
+        run: exit 1

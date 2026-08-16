@@ -29,6 +29,8 @@ on:
       - M68 Publish Scheduled
       - M68 Shop Sites Sync
       - Scrape Mulhouse News
+      - Scrape Outings (Agenda)
+      - Sauvegarde Convex - Hebdomadaire
     types: [completed]
 
 permissions:
@@ -117,6 +119,7 @@ jobs:
 
       - name: Envoyer
         env:
+          GH_TOKEN: ${{ github.token }}
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
           WF_NAME: ${{ github.event.workflow_run.name }}
@@ -133,6 +136,25 @@ jobs:
           if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
             echo "::warning::Secrets Telegram absents"
             exit 0
+          fi
+
+          # Scrape toutes les 15 min : un seul Telegram toutes les 2 h tant
+          # que ça reste rouge (sinon 8 messages identiques d'affilée).
+          if [ "$WF_NAME" = "Scrape Mulhouse News" ]; then
+            prev=$(gh api "repos/${{ github.repository }}/actions/runs?per_page=8" \
+              --jq '[.workflow_runs[] | select(.name=="Scrape Mulhouse News" and .conclusion=="failure" and .id != '${{ github.event.workflow_run.id }}')] | .[0].created_at' \
+              2>/dev/null)
+            if [ -n "$prev" ] && [ "$prev" != "null" ]; then
+              age=$(python3 -c "
+              from datetime import datetime, timezone
+              t=datetime.fromisoformat('$prev'.replace('Z','+00:00'))
+              print(int((datetime.now(timezone.utc)-t).total_seconds()))
+              " 2>/dev/null || echo 99999)
+              if [ "$age" -lt 7200 ]; then
+                echo "Telegram scrape déjà envoyé il y a ${age}s — skip"
+                exit 0
+              fi
+            fi
           fi
           NL=$'\n'
           esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }

@@ -1,0 +1,27 @@
+name: Actionlint
+
+# Un YAML Actions invalide coupe le cron sans aucun run planifié
+# (knowledge-sync et publish-scheduled morts du 12 au 16/08/2026).
+
+on:
+  push:
+    paths:
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download actionlint
+        run: bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.7
+      - name: Lint workflow files
+        run: ./actionlint -color
