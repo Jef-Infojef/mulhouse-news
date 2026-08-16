@@ -24,6 +24,9 @@ permissions:
 
 env:
   JINA_KEY_ENV: github
+  # npm ci ne doit pas télécharger Chrome (403 intermittents). L'étape
+  # suivante l'installe explicitement, avec retries.
+  PUPPETEER_SKIP_DOWNLOAD: "true"
 
 jobs:
   sync:
@@ -47,7 +50,13 @@ jobs:
         run: npm ci
 
       - name: Install Chrome for Puppeteer
-        run: npx puppeteer browsers install chrome
+        run: |
+          for i in 1 2 3; do
+            npx puppeteer browsers install chrome && exit 0
+            echo "tentative $i/3 échouée, nouvelle essai dans 15s…"
+            sleep 15
+          done
+          exit 1
 
       - name: Sync catalogue bibliothèques (crawl Anubis/Puppeteer, ~2h30)
         run: npx tsx scripts/library-catalog-sync.ts ${{ inputs.max_records && format('--max-records={0}', inputs.max_records) || '' }}

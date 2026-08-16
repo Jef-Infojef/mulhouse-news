@@ -15,6 +15,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+
 jobs:
   sync:
     runs-on: ubuntu-latest

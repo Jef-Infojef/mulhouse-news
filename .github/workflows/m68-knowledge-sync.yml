@@ -24,6 +24,7 @@ permissions:
 # workflow pour valoir sur la trentaine de steps sans les alourdir chacun.
 env:
   JINA_KEY_ENV: github
+  PUPPETEER_SKIP_DOWNLOAD: "true"
 
 jobs:
   sync:

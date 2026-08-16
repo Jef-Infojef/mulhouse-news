@@ -32,6 +32,11 @@ on:
 
 env:
   JINA_KEY_ENV: github
+  # Full Index n'ouvre jamais Chrome (le catalogue bibliothèques est un
+  # workflow mensuel à part). Sans ce skip, le postinstall Puppeteer
+  # télécharge Chrome et un 403 storage.googleapis.com tue npm ci —
+  # constaté le 2026-08-16 sur Index (core-data), 21 s, run #9.
+  PUPPETEER_SKIP_DOWNLOAD: "true"
   TURSO_DATABASE_URL: ${{ secrets.MULHOUSEGPT_TURSO_DATABASE_URL }}
   TURSO_AUTH_TOKEN: ${{ secrets.MULHOUSEGPT_TURSO_AUTH_TOKEN }}
   NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}

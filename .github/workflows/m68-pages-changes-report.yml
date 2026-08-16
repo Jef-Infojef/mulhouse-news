@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+
 jobs:
   report:
     runs-on: ubuntu-latest
