@@ -29,7 +29,9 @@ env:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # 90 min trop juste après un trou de sync : sorties ~25 min + UPR ~20 min
+    # ont fait tuer le job le 2026-08-16 avant Jina/garde-fou/Telegram.
+    timeout-minutes: 150
     steps:
       - name: Checkout MulhouseGPT (deploy key lecture seule)
         uses: actions/checkout@v4
