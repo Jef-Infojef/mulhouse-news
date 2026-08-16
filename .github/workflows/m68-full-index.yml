@@ -16,11 +16,12 @@ name: M68 Full Index
 # document/magazine/city_page/wiki/landmark_directory/open_data/osm_poi/
 # outing) a lui-même timeout à 1h00 — probablement dominé par indexArticles
 # (tout l'historique presse, sans fenêtre temporelle, retraité intégralement
-# à chaque run) et/ou city_page (crawl page par page du sitemap mulhouse.fr,
-# domaine par ailleurs observé instable/lent sur d'autres groupes). "core"
-# re-scindé en 3 le même jour pour isoler ces sources volumineuses les unes
-# des autres. runSource() (lib/rag/indexer.ts) logue désormais la durée de
-# chaque source individuellement pour affiner ce découpage si besoin.
+# à chaque run). "core" re-scindé en 3 le même jour pour isoler ces sources
+# volumineuses les unes des autres. city_page n'est plus dans ce workflow :
+# le daily Vercel (knowledge-sync → /api/cron/city-sync) fait le même
+# lastmod, et mulhouse.fr bloque les IPs GitHub. runSource() (lib/rag/indexer.ts)
+# logue désormais la durée de chaque source individuellement pour affiner
+# ce découpage si besoin.
 # Chaque groupe a son propre budget de temps, un groupe lent ou en échec ne
 # bloque plus les autres. ensureFtsReady() (lib/rag/indexer.ts) est protégé
 # par un verrou advisory Postgres pour tolérer ces démarrages simultanés.
@@ -63,7 +64,7 @@ jobs:
           - name: core-articles
             sources: article,news_article
           - name: core-pages
-            sources: city_page,wiki,landmark_directory
+            sources: wiki,landmark_directory
           - name: core-data
             sources: shop,shop_social,event,document,magazine,open_data,osm_poi,outing
           - name: culture-tourisme
