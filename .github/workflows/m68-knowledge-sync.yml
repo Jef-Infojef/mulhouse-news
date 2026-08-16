@@ -262,13 +262,14 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
-      - name: Sync PDF isolés (stationnement, marchés, conservatoire…)
+      - name: Sync PDF isolés (via Vercel, IPs GitHub bloquées par mulhouse.fr)
         if: always() && github.event.schedule != '0 3 * * 3'
-        run: npx tsx scripts/standalone-pdfs-sync.ts
-        env:
-          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
-          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
-          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+        run: |
+          response=$(curl -s -w "\n%{http_code}" --max-time 290 \
+            -H "Authorization: ${{ secrets.M68_CRON_SECRET }}" \
+            "https://mulhousegpt.vercel.app/api/cron/standalone-pdfs")
+          echo "$response" | head -1
+          [ "$(echo "$response" | tail -1)" = "200" ]
 
       - name: Sync publications sociales des commerces
         if: always() && github.event.schedule != '0 3 * * 3'
