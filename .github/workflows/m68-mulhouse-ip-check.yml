@@ -28,7 +28,7 @@ jobs:
       - name: Tester mulhouse.fr depuis l'IP du runner
         id: probe
         continue-on-error: true
-        run: python scripts/check_github_ip_mulhouse.py
+        run: python scripts/probe_mulhouse_github_ip.py
 
       # Manuel seulement : un Telegram quotidien « toujours bloqué » serait du bruit.
       - name: Notifier Telegram (lancement manuel)
