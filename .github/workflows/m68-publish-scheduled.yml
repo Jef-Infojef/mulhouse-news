@@ -16,6 +16,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Exposé en env de job pour le `if` du pont Convex : `secrets` n'est
+      # pas autorisé dans une condition (workflow invalide depuis le 12/08,
+      # plus aucun run planifié toutes les 15 min).
+      CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
     steps:
       - name: Checkout assocommercants (deploy key lecture seule)
         uses: actions/checkout@v4
@@ -72,10 +77,10 @@ jobs:
           DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
 
       - name: Sync NewsArticle publiées Supabase → Convex
-        if: ${{ secrets.CONVEX_DEPLOY_KEY != '' }}
+        if: env.CONVEX_DEPLOY_KEY != ''
         working-directory: mulhouse-news
         run: npx tsx scripts/sync_news_to_convex.ts
         env:
           DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          CONVEX_DEPLOY_KEY: ${{ env.CONVEX_DEPLOY_KEY }}
           NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
