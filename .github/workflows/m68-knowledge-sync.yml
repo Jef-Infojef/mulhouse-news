@@ -86,6 +86,18 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
+      # Vide-greniers.org (Réseau des agendas) : vide-greniers, brocantes et
+      # bourses à 20 km de Mulhouse. Une seule page listing, bloc JSON-LD par
+      # événement ; le passage quotidien fait sortir du corpus les événements
+      # joués ou annulés (ils disparaissent de la page).
+      - name: Sync vide-greniers.org (brocantes et bourses, 20 km)
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/vide-greniers-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
       - name: Sync Office de Tourisme (pages + guides PDF)
         if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/tourism-sync.ts
@@ -328,6 +340,55 @@ jobs:
       - name: Sync Théâtre de la Sinne
         if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/theatre-sinne-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      # Théâtre Poche Ruelle : site minuscule (une dizaine de pages utiles), la
+      # sync coûte trois requêtes HTTP. La programmation vit dans la page
+      # « À l'affiche » : son lastmod bouge quand elle change, et le passage
+      # quotidien la réindexe.
+      - name: Sync Théâtre Poche Ruelle
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/theatre-poche-ruelle-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      # Lieux culturels cités par la presse. La Filature : ~88 fiches de saison
+      # lues dans le JSON-LD de /programme, purge par date. Temple Saint-Étienne :
+      # événements à venir, exclusion des passés au crawl. Noumatrouff : pages
+      # fixes (l'agenda vit sur soticket.net). L'Entrepôt : programme curaté +
+      # fiches liées, purge quand un spectacle disparaît de la page.
+      - name: Sync La Filature
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/filature-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync Temple Saint-Étienne
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/temple-saint-etienne-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync La Noumatrouff
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/noumatrouff-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
+      - name: Sync L'Entrepôt
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/lentrepot-sync.ts
         env:
           NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}

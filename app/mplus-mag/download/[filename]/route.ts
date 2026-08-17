@@ -2,13 +2,18 @@ import { NextResponse } from 'next/server'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
-// Les PDF M+Mag sont d'abord servis depuis le site officiel mplusinfo.fr
+// Les PDF M+Mag sont servis depuis le site officiel mplusinfo.fr
 // (page « Le Mag » -> https://www.mplusinfo.fr/le-mag). Chaque numéro y est
 // hébergé sous une URL stable sur assets.mulhouse.omerloclients.com/issue_pdf.
-// On redirige le téléchargement vers cette URL : fiable, et ne consomme pas la
-// bande passante Vercel.
+//
+// On PROXIFIE ici le PDF (streaming) au lieu de simplement rediriger : le serveur
+// mplusinfo sert le fichier en « inline » (pas de Content-Disposition: attachment),
+// ce qui ouvrirait le PDF dans le navigateur au lieu de le télécharger. En passant
+// par cette route on force le téléchargement. Le streaming évite de bufferiser le
+// fichier en mémoire et permet de dépasser les limites de réponse de Vercel.
+//
 // Fallback : si le numéro n'est pas dans la liste, on garde la présignature B2
-// (bucket privé : Vercel ne doit pas servir les ~136 Mo directement).
+// (bucket privé), qui sert elle aussi le fichier en téléchargement (attachment).
 const MPLUSINFO_PDF: Record<string, string> = {
   '36': '4ebcdccf-7b81-4ec5-96e6-9f42ebebd2ff.pdf',
   '35': '29ac4dad-7bb9-4db6-840a-9c8c3aad0a98.pdf',
@@ -34,8 +39,7 @@ const MPLUSINFO_PDF: Record<string, string> = {
   '15': 'db078ff4-5a7a-4c7d-905a-cc63975acd71.pdf',
 }
 
-// Fallback B2 (bucket privé) : si un numéro n'est pas listé ci-dessus, on redirige
-// vers une URL présignée pour que le téléchargement parte directement de B2.
+// Fallback B2 (bucket privé) : si un numéro n'est pas listé ci-dessus.
 const b2Client = new S3Client({
   region: 'eu-central-003',
   endpoint: `https://${process.env.B2_ENDPOINT}`,
@@ -44,6 +48,9 @@ const b2Client = new S3Client({
     secretAccessKey: process.env.B2_APPLICATION_KEY || '',
   },
 })
+
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 export async function GET(
   _req: Request,
@@ -54,17 +61,36 @@ export async function GET(
     return new NextResponse('Fichier introuvable', { status: 404 })
   }
 
-  // 1) Source principale : redirection vers le PDF officiel hébergé par mplusinfo.fr
+  // 1) Source principale : proxy du PDF officiel (force le téléchargement).
   const num = filename.replace(/^M_Mag_/, '').split('_')[0]
   const assetId = MPLUSINFO_PDF[num]
   if (assetId) {
-    return NextResponse.redirect(
-      `https://assets.mulhouse.omerloclients.com/issue_pdf/${assetId}`,
-      302
-    )
+    const upstream = `https://assets.mulhouse.omerloclients.com/issue_pdf/${assetId}`
+    try {
+      const res = await fetch(upstream)
+      if (!res.ok || !res.body) {
+        console.error(`[M+Mag] Échec proxy mplusinfo (${assetId}) : ${res.status}`)
+        return new NextResponse('Fichier introuvable', { status: 502 })
+      }
+      // Retourne le PDF en streaming avec Content-Disposition: attachment pour
+      // forcer le téléchargement, quel que soit le comportement du serveur amont.
+      return new Response(res.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Content-Length': res.headers.get('content-length') ?? '',
+          'Cache-Control': 'public, max-age=86400',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      })
+    } catch (error) {
+      console.error('[M+Mag] Erreur réseau proxy mplusinfo:', error)
+      return new NextResponse('Erreur serveur', { status: 502 })
+    }
   }
 
-  // 2) Fallback : présignature B2 si le numéro n'est pas connu
+  // 2) Fallback : présignature B2 si le numéro n'est pas connu.
   try {
     const url = await getSignedUrl(
       b2Client,
@@ -74,9 +100,11 @@ export async function GET(
       }),
       { expiresIn: 3600 }
     )
+    // B2 met déjà Content-Disposition: attachment (cf. script d'upload) → redirection OK.
     return NextResponse.redirect(url, 307)
   } catch (error) {
     console.error('[M+Mag] Erreur présignature B2:', error)
     return new NextResponse('Erreur serveur', { status: 500 })
   }
 }
+

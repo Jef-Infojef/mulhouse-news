@@ -70,7 +70,7 @@ jobs:
           - name: culture-tourisme
             sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory,demographics,association_directory,agglo_page,sivom_page,uha_page,universite_populaire_page,piscines_m2a
           - name: musees
-            sources: museum_page,railway_page,electropolis_page,textile_museum_page,historical_museum_page,fine_arts_museum_page,mine_museum_page,wallpaper_museum_page,wesserling_page,kunsthalle_page,motoco_page,theatre_sinne_page
+            sources: museum_page,railway_page,electropolis_page,textile_museum_page,historical_museum_page,fine_arts_museum_page,mine_museum_page,wallpaper_museum_page,wesserling_page,kunsthalle_page,motoco_page,theatre_sinne_page,theatre_poche_ruelle_page,filature_page,temple_saint_etienne_page,noumatrouff_page,lentrepot_page
           - name: emploi
             sources: job_offer,labour_market_stats,territory_employment,employment_access,hiring_company,employment_event
           - name: administratif
