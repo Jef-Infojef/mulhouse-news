@@ -506,6 +506,11 @@ jobs:
               echo "$echecs"
               echo
             fi
+            if [ -f "sync-errors.log" ] && [ -s "sync-errors.log" ]; then
+              echo "Détails / causes :"
+              head -12 sync-errors.log
+              echo
+            fi
             printf '\n'
             echo "STEPS_EOF"
           } >> "$GITHUB_ENV"
