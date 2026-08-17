@@ -1,0 +1,44 @@
+name: M68 Petit Futé Test
+
+# TEST ponctuel : la sync Petit Futé (petitfute.com) est réputée « locale
+# seulement » car le site est protégé par Cloudflare — mais elle passe par le
+# lecteur Jina (r.jina.ai) avec la clé du magasin JinaKey, qui contourne le
+# 403. Ce workflow vérifie que la sync fonctionne depuis un runner GitHub
+# (JINA_KEY_ENV=github, clé lue dans le magasin, bascule auto sur 402).
+# Déclenché à la main uniquement : s'il passe au vert, on peut la promouvoir
+# dans le cron quotidien (m68-knowledge-sync.yml).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  JINA_KEY_ENV: github
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout MulhouseGPT (deploy key lecture seule)
+        uses: actions/checkout@v4
+        with:
+          repository: Jef-Infojef/MulhouseGPT
+          ssh-key: ${{ secrets.MULHOUSEGPT_DEPLOY_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync Petit Futé (guide + restaurants, via Jina Reader)
+        run: npx tsx scripts/petitfute-sync.ts
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
