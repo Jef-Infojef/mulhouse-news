@@ -455,11 +455,33 @@ def log_scrape(
     )
 
 
-def fetch_text(url: str, timeout: int = 60, sitemap: bool = False) -> str:
+def fetch_text(url: str, timeout: int = 60, sitemap: bool = False, retries: int = 3) -> str:
+    """Télécharge une page avec RETRY sur les erreurs réseau transitoires.
+
+    Un `curl: (35) Connection reset by peer` sur une seule URL faisait échouer
+    le run entier (2335 événements traités, 1 seul échec — mesuré le 2026-08-17).
+    Sont retentées les erreurs de transport (RequestsError levée par
+    requests.get) et les 5xx : une 404 ou 4xx stable ne sert à rien de rejouer.
+    """
     headers = SITEMAP_HEADERS if sitemap else FETCH_HEADERS
-    resp = requests.get(url, headers=headers, timeout=timeout, impersonate="chrome110")
-    resp.raise_for_status()
-    return resp.text
+    delay = 1.0
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(url, headers=headers, timeout=timeout, impersonate="chrome110")
+            resp.raise_for_status()
+            return resp.text
+        except requests.errors.RequestsError as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            # Une réponse HTTP reçue (4xx stable, 404…) ne sera pas rejouée :
+            # retenter n'apporterait qu'un délai, l'échec est définitif.
+            if status is not None and status < 500:
+                raise
+            if attempt >= retries:
+                raise
+            print(f"[fetch_text] {url} — tentative {attempt}/{retries} ({exc}), retry dans {delay:.0f}s")
+            time.sleep(delay)
+            delay *= 2
+    raise RuntimeError(f"fetch_text: échec après {retries} tentatives ({url})")
 
 
 def record_result(stats: ScrapeStats, result: str) -> None:
