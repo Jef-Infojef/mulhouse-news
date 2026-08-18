@@ -51,7 +51,7 @@ jobs:
       - name: Sync pages mulhouse.fr (via Vercel, IPs GitHub bloquées)
         if: github.event.schedule != '0 3 * * 3'
         run: |
-          response=$(curl -s -w "\n%{http_code}" --max-time 290 \
+          response=$(curl -s -w "\n%{http_code}" --max-time 310 \
             -H "Authorization: ${{ secrets.M68_CRON_SECRET }}" \
             "https://mulhousegpt.vercel.app/api/cron/city-sync")
           echo "$response" | head -1
@@ -277,7 +277,7 @@ jobs:
       - name: Sync PDF isolés (via Vercel, IPs GitHub bloquées par mulhouse.fr)
         if: always() && github.event.schedule != '0 3 * * 3'
         run: |
-          response=$(curl -s -w "\n%{http_code}" --max-time 290 \
+          response=$(curl -s -w "\n%{http_code}" --max-time 310 \
             -H "Authorization: ${{ secrets.M68_CRON_SECRET }}" \
             "https://mulhousegpt.vercel.app/api/cron/standalone-pdfs")
           echo "$response" | head -1
@@ -460,6 +460,19 @@ jobs:
       # verts pendant que le contenu s'indexait sans vecteurs.
       # continue-on-error : on veut le verdict DANS la notification, pas un
       # arrêt qui empêcherait de l'envoyer.
+
+      # Le garde-fou exige moins de 500 chunks sans embedding, mais les
+      # backfills inline de chaque sync (500 à 1 000) ne suffisent pas après un
+      # gros réindex (ex. UPR : 2 841 chunks le 2026-08-18, 1 835 restés sans
+      # vecteur → ANOMALIE). Un backfill centralisé à la fin, comme dans
+      # m68-full-index, rattrape le retard avant le contrôle.
+      - name: Backfill embeddings restants
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/rag-backfill-embeddings.ts
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
       - name: Garde-fou corpus RAG
         id: guard
         if: always()
