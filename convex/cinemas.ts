@@ -276,6 +276,11 @@ export const getCinemas = query({
  * `fromMs`/`toMs` bornent startsAt (par défaut fromMs = maintenant, toMs non
  * borné). `limit` plafonné à 20000 : les séances sont ordonnées par startsAt
  * asc, les jours demandés par les ponts caches sont donc toujours en tête.
+ *
+ * Scan borné : le balayage passe d'abord par `.take(limit)` (index by_startsAt,
+ * gte fromMs), PUIS `toMs` est appliqué en JS. Le filtrer dans la query
+ * obligeait Convex à parcourir l'index jusqu'à la fin — c.-à-d. toutes les
+ * séances futures — même pour répondre à un jour précis.
  */
 export const getScreeningsWithMovieCinema = query({
   args: {
@@ -287,14 +292,17 @@ export const getScreeningsWithMovieCinema = query({
     const from = args.fromMs ?? Date.now();
     const limit = Math.min(Math.max(1, args.limit ?? 5000), 20000);
 
-    let q = ctx.db
+    let screenings = await ctx.db
       .query("screenings")
       .withIndex("by_startsAt", (qq) => qq.gte("startsAt", from))
-      .order("asc");
+      .order("asc")
+      .take(limit);
+
+    // Borne haute appliquée après take() : scan plafonné à `limit`, pas à tout
+    // l'index. Une journée ≈ 80 séances → bien en vue de la tête de liste.
     if (args.toMs !== undefined) {
-      q = q.filter((qq) => qq.lte(qq.field("startsAt"), args.toMs!));
+      screenings = screenings.filter((s) => s.startsAt <= args.toMs!);
     }
-    const screenings = await q.take(limit);
 
     // Jointures en JS : volumes petits (3 cinémas, ~293 films), collect OK.
     const movies = await ctx.db.query("movies").collect();
