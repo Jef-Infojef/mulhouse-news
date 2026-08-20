@@ -184,6 +184,18 @@ def get_articles_short_content(limit: int = 50, hours: int = 24) -> list[dict]:
     return res["articles"]
 
 
+def get_articles_missing_content_all(limit: int = 300, max_pages: int = 200) -> list[dict]:
+    """Articles lalsace.fr au contenu manquant, sans borne de date (backfill
+    d'archive). Scan paginé publishedAt asc : les plus anciens d'abord.
+    Retourne les métadonnées (jamais le contenu)."""
+    res = _call(
+        "scrapers:getArticlesMissingContentAll",
+        {"limit": limit, "maxPages": max_pages},
+        mutation=False,
+    )
+    return res["articles"]
+
+
 def get_articles_missing_captions(limit: int = 30) -> list[dict]:
     """Articles EBRA récents avec imageUrl mais sans imageCaption (rattrapage)."""
     res = _call(

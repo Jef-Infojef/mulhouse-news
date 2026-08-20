@@ -1,4 +1,5 @@
 import os
+import argparse
 import psycopg2
 from bs4 import BeautifulSoup
 import json
@@ -41,7 +42,7 @@ def fetch_grdc_content(page_text, target_url, cookies_dict):
     try:
         host = target_url.split("/")[2]
         api = f"https://{host}/services/grdc/detail?key={key}"
-        time.sleep(random.uniform(0.5, 1.2))
+        time.sleep(random.uniform(0.2, 0.4))
         resp = requests.get(api, cookies=cookies_dict, impersonate="chrome120", timeout=30)
         if resp.status_code != 200:
             return None, []
@@ -277,7 +278,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
             if target_url != url:
                 print(f"    [🔄] Test Fallback L'Alsace pour : {url[:40]}...")
 
-        time.sleep(random.uniform(1.0, 2.0))
+        time.sleep(random.uniform(0.3, 0.6))
         
         try:
             resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome120", timeout=30, allow_redirects=True)
@@ -490,8 +491,19 @@ def run_image_scripts():
         return f"Error: {str(e)}"
 
 def main():
+    parser = argparse.ArgumentParser(description="Scraper de contenu (mode normal = 24h, --archive = toutes les dates)")
+    parser.add_argument("--archive", action="store_true",
+                        help="Backfill d'archive : tous les articles lalsace.fr au contenu manquant, sans borne de date")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="Nombre max d'articles à traiter (défaut : 50 en normal, 300 en archive)")
+    parser.add_argument("--max-pages", type=int, default=200,
+                        help="Convex archive : pages de scan maximales (défaut 200 x 500 docs)")
+    args = parser.parse_args()
+
     start_time = datetime.now()
     print(f"=== SCRAPER PRODUCTION V2 (WITH LOGS) - {start_time.strftime('%H:%M:%S')} ===")
+    if args.archive:
+        print("[*] MODE ARCHIVE : toutes les dates (backfill lalsace.fr)")
     
     conn = None
     cur = None
@@ -560,19 +572,41 @@ def main():
         print(f"[*] État initial connexion : {'✅' if stats['is_connected'] else '❌'}")
 
         if USE_CONVEX:
-            articles = convex_client.get_articles_short_content(limit=50, hours=24)
+            if args.archive:
+                articles = convex_client.get_articles_missing_content_all(
+                    limit=args.limit or 300, max_pages=args.max_pages
+                )
+            else:
+                articles = convex_client.get_articles_short_content(limit=args.limit or 50, hours=24)
         else:
-            cur.execute("""
-                SELECT id, title, link 
-                FROM "Article" 
-                WHERE (content IS NULL OR LENGTH(content) < 500)
-                  AND "publishedAt" > NOW() - INTERVAL '24 hours'
-                ORDER BY "publishedAt" DESC LIMIT 50
-            """)
+            if args.archive:
+                # Tous les articles L'Alsace au contenu manquant, du plus ancien
+                # au plus récent (les vieux sont traités en premier).
+                # Pas de limite par défaut ; `--limit N` borne le run.
+                archive_limit = args.limit if args.limit > 0 else None
+                cur.execute("""
+                    SELECT id, title, link
+                    FROM "Article"
+                    WHERE link LIKE '%%lalsace.fr%%'
+                      AND (content IS NULL OR LENGTH(content) < 150)
+                    ORDER BY "publishedAt" ASC NULLS LAST
+                    LIMIT %s
+                """, (archive_limit,))
+            else:
+                cur.execute("""
+                    SELECT id, title, link
+                    FROM "Article"
+                    WHERE (content IS NULL OR LENGTH(content) < 500)
+                      AND "publishedAt" > NOW() - INTERVAL '24 hours'
+                    ORDER BY "publishedAt" DESC LIMIT %s
+                """, (args.limit or 50,))
             articles = cur.fetchall()
         
         cooldowns = get_retry_cooldowns(conn)
-        
+        total_articles = len(articles)
+        total_chars_recovered = 0
+        print(f"[*] {total_articles} articles à traiter.")
+
         for i, article in enumerate(articles, 1):
             if USE_CONVEX:
                 art_id = article["link"]
@@ -671,7 +705,15 @@ def main():
                 conn.commit()
             
             session_details.append({"title": title, "link": link, "status": status, "error": err, "chars": current_len})
-            print(f"    [{i}/{len(articles)}] {status} | {title[:40]}...")
+            if status == "SUCCESS" and current_len:
+                total_chars_recovered += current_len
+            elapsed = (datetime.now() - start_time).total_seconds()
+            pct = 100.0 * i / total_articles if total_articles else 100.0
+            eta = (elapsed / i) * (total_articles - i) if i else 0
+            print(f"    [{i}/{total_articles}] ({pct:5.1f}% | {int(elapsed // 60):02d}m{int(elapsed % 60):02d}s | ETA {int(eta // 60):02d}m{int(eta % 60):02d}s) {status} | {title[:40]}...", flush=True)
+
+        if total_chars_recovered:
+            print(f"\n[*] Taille totale récupérée : {total_chars_recovered:,} chars ({total_chars_recovered/1_048_576:.2f} Mo)", flush=True)
 
         persist_retry_cooldowns(conn, cooldowns)
 
@@ -746,6 +788,8 @@ def main():
             print(f"\n[!] Log non enregistré (table absente?) : {log_err}")
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"❌ Erreur critique : {e}")
         if USE_CONVEX:
             try:

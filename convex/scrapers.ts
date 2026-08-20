@@ -330,6 +330,54 @@ export const getArticlesShortContent = query({
   },
 });
 
+// Articles EBRA (lalsace.fr) au contenu manquant, SANS borne de date —
+// backfill d'archive (scrape_content_full.py --archive). Scan paginé du plus
+// ancien au plus récent (publishedAt asc) : les vieux articles sont traités
+// en premier, et chaque run avance naturellement (contenu rempli → filtré).
+export const getArticlesMissingContentAll = query({
+  args: {
+    limit: v.optional(v.number()),
+    maxPages: v.optional(v.number()),
+    pageSize: v.optional(v.number()),
+    minLength: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(1, args.limit ?? 300), 500);
+    const maxPages = Math.min(Math.max(1, args.maxPages ?? 200), 1000);
+    const pageSize = Math.min(Math.max(1, args.pageSize ?? 500), 1000);
+    const minLength = args.minLength ?? 150;
+    const articles = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < maxPages; page++) {
+      const res = await ctx.db
+        .query("articles")
+        .withIndex("by_hidden_publishedAt", (q) => q.eq("hidden", false))
+        .order("asc")
+        .paginate({ cursor, numItems: pageSize });
+      for (const doc of res.page) {
+        if (!doc.link || !doc.link.includes("lalsace.fr")) continue;
+        const short = doc.content === undefined || doc.content === null || doc.content.length < minLength;
+        if (!short) continue;
+        articles.push({
+          id: doc._id,
+          title: doc.title,
+          link: doc.link,
+          imageUrl: doc.imageUrl ?? null,
+          imageCaption: doc.imageCaption ?? null,
+          source: doc.source ?? null,
+          description: doc.description ?? null,
+          publishedAt: doc.publishedAt,
+          supabaseId: doc.supabaseId ?? null,
+        });
+        if (articles.length >= limit) return { articles };
+      }
+      if (res.isDone) break;
+      cursor = res.continueCursor;
+    }
+    return { articles };
+  },
+});
+
 export const getArticleByTitleRecent = query({
   args: { title: v.string(), hours: v.optional(v.number()) },
   handler: async (ctx, { title, hours }) => {

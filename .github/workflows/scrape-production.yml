@@ -1,6 +1,16 @@
-name: Run Full Scraper (Production)
-on: 
+name: Run L'Alsace Archive Backfill (Production)
+
+on:
   workflow_dispatch:
+    inputs:
+      start:
+        description: 'Date de début (YYYY-MM-DD)'
+        required: false
+        default: '2006-08-21'
+      end:
+        description: 'Date de fin (YYYY-MM-DD, défaut : hier)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -8,6 +18,8 @@ permissions:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,10 +31,52 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install beautifulsoup4 curl_cffi psycopg2-binary requests
+          python -m pip install --upgrade pip
+          pip install beautifulsoup4 curl_cffi psycopg2-binary python-dotenv requests
 
-      - name: Run Production Scraper
+      - name: Snapshot Convex I/O (avant)
+        continue-on-error: true
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+        run: python scripts/log_convex_io.py before
+
+      - name: Run L'Alsace archive discovery (sitemaps)
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
+        run: |
+          python scripts/scrape_alsace_archive.py --start ${{ inputs.start }} --end ${{ inputs.end }}
+
+      - name: Run L'Alsace archive content (GRDC + cookie EBRA)
+        env:
           ALSACE_COOKIES: ${{ secrets.ALSACE_COOKIES }}
-        run: python scripts/scrape_alsace_production.py
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
+          B2_PUBLIC_URL: ${{ secrets.B2_PUBLIC_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
+        run: |
+          python scripts/scrape_content_full.py --archive
+
+      - name: Log Convex I/O du run
+        if: always()
+        continue-on-error: true
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
+        run: python scripts/log_convex_io.py after
+
+      - name: Log failure to DB
+        if: failure()
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
+        run: |
+          python scripts/log_github_failure.py
