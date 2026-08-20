@@ -57,6 +57,20 @@ jobs:
         run: |
           python scripts/scrape_and_seed.py
 
+      # Rattrapage L'Alsace « jour » : le sitemap quotidien liste TOUTES les
+      # URLs publiées le jour même (et la veille), contrairement au RSS qui ne
+      # renvoie que les derniers items. Garantit de ne rien manquer du jour,
+      # même si un article sort du RSS entre deux runs de 15 min.
+      - name: Run L'Alsace sitemap (rattrapage jour)
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
+        run: |
+          START=$(date -u -d "2 days ago" +%F)
+          END=$(date -u +%F)
+          python scripts/scrape_alsace_archive.py --start "$START" --end "$END"
+
       - name: Run mplusinfo.fr scraper
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
