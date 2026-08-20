@@ -493,3 +493,47 @@ export const getRecentArticlesWithContent = query({
     return { articles };
   },
 });
+
+// Backfill RAG complet : tous les articles hidden=false avec contenu non vide,
+// sans borne de temps, paginé du plus ancien au plus récent (publishedAt asc).
+// Renvoie `content` (usage RAG) + curseur de pagination pour tout récupérer.
+// query dédiée au backfill, jamais de liste.
+export const getAllArticlesWithContent = query({
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.null(), v.string())),
+    pageSize: v.optional(v.number()),
+    minLength: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(1, args.limit ?? 300), 1000);
+    const pageSize = Math.min(Math.max(1, args.pageSize ?? 500), 1000);
+    const minLength = args.minLength ?? 40;
+    const res = await ctx.db
+      .query("articles")
+      .withIndex("by_hidden_publishedAt", (q) => q.eq("hidden", false))
+      .order("asc")
+      .paginate({ cursor: args.cursor ?? null, numItems: pageSize });
+    const articles = [];
+    for (const doc of res.page) {
+      if (!doc.content || doc.content.length < minLength) continue;
+      articles.push({
+        id: doc.supabaseId ?? doc._id,
+        supabaseId: doc.supabaseId ?? null,
+        title: doc.title,
+        description: doc.description ?? null,
+        content: doc.content,
+        source: doc.source ?? null,
+        link: doc.link,
+        publishedAt: doc.publishedAt,
+        updatedAt: doc.updatedAt,
+      });
+      if (articles.length >= limit) break;
+    }
+    return {
+      articles,
+      cursor: res.continueCursor,
+      isDone: res.isDone,
+    };
+  },
+});

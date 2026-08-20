@@ -213,12 +213,18 @@ def upsert_document(
         stats["by_source"][source_type] = stats["by_source"].get(source_type, 0) + 1
 
 
-def sync_press_articles(cur, limit: int, stats: dict) -> None:
+def sync_press_articles(cur, limit: int, stats: dict, full: bool = False) -> None:
     if USE_CONVEX:
-        # Lecture Convex : articles récents hidden=false avec contenu (25h).
-        # `id` = supabaseId (sourceId stable du RAG) ; le tri SQL par updatedAt
-        # est approché par un scan borné côté Convex (voir scrapers.ts).
-        rows = convex_client.get_recent_articles_with_content(limit=limit, hours=25)
+        if full:
+            # Backfill complet : tous les articles avec contenu, sans borne 25h.
+            # Paginé du plus ancien au plus récent (cursor).
+            print("[*] Mode FULL : indexation de tous les articles avec contenu...")
+            rows = convex_client.get_all_articles_with_content(limit=limit)
+        else:
+            # Lecture Convex : articles récents hidden=false avec contenu (25h).
+            # `id` = supabaseId (sourceId stable du RAG) ; le tri SQL par updatedAt
+            # est approché par un scan borné côté Convex (voir scrapers.ts).
+            rows = convex_client.get_recent_articles_with_content(limit=limit, hours=25)
         for article in rows:
             body = format_press_article(article)
             if not body:
@@ -334,6 +340,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sync actualités → RAG (KnowledgeChunk)")
     parser.add_argument("--press-limit", type=int, default=40)
     parser.add_argument("--news-limit", type=int, default=40)
+    parser.add_argument("--full", action="store_true",
+                        help="Backfill complet : indexe tous les articles avec contenu (ignore la borne 25h)")
     args = parser.parse_args()
 
     if not DATABASE_URL:
@@ -348,7 +356,7 @@ def main() -> int:
     try:
         cur = conn.cursor()
         ensure_fts_index(cur)
-        sync_press_articles(cur, args.press_limit, stats)
+        sync_press_articles(cur, args.press_limit, stats, full=args.full)
         if not USE_CONVEX:
             # En mode Convex, NewsArticle n'est pas syncé : la table est vide
             # côté Convex (documenté) et l'écriture Aiven reste en SQL.

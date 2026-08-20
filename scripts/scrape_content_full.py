@@ -42,7 +42,7 @@ def fetch_grdc_content(page_text, target_url, cookies_dict):
     try:
         host = target_url.split("/")[2]
         api = f"https://{host}/services/grdc/detail?key={key}"
-        time.sleep(random.uniform(0.2, 0.4))
+        time.sleep(random.uniform(0.1, 0.2))
         resp = requests.get(api, cookies=cookies_dict, impersonate="chrome120", timeout=30)
         if resp.status_code != 200:
             return None, []
@@ -278,7 +278,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
             if target_url != url:
                 print(f"    [🔄] Test Fallback L'Alsace pour : {url[:40]}...")
 
-        time.sleep(random.uniform(0.3, 0.6))
+        time.sleep(random.uniform(0.1, 0.25))
         
         try:
             resp = requests.get(target_url, cookies=cookies_dict, impersonate="chrome120", timeout=30, allow_redirects=True)

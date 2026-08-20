@@ -300,6 +300,24 @@ def get_recent_articles_with_content(limit: int = 250, hours: int = 25) -> list[
     return res["articles"]
 
 
+def get_all_articles_with_content(limit: int = 300, page_size: int = 500) -> list[dict]:
+    """Backfill RAG : TOUS les articles hidden=false avec contenu non vide,
+    sans borne de temps, paginé du plus ancien au plus récent (cursor)."""
+    articles: list[dict] = []
+    cursor: str | None = None
+    while True:
+        res = _call(
+            "scrapers:getAllArticlesWithContent",
+            {"limit": limit, "cursor": cursor, "pageSize": page_size},
+            mutation=False,
+        )
+        articles.extend(res["articles"])
+        if res["isDone"]:
+            break
+        cursor = res["cursor"]
+    return articles
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # AppConfig
 # ─────────────────────────────────────────────────────────────────────────────
