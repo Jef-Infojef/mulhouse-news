@@ -234,6 +234,7 @@ export const getRecentOutings = query({
         supabaseId: o.supabaseId,
         title: o.title,
         description: o.description ?? null,
+        imageUrl: o.imageUrl ?? null,
         date: o.date,
         endDate: o.endDate ?? null,
         location: o.location ?? null,

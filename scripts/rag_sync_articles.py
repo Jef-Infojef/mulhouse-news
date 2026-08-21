@@ -40,7 +40,19 @@ _root = os.path.dirname(_script_dir)
 for _env in (".envenv", ".env.local", ".env"):
     load_dotenv(os.path.join(_root, _env))
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "").replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+def _clean_url(v: str) -> str:
+    return v.replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+
+# Base RAG (KnowledgeChunk) : toujours Aiven (RAG_DATABASE_URL). C'est elle que
+# le chat MulhouseGPT lit. Ne JAMAIS écrire les vecteurs dans Supabase (free
+# tier 500 Mo) — une copie parasite de 120 Mo y avait été créée parce que
+# DATABASE_URL (Supabase) servait de cible d'écriture.
+RAG_URL = _clean_url(os.environ.get("RAG_DATABASE_URL", "") or "")
+# Source des articles en mode non-Convex (fallback legacy) : Supabase.
+NEWS_URL = _clean_url(
+    os.environ.get("NEWS_DATABASE_URL", "") or os.environ.get("DATABASE_URL", "") or ""
+)
+DATABASE_URL = _clean_url(os.environ.get("DATABASE_URL", "") or "")
 
 # Backend : Convex (cloud) si USE_CONVEX=1 ou CONVEX_DEPLOY_KEY définie.
 USE_CONVEX = convex_client.use_convex()
@@ -213,7 +225,7 @@ def upsert_document(
         stats["by_source"][source_type] = stats["by_source"].get(source_type, 0) + 1
 
 
-def sync_press_articles(cur, limit: int, stats: dict, full: bool = False) -> None:
+def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool = False) -> None:
     if USE_CONVEX:
         if full:
             # Backfill complet : tous les articles avec contenu, sans borne 25h.
@@ -232,7 +244,7 @@ def sync_press_articles(cur, limit: int, stats: dict, full: bool = False) -> Non
                 continue
             try:
                 upsert_document(
-                    cur,
+                    rag_cur,
                     source_type="article",
                     source_id=article["id"],
                     title=article["title"],
@@ -251,7 +263,7 @@ def sync_press_articles(cur, limit: int, stats: dict, full: bool = False) -> Non
                 print(f"  [ERR] article {article['id']}: {exc}", file=sys.stderr)
         return
 
-    cur.execute(
+    news_cur.execute(
         """
         SELECT id, title, description, content, source, link, "publishedAt"
         FROM "Article"
@@ -262,7 +274,7 @@ def sync_press_articles(cur, limit: int, stats: dict, full: bool = False) -> Non
         """,
         (limit,),
     )
-    for row in cur.fetchall():
+    for row in news_cur.fetchall():
         article = {
             "id": row[0],
             "title": row[1],
@@ -278,7 +290,7 @@ def sync_press_articles(cur, limit: int, stats: dict, full: bool = False) -> Non
             continue
         try:
             upsert_document(
-                cur,
+                rag_cur,
                 source_type="article",
                 source_id=article["id"],
                 title=article["title"],
@@ -295,8 +307,8 @@ def sync_press_articles(cur, limit: int, stats: dict, full: bool = False) -> Non
             print(f"  [ERR] article {article['id']}: {exc}", file=sys.stderr)
 
 
-def sync_news_articles(cur, limit: int, stats: dict, site_url: str) -> None:
-    cur.execute(
+def sync_news_articles(rag_cur, news_cur, limit: int, stats: dict, site_url: str) -> None:
+    news_cur.execute(
         """
         SELECT id, title, slug, excerpt, content, "publishedAt"
         FROM "NewsArticle"
@@ -307,7 +319,7 @@ def sync_news_articles(cur, limit: int, stats: dict, site_url: str) -> None:
         """,
         (limit,),
     )
-    for row in cur.fetchall():
+    for row in news_cur.fetchall():
         article = {
             "id": row[0],
             "title": row[1],
@@ -320,7 +332,7 @@ def sync_news_articles(cur, limit: int, stats: dict, site_url: str) -> None:
         url = f"{site_url.rstrip('/')}/actualites/{article['slug']}"
         try:
             upsert_document(
-                cur,
+                rag_cur,
                 source_type="news_article",
                 source_id=article["id"],
                 title=article["title"],
@@ -344,26 +356,34 @@ def main() -> int:
                         help="Backfill complet : indexe tous les articles avec contenu (ignore la borne 25h)")
     args = parser.parse_args()
 
-    if not DATABASE_URL:
-        print("DATABASE_URL manquant", file=sys.stderr)
+    if not RAG_URL:
+        print("RAG_DATABASE_URL manquant (cible d'écriture KnowledgeChunk)", file=sys.stderr)
         return 1
 
     site_url = os.environ.get("NEXT_PUBLIC_SITE_URL", "https://www.mulhouse68.fr")
 
     stats = {"indexed": 0, "skipped": 0, "errors": 0, "by_source": {}}
 
-    conn = psycopg2.connect(DATABASE_URL)
+    # Écriture des vecteurs : TOUJOURS Aiven (RAG_DATABASE_URL).
+    rag_conn = psycopg2.connect(RAG_URL)
+    # Lecture des articles en mode non-Convex (fallback) : Supabase.
+    news_conn = psycopg2.connect(NEWS_URL) if (not USE_CONVEX and NEWS_URL) else None
     try:
-        cur = conn.cursor()
-        ensure_fts_index(cur)
-        sync_press_articles(cur, args.press_limit, stats, full=args.full)
+        rag_cur = rag_conn.cursor()
+        ensure_fts_index(rag_cur)
+        news_cur = news_conn.cursor() if news_conn else None
+        sync_press_articles(rag_cur, news_cur, args.press_limit, stats, full=args.full)
         if not USE_CONVEX:
             # En mode Convex, NewsArticle n'est pas syncé : la table est vide
             # côté Convex (documenté) et l'écriture Aiven reste en SQL.
-            sync_news_articles(cur, args.news_limit, stats, site_url)
-        conn.commit()
+            sync_news_articles(rag_cur, news_cur, args.news_limit, stats, site_url)
+        rag_conn.commit()
+        if news_conn:
+            news_conn.commit()
     finally:
-        conn.close()
+        rag_conn.close()
+        if news_conn:
+            news_conn.close()
 
     print("--- Sync RAG actualités (GitHub Actions) ---")
     print(f"Chunks indexés : {stats['indexed']}")

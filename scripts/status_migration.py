@@ -62,7 +62,7 @@ def count_convex_alsace():
 
 def count_rag():
     try:
-        url = os.environ.get("DATABASE_URL", "").replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+        url = os.environ.get("RAG_DATABASE_URL", "").replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
         conn = psycopg2.connect(url)
         cur = conn.cursor()
         cur.execute('SELECT COUNT(*) FROM "KnowledgeChunk" WHERE "sourceType" = %s', ("article",))

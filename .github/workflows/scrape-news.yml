@@ -109,9 +109,11 @@ jobs:
         run: |
           python scripts/scrape_content_full.py
 
-      - name: Sync RAG index (direct Supabase, sans Vercel)
+      - name: Sync RAG index (direct Aiven, sans Vercel)
         env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
           NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
           USE_CONVEX: '1'

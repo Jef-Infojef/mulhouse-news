@@ -13,6 +13,7 @@ Usage :
 import argparse
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import psycopg2
@@ -72,10 +73,8 @@ def main():
     def clean(v):
         return None if v is None else v
 
-    inserted = updated = errors = 0
-    start = time.time()
-    for i, r in enumerate(rows, 1):
-        row = {
+    def to_row(r):
+        return {
             "supabaseId": r[0],
             "title": r[1],
             "link": r[2],
@@ -89,19 +88,45 @@ def main():
             "updatedAt": ms(r[10]),
             "hidden": bool(r[11]),
         }
-        try:
-            res = convex_client.upsert_article(row)
-            if res and res.get("created"):
-                inserted += 1
-            else:
-                updated += 1
-        except Exception as e:
-            errors += 1
-            if errors <= 5:
-                print(f"    [!] Échec ({r[2]}): {e}")
-        if i % 500 == 0:
-            el = time.time() - start
-            print(f"    [{i}/{len(rows)}] +{inserted} insérés, {updated} à jour, {errors} erreurs ({el:.0f}s)")
+
+    # Upserts Convex en parallèle : chaque article = un appel HTTP séquentiel
+    # (~0,6 s), la sérialisation en faisait ~1,5 article/s. Un pool de workers
+    # envoie plusieurs mutations simultanément (Convex gère la concurrence).
+    # On garde un nombre borné de requêtes en vol pour ne pas noyer l'API.
+    workers = int(os.environ.get("MIGRATE_CONCURRENCY", "12"))
+    inserted = updated = errors = 0
+    start = time.time()
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        in_flight: dict = {}
+        row_iter = iter(rows)
+        def submit_next():
+            r = next(row_iter, None)
+            if r is None:
+                return False
+            in_flight[pool.submit(convex_client.upsert_article, to_row(r))] = r[2]
+            return True
+        for _ in range(workers):
+            submit_next()
+        while in_flight:
+            fut = next(as_completed(in_flight))
+            link = in_flight.pop(fut)
+            try:
+                res = fut.result()
+                if res and res.get("created"):
+                    inserted += 1
+                else:
+                    updated += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    print(f"    [!] Échec ({link}): {e}")
+            done += 1
+            submit_next()
+            if done % 500 == 0:
+                el = time.time() - start
+                rate = done / el if el else 0
+                print(f"    [{done}/{len(rows)}] +{inserted} insérés, {updated} à jour, {errors} erreurs ({el:.0f}s, {rate:.1f}/s)")
 
     print(f"\n[*] TERMINÉ : {len(rows)} lus | +{inserted} insérés | {updated} déjà présents/mis à jour | {errors} erreurs")
 

@@ -1,5 +1,7 @@
 # AGENTS.md — Mulhouse News
 
+**Port** : 3006
+
 ## Logs WinLauncher (dev local)
 
 Lancé depuis WinLauncher (port 3006), le stdout est dans
