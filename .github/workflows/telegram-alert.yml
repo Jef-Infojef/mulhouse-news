@@ -20,6 +20,7 @@ on:
     workflows:
       - Sauvegarde Complète (Full) - Hebdomadaire
       - Sauvegarde Incrémentale - Quotidienne
+      - Cinema Scrape
       - Purge des logs de scraping
       - Keep-Alive
       - M68 Airport Sync

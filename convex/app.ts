@@ -305,6 +305,19 @@ export const deleteArticle = mutation({
 // trié par publishedAt desc — approximation : scan borné des 500 plus récents,
 // puis filtre en JS, même sensibilité). Query INTERNE : consommée uniquement par
 // l'action testEbraConnection (les actions n'ont pas accès direct à ctx.db).
+// Masquer/Afficher un article (équivalent de `article.update({ hidden })` Prisma
+// côté Supabase). Consommé en HTTP par le pont assocommercants
+// (PATCH /api/google-news/[id] quand useConvexNews()).
+export const setArticleHidden = mutation({
+  args: { id: v.id("articles"), hidden: v.boolean() },
+  handler: async (ctx, { id, hidden }) => {
+    const doc = await ctx.db.get(id);
+    if (!doc) return { success: false, error: "Article introuvable" };
+    await ctx.db.patch(id, { hidden });
+    return { success: true, error: null };
+  },
+});
+
 export const getLastAlsaceArticle = internalQuery({
   args: {},
   handler: async (ctx) => {

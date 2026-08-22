@@ -1,0 +1,46 @@
+name: Cinema Scrape
+
+# Séances de cinéma AlloCiné → Supabase (+ miroir Convex). Porté depuis le
+# repo assocommercants (08/2026) pour rapprocher le job du backend Convex
+# qu'il alimente — même cron 2h UTC que l'ancien workflow. Le script écrit
+# Supabase (chemin primaire, tables Cinema/Movie/Screening/ScrapeLog) puis
+# reflète en Convex via les mutations cinemas:*.
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scrape cinema showtimes
+        run: npx tsx scripts/cinema-scrape.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+
+      - name: Invalider le cache cinéma (1 appel site/jour)
+        if: success()
+        run: |
+          curl -sf "https://www.mulhouse68.fr/api/cron/revalidate?tag=cinema&key=${{ secrets.CRON_SECRET }}" \
+            && echo "Cache cinéma invalidé" \
+            || echo "Revalidation cache ignorée"
