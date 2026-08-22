@@ -6,6 +6,7 @@ Résout automatiquement les CAPTCHAs popups
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -369,8 +370,10 @@ def save_pharmacies(pharmacies):
             json.dump(payload, f, ensure_ascii=False)
 
         logger.info(f"Enregistrement direct en BDD via {repo_root / 'scripts/pharmacies-save.ts'}")
+        # npx.cmd sous Windows : shutil.which résout le chemin complet
+        npx = shutil.which("npx") or "npx"
         result = subprocess.run(
-            ["npx", "tsx", "scripts/pharmacies-save.ts", str(payload_path)],
+            [npx, "tsx", "scripts/pharmacies-save.ts", str(payload_path)],
             cwd=repo_root,
             env=os.environ.copy(),
             capture_output=True,

@@ -36,10 +36,11 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: scripts/pharmacies-garde/requirements.txt
 
       - name: Installer les dépendances Python
         run: |
-          pip install playwright requests beautifulsoup4 2captcha-python
+          pip install -r scripts/pharmacies-garde/requirements.txt
 
       - name: Installer Playwright Chromium
         run: |
