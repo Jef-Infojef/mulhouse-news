@@ -1,0 +1,41 @@
+name: Daily Weather Backfill
+
+on:
+  schedule:
+    # Runs at 23:00 UTC (00:00 CET) so data is ready right at midnight
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Run weather backfill script
+        run: npx tsx scripts/weather-backfill.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          WEATHER_LOCATION: Mulhouse
+
+      - name: Alerter sur Telegram si echec
+        if: failure()
+        uses: ./.github/actions/telegram
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: echec
+          title: ${{ github.workflow }} — echec
