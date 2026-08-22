@@ -1,0 +1,136 @@
+name: Sauvegarde quotidienne des bases de données
+
+on:
+  schedule:
+    # 1x/jour à 3h30 UTC : les dumps news (~28 Mo) rendaient le rythme
+    # 4x/jour intenable pour le palier gratuit B2 (~148 Mo/jour).
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Installer les dépendances
+        run: |
+          npm install @libsql/client
+          # apt-key est déprécié sur ubuntu-latest : dépôt PGDG avec clé signed-by
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -sSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          pip install awscli
+
+      - name: Backup TURSO (Main)
+        env:
+          TURSO_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          B2_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+        run: |
+          set -e
+          echo "[*] Sauvegarde Turso..."
+          node scripts/turso-dump-action.js "$TURSO_URL" "$TURSO_TOKEN" backup-turso.sql
+          gzip -c backup-turso.sql > backup-turso.sql.gz
+          ls -lh backup-turso.sql.gz
+
+          aws configure set aws_access_key_id "$B2_KEY_ID"
+          aws configure set aws_secret_access_key "$B2_APP_KEY"
+          aws configure set region us-west-002
+
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          aws s3 cp backup-turso.sql.gz "s3://asso-franklin-turso/backups/turso/backup-turso-${TIMESTAMP}.sql.gz" \
+            --endpoint-url https://s3.eu-central-003.backblazeb2.com
+          echo "[OK] Backup Turso téléchargé avec succès"
+
+      - name: Backup POSTGRES (News)
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.NEWS_DATABASE_URL }}
+          B2_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+        run: |
+          set -e
+          echo "[*] Sauvegarde PostgreSQL (News)..."
+
+          if [ -z "$NEWS_DATABASE_URL" ]; then
+            echo "[ERROR] NEWS_DATABASE_URL non défini"
+            exit 1
+          fi
+
+          CLEAN_URL=$(printf '%s\n' "$NEWS_DATABASE_URL" | sed 's/sslmode=no-verify/sslmode=require/g')
+          /usr/lib/postgresql/17/bin/pg_dump "$CLEAN_URL" > backup-news.sql
+          gzip -c backup-news.sql > backup-news.sql.gz
+          ls -lh backup-news.sql.gz
+
+          aws configure set aws_access_key_id "$B2_KEY_ID"
+          aws configure set aws_secret_access_key "$B2_APP_KEY"
+          aws configure set region us-west-002
+
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          aws s3 cp backup-news.sql.gz "s3://asso-franklin-turso/backups/news/backup-news-${TIMESTAMP}.sql.gz" \
+            --endpoint-url https://s3.eu-central-003.backblazeb2.com
+          echo "[OK] Backup PostgreSQL téléchargé avec succès"
+
+      - name: Purger les sauvegardes de plus de 90 jours
+        env:
+          B2_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+        run: |
+          # Le workflow tourne 4x/jour (~8 Mo par passage) : sans purge le
+          # bucket dépasse le palier gratuit B2 en quelques mois. 90 jours
+          # de rétention = ~3 Go maximum.
+          aws configure set aws_access_key_id "$B2_KEY_ID"
+          aws configure set aws_secret_access_key "$B2_APP_KEY"
+          aws configure set region us-west-002
+
+          CUTOFF_DATE=$(date -d '90 days ago' +%Y%m%d)
+          echo "Purge des sauvegardes antérieures au ${CUTOFF_DATE}"
+
+          for PREFIX in turso news; do
+            aws s3 ls "s3://asso-franklin-turso/backups/${PREFIX}/" \
+              --endpoint-url https://s3.eu-central-003.backblazeb2.com > backup-list.txt || true
+
+            while IFS= read -r line; do
+              # Format des noms : backup-<prefix>-YYYYMMDD_HHMMSS.sql.gz
+              FILE_DATE=$(echo "$line" | grep -oP "backup-${PREFIX}-\K[0-9]{8}" || true)
+              FILE_NAME=$(echo "$line" | awk '{print $4}')
+
+              if [ ! -z "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
+                echo "Suppression : backups/${PREFIX}/${FILE_NAME}"
+                aws s3 rm "s3://asso-franklin-turso/backups/${PREFIX}/${FILE_NAME}" \
+                  --endpoint-url https://s3.eu-central-003.backblazeb2.com || true
+              fi
+            done < backup-list.txt
+          done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f backup-turso.sql backup-turso.sql.gz backup-news.sql backup-news.sql.gz backup-list.txt
+
+      - name: Notification d'erreur
+        if: failure()
+        run: |
+          echo "[FAILED] La sauvegarde a échoué!"
+          exit 1
+      # Alerte Telegram sur echec uniquement : ces workflows sont nombreux, un
+      # message a chaque succes noierait les vrais signaux. La sync RAG de
+      # mulhouse-news envoie un resume quotidien, elle est seule a le faire.
+      - name: Alerter sur Telegram si echec
+        if: failure()
+        uses: ./.github/actions/telegram
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: echec
+          title: ${{ github.workflow }} — echec
