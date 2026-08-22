@@ -33,33 +33,50 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import Json
 
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+
 import convex_client
 
-_script_dir = os.path.dirname(os.path.abspath(__file__))
 _root = os.path.dirname(_script_dir)
 for _env in (".envenv", ".env.local", ".env"):
     load_dotenv(os.path.join(_root, _env))
 
+# Fallback MulhouseGPT pour RAG_DATABASE_URL si non trouvé en local
+if not os.environ.get("RAG_DATABASE_URL"):
+    for _alt_path in ("C:/dev/MulhouseGPT/.env.local", "C:/dev/MulhouseGPT/.env", "../MulhouseGPT/.env.local"):
+        if os.path.exists(_alt_path):
+            load_dotenv(_alt_path)
+            if os.environ.get("RAG_DATABASE_URL"):
+                break
+
+import urllib.parse
+
 def _clean_url(v: str) -> str:
-    return v.replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
+    if not v:
+        return ""
+    if "?" in v:
+        base, query = v.split("?", 1)
+        params = urllib.parse.parse_qs(query)
+        clean_params = {}
+        if "sslmode" in params:
+            clean_params["sslmode"] = params["sslmode"][0]
+        return base + ("?" + urllib.parse.urlencode(clean_params) if clean_params else "")
+    return v
 
-# Base RAG (KnowledgeChunk) : toujours Aiven (RAG_DATABASE_URL). C'est elle que
-# le chat MulhouseGPT lit. Ne JAMAIS écrire les vecteurs dans Supabase (free
-# tier 500 Mo) — une copie parasite de 120 Mo y avait été créée parce que
-# DATABASE_URL (Supabase) servait de cible d'écriture.
+# Base RAG (KnowledgeChunk) : toujours Aiven (RAG_DATABASE_URL).
 RAG_URL = _clean_url(os.environ.get("RAG_DATABASE_URL", "") or "")
-# Source des articles en mode non-Convex (fallback legacy) : Supabase.
-NEWS_URL = _clean_url(
-    os.environ.get("NEWS_DATABASE_URL", "") or os.environ.get("DATABASE_URL", "") or ""
-)
+# Source des articles en mode non-Convex : Supabase / PostgreSQL.
 DATABASE_URL = _clean_url(os.environ.get("DATABASE_URL", "") or "")
+NEWS_URL = _clean_url(
+    os.environ.get("DATABASE_URL", "") or os.environ.get("NEWS_DATABASE_URL", "") or ""
+)
 
-# Backend : Convex (cloud) si USE_CONVEX=1 ou CONVEX_DEPLOY_KEY définie.
-USE_CONVEX = convex_client.use_convex()
-if USE_CONVEX:
-    print("[*] Backend lecture articles presse: Convex (cloud)")
-else:
-    print("[*] Backend lecture articles presse: Supabase (psycopg2)")
+# Backend : Convex si activé et configuré, avec fallback automatique PostgreSQL.
+USE_CONVEX_ENV = os.environ.get("USE_CONVEX", "1").strip().lower()
+USE_CONVEX = convex_client.use_convex() if USE_CONVEX_ENV not in ("0", "false", "no") else False
+
 
 MAX_CHUNK_CHARS = 3000
 OVERLAP_CHARS = 200
@@ -225,55 +242,62 @@ def upsert_document(
         stats["by_source"][source_type] = stats["by_source"].get(source_type, 0) + 1
 
 
-def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool = False) -> None:
-    if USE_CONVEX:
-        if full:
-            # Backfill complet : tous les articles avec contenu, sans borne 25h.
-            # Paginé du plus ancien au plus récent (cursor).
-            print("[*] Mode FULL : indexation de tous les articles avec contenu...")
-            rows = convex_client.get_all_articles_with_content(limit=limit)
-        else:
-            # Lecture Convex : articles récents hidden=false avec contenu (25h).
-            # `id` = supabaseId (sourceId stable du RAG) ; le tri SQL par updatedAt
-            # est approché par un scan borné côté Convex (voir scrapers.ts).
-            rows = convex_client.get_recent_articles_with_content(limit=limit, hours=25)
-        for article in rows:
-            body = format_press_article(article)
-            if not body:
-                stats["skipped"] += 1
-                continue
-            try:
-                upsert_document(
-                    rag_cur,
-                    source_type="article",
-                    source_id=article["id"],
-                    title=article["title"],
-                    content=body,
-                    url=article["link"],
-                    metadata={
-                        "source": article["source"] or "",
-                        "publishedAt": datetime.fromtimestamp(
-                            article["publishedAt"] / 1000, tz=timezone.utc
-                        ).isoformat(),
-                    },
-                    stats=stats,
-                )
-            except Exception as exc:
-                stats["errors"] += 1
-                print(f"  [ERR] article {article['id']}: {exc}", file=sys.stderr)
-        return
+def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool = False, use_convex_mode: bool = False) -> None:
+    if use_convex_mode:
+        try:
+            if full:
+                print("[*] Mode FULL Convex : indexation de tous les articles avec contenu...")
+                rows = convex_client.get_all_articles_with_content(limit=limit)
+            else:
+                rows = convex_client.get_recent_articles_with_content(limit=limit, hours=25)
+            for article in rows:
+                body = format_press_article(article)
+                if not body:
+                    stats["skipped"] += 1
+                    continue
+                try:
+                    upsert_document(
+                        rag_cur,
+                        source_type="article",
+                        source_id=article["id"],
+                        title=article["title"],
+                        content=body,
+                        url=article["link"],
+                        metadata={
+                            "source": article["source"] or "",
+                            "publishedAt": datetime.fromtimestamp(
+                                article["publishedAt"] / 1000, tz=timezone.utc
+                            ).isoformat(),
+                        },
+                        stats=stats,
+                    )
+                except Exception as exc:
+                    stats["errors"] += 1
+                    print(f"  [ERR] article {article['id']}: {exc}", file=sys.stderr)
+            return
+        except Exception as exc:
+            print(f"[!] Convex indisponible ({exc}) -> bascule automatique sur PostgreSQL.", file=sys.stderr)
+            if not news_cur:
+                raise
 
-    news_cur.execute(
-        """
+    where_clause = """
+        WHERE hidden = false 
+          AND (
+            ("content" IS NOT NULL AND length("content") >= 40)
+            OR ("description" IS NOT NULL AND length("description") >= 20)
+          )
+    """
+    if not full:
+        where_clause += " AND \"updatedAt\" > NOW() - INTERVAL '25 hours'"
+
+    sql = f"""
         SELECT id, title, description, content, source, link, "publishedAt"
         FROM "Article"
-        WHERE hidden = false
-          AND "updatedAt" > NOW() - INTERVAL '25 hours'
-        ORDER BY "updatedAt" DESC
+        {where_clause}
+        ORDER BY "publishedAt" DESC
         LIMIT %s
-        """,
-        (limit,),
-    )
+    """
+    news_cur.execute(sql, (limit,))
     for row in news_cur.fetchall():
         article = {
             "id": row[0],
@@ -298,7 +322,7 @@ def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool =
                 url=article["link"],
                 metadata={
                     "source": article["source"] or "",
-                    "publishedAt": article["publishedAt"].isoformat(),
+                    "publishedAt": article["publishedAt"].isoformat() if article["publishedAt"] else "",
                 },
                 stats=stats,
             )
@@ -307,18 +331,21 @@ def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool =
             print(f"  [ERR] article {article['id']}: {exc}", file=sys.stderr)
 
 
-def sync_news_articles(rag_cur, news_cur, limit: int, stats: dict, site_url: str) -> None:
-    news_cur.execute(
-        """
+def sync_news_articles(rag_cur, news_cur, limit: int, stats: dict, site_url: str, full: bool = False) -> None:
+    if not news_cur:
+        return
+    where_clause = "WHERE hidden = false AND \"statusWorkflow\" = 'PUBLISHED'"
+    if not full:
+        where_clause += " AND \"updatedAt\" > NOW() - INTERVAL '25 hours'"
+
+    sql = f"""
         SELECT id, title, slug, excerpt, content, "publishedAt"
         FROM "NewsArticle"
-        WHERE hidden = false AND "statusWorkflow" = 'PUBLISHED'
-          AND "updatedAt" > NOW() - INTERVAL '25 hours'
-        ORDER BY "updatedAt" DESC
+        {where_clause}
+        ORDER BY "publishedAt" DESC
         LIMIT %s
-        """,
-        (limit,),
-    )
+    """
+    news_cur.execute(sql, (limit,))
     for row in news_cur.fetchall():
         article = {
             "id": row[0],
@@ -350,10 +377,11 @@ def sync_news_articles(rag_cur, news_cur, limit: int, stats: dict, site_url: str
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Sync actualités → RAG (KnowledgeChunk)")
-    parser.add_argument("--press-limit", type=int, default=40)
+    parser.add_argument("--press-limit", type=int, default=100)
     parser.add_argument("--news-limit", type=int, default=40)
     parser.add_argument("--full", action="store_true",
                         help="Backfill complet : indexe tous les articles avec contenu (ignore la borne 25h)")
+    parser.add_argument("--postgres", action="store_true", help="Force la lecture PostgreSQL directe")
     args = parser.parse_args()
 
     if not RAG_URL:
@@ -364,19 +392,24 @@ def main() -> int:
 
     stats = {"indexed": 0, "skipped": 0, "errors": 0, "by_source": {}}
 
+    use_convex = USE_CONVEX and not args.postgres
+    if use_convex:
+        print("[*] Backend lecture initial : Convex (cloud)")
+    else:
+        print("[*] Backend lecture : PostgreSQL / Supabase")
+
     # Écriture des vecteurs : TOUJOURS Aiven (RAG_DATABASE_URL).
     rag_conn = psycopg2.connect(RAG_URL)
-    # Lecture des articles en mode non-Convex (fallback) : Supabase.
-    news_conn = psycopg2.connect(NEWS_URL) if (not USE_CONVEX and NEWS_URL) else None
+    # Connexion de lecture PostgreSQL toujours préparée au besoin (pour newsArticles ou fallback)
+    news_conn = psycopg2.connect(NEWS_URL) if NEWS_URL else None
+
     try:
         rag_cur = rag_conn.cursor()
         ensure_fts_index(rag_cur)
         news_cur = news_conn.cursor() if news_conn else None
-        sync_press_articles(rag_cur, news_cur, args.press_limit, stats, full=args.full)
-        if not USE_CONVEX:
-            # En mode Convex, NewsArticle n'est pas syncé : la table est vide
-            # côté Convex (documenté) et l'écriture Aiven reste en SQL.
-            sync_news_articles(rag_cur, news_cur, args.news_limit, stats, site_url)
+        sync_press_articles(rag_cur, news_cur, args.press_limit, stats, full=args.full, use_convex_mode=use_convex)
+        if news_cur:
+            sync_news_articles(rag_cur, news_cur, args.news_limit, stats, site_url, full=args.full)
         rag_conn.commit()
         if news_conn:
             news_conn.commit()

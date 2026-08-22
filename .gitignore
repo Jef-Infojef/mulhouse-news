@@ -41,6 +41,8 @@ error_log.txt
 final_error.txt
 startup_error.txt
 *.log
+.*_progress.json
+.*_checkpoint.json
 
 # Scripts d'analyse locale & temporaires (contenant potentiellement des secrets)
 scripts/eval_*.ts

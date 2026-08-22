@@ -282,6 +282,7 @@ def main():
         "duplicates_title": 0,
         "duplicates_link": 0,
         "google_decode_errors": 0,
+        "skipped_not_mulhouse": 0,
         "inserted_articles": []
     }
     start_time = datetime.now()
@@ -329,25 +330,46 @@ def main():
             
             link_tag = item.find("link")
             raw_link = link_tag.text.strip() if link_tag else ""
+            if not raw_link:
+                continue
 
-            is_mulhouse = "mulhous" in clean_title or "mulhous" in clean_desc
-            if not is_mulhouse and raw_link and not feed["is_google"]:
-                if is_mulhouse_url(raw_link):
-                    is_mulhouse = True
-                elif is_ebra_url(raw_link):
-                    # Titre « Maison de l'urbanisme au Grand Rex » : Mulhouse
-                    # est dans le fil d'Ariane, pas dans le slug ni le titre.
-                    try:
-                        peek = requests.get(
-                            raw_link, timeout=15, allow_redirects=True, impersonate="chrome110"
-                        )
-                        if peek.status_code == 200 and html_is_mulhouse_edition(peek.text):
-                            is_mulhouse = True
-                            print(f"    [fil d'Ariane] {title[:60]}...")
-                    except Exception:
-                        pass
+            # Décodage Google AVANT le filtre : la pertinence se juge aussi sur
+            # l'URL réelle (slug, dossier /mulhouse/, édition EBRA).
+            if feed['is_google']:
+                real_url = extract_real_url(raw_link)
+                # Si le décodage échoue, on saute l'article pour ne pas polluer la DB avec des liens inexploitables
+                if "google.com" in real_url:
+                    print(f"    [!] Saut : Échec décodage Google pour {title[:40]}...")
+                    stats["google_decode_errors"] += 1
+                    continue
+            else:
+                real_url = raw_link
 
-            if not feed['is_google'] and not is_mulhouse:
+            # Filtre de pertinence Mulhouse, par force de signal :
+            # - fort   : « mulhous » dans le TITRE, ou présent dans l'URL réelle ;
+            # - faible : « mulhous » dans le RÉSUMÉ seul (actu nationale qui cite
+            #   la ville en passant) -> on n'accepte que si le HTML prouve
+            #   l'édition Mulhouse (fil d'Ariane ou tag INSEE 68224).
+            title_hit = "mulhous" in clean_title
+            url_hit = is_mulhouse_url(real_url)
+
+            if title_hit or url_hit:
+                is_mulhouse = True
+            elif "mulhous" in clean_desc and is_ebra_url(real_url):
+                try:
+                    peek = requests.get(
+                        real_url, timeout=15, allow_redirects=True, impersonate="chrome110"
+                    )
+                    if peek.status_code == 200 and html_is_mulhouse_edition(peek.text):
+                        is_mulhouse = True
+                        print(f"    [fil d'Ariane] {title[:60]}...")
+                except Exception:
+                    pass
+            else:
+                is_mulhouse = False
+
+            if not is_mulhouse:
+                stats["skipped_not_mulhouse"] += 1
                 continue
 
             if normalized_title in titles_seen_this_run:
@@ -362,8 +384,6 @@ def main():
             else:
                 source = feed['name']
 
-            if not raw_link: continue
-
             # 1. Dédup titre (SQL uniquement). Convex : by_link plus bas,
             # un document, pas un scan de 500 articles complets par item RSS.
             if not USE_CONVEX:
@@ -373,18 +393,7 @@ def main():
                     stats["duplicates_title"] += 1
                     continue
 
-            # 2. Décodage (uniquement pour Google)
-            if feed['is_google']:
-                real_url = extract_real_url(raw_link)
-                # Si le décodage échoue, on saute l'article pour ne pas polluer la DB avec des liens inexploitables
-                if "google.com" in real_url:
-                    print(f"    [!] Saut : Échec décodage Google pour {title[:40]}...")
-                    stats["google_decode_errors"] += 1
-                    continue
-            else:
-                real_url = raw_link
-
-            # 3. Vérifier doublon final (Lien)
+            # 2. Vérifier doublon final (Lien)
             if USE_CONVEX:
                 existing_by_link = convex_client.get_article_by_link(real_url)
                 if existing_by_link:
@@ -398,7 +407,7 @@ def main():
                     stats["duplicates_link"] += 1
                     continue
 
-            # 4. Récupération Meta et Insertion
+            # 3. Récupération Meta et Insertion
             print(f"    [+] Nouveau ({feed['name']}): {title[:60]}...")
             titles_seen_this_run.add(normalized_title)
             

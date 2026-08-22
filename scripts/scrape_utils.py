@@ -100,19 +100,21 @@ def is_mulhouse_url(url: str) -> bool:
 
 
 def html_is_mulhouse_edition(html: str) -> bool:
-    """Fil d'Ariane / geo L'Alsace : édition Mulhouse-Thann, commune 68224.
+    """L'article EST classé Mulhouse, pas seulement la page L'Alsace.
 
-    Le kicker « Centre-ville » n'est retenu que s'il accompagne déjà l'édition
-    Mulhouse (évite Colmar, Guebwiller, etc.).
+    Interdit : le widget « Articles les plus lus Édition Mulhouse - Thann »
+    présent sur TOUTES les pages (Indochine, Mika… ingérés par erreur).
+
+    On ne garde que :
+    - le cran de fil d'Ariane commune `/edition-mulhouse-thann/mulhouse`
+    - le tag geo INSEE 68224-mulhouse
     """
     if not html:
         return False
     low = html.lower()
-    if "/edition-mulhouse-thann" in low:
+    if "/edition-mulhouse-thann/mulhouse" in low:
         return True
     if "68224-mulhouse" in low:
-        return True
-    if re.search(r"edition\s+mulhouse\s*-\s*thann", low):
         return True
     return False
 
