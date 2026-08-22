@@ -6,6 +6,7 @@ import time
 import random
 import unicodedata
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
@@ -50,6 +51,70 @@ def is_ebra_url(url: str) -> bool:
 
 def is_jds_url(url: str) -> bool:
     return "jds.fr" in url
+
+
+# Rubrique d'édition Mulhouse-Thann dans le chemin (pas seulement le slug).
+_MULHOUSE_PATH_RE = re.compile(
+    r"/(?:edition-mulhouse(?:-thann)?|secteur-de-mulhouse)(?:/|$)",
+    re.I,
+)
+
+def is_mulhouse_url(url: str) -> bool:
+    """L'URL parle-t-elle de Mulhouse, sans ouvrir la page ?
+
+    Le slug seul ratait « Une maison de l'urbanisme au Grand Rex »
+    (`/haut-rhin/2013/11/09/une-maison-de-l-urbanisme-au-grand-rex`) : Mulhouse
+    est dans le fil d'Ariane, pas dans le dernier segment. On inspecte aussi
+    les dossiers du chemin (`/edition-mulhouse-thann/`, `/mulhouse/`).
+    « centre-ville » n'est PAS un critère d'URL : trop d'éditions L'Alsace
+    ont un centre-ville. Le kicker se juge sur le HTML (html_is_mulhouse_edition).
+    """
+    try:
+        path = urlparse(url).path.lower()
+    except Exception:
+        path = (url or "").lower()
+    if _MULHOUSE_PATH_RE.search(path):
+        return True
+    parts = [p for p in path.split("/") if p]
+    slug = parts[-1] if parts else ""
+    for folder in parts[:-1]:
+        if folder in ("mulhouse",) or folder.startswith("mulhous"):
+            return True
+        if "mulhouse" in folder.split("-") and folder != "rmulhouse":
+            return True
+    tokens = slug.split("-")
+    if tokens == ["mulhouse"]:
+        return False
+    if tokens[0] == "mulhouse" and len(tokens) > 1 and tokens[1].isdigit():
+        return False
+    if tokens[0] == "r" and len(tokens) > 1 and tokens[1] == "mulhouse":
+        return False
+    for token in tokens:
+        if token == "mulhouse":
+            return True
+        if token.startswith("mulhous"):
+            return True
+        if token != "rmulhouse" and token.endswith("mulhouse"):
+            return True
+    return False
+
+
+def html_is_mulhouse_edition(html: str) -> bool:
+    """Fil d'Ariane / geo L'Alsace : édition Mulhouse-Thann, commune 68224.
+
+    Le kicker « Centre-ville » n'est retenu que s'il accompagne déjà l'édition
+    Mulhouse (évite Colmar, Guebwiller, etc.).
+    """
+    if not html:
+        return False
+    low = html.lower()
+    if "/edition-mulhouse-thann" in low:
+        return True
+    if "68224-mulhouse" in low:
+        return True
+    if re.search(r"edition\s+mulhouse\s*-\s*thann", low):
+        return True
+    return False
 
 
 def ebra_target_url(url: str, alsace_cookies_active: bool) -> str:

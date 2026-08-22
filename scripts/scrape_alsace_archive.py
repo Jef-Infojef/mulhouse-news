@@ -13,10 +13,13 @@ insérés avec content = NULL ; le contenu est ensuite rempli par
 Usage :
     python scripts/scrape_alsace_archive.py                     # tout (2006 → hier)
     python scripts/scrape_alsace_archive.py --start 2010-01-01 --end 2012-12-31
-    python scripts/scrape_alsace_archive.py --filter mulhouse   # défaut
-    python scripts/scrape_alsace_archive.py --filter haut-rhin
+    python scripts/scrape_alsace_archive.py --filter mulhouse   # défaut (slug + chemin)
+    python scripts/scrape_alsace_archive.py --check-page        # fil d'Ariane / 68224 sur les URL rejetées
     python scripts/scrape_alsace_archive.py --dry-run           # comptage seul
     python scripts/scrape_alsace_archive.py --limit 100         # insertion plafonnée
+
+Rattrapage Grand Rex (2013-11-09), fil d'Ariane « Edition Mulhouse - Thann » :
+    python scripts/scrape_alsace_archive.py --start 2013-11-09 --end 2013-11-09 --check-page
 
 Backend : Convex si CONVEX_DEPLOY_KEY + NEXT_PUBLIC_CONVEX_URL sont définies,
 sinon Supabase via DATABASE_URL (comme scrape_and_seed.py).
@@ -29,7 +32,6 @@ import random
 import re
 import sys
 import time
-import unicodedata
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -37,7 +39,9 @@ from curl_cffi import requests as curl_requests
 import psycopg2
 from dotenv import load_dotenv
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import convex_client
+from scrape_utils import html_is_mulhouse_edition, is_mulhouse_url
 
 load_dotenv()
 
@@ -45,37 +49,6 @@ SITEMAP_INDEX = "https://www.lalsace.fr/sitemap-index.xml"
 SOURCE = "L'Alsace (archive)"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
-
-
-def normalize_text(text):
-    if not text:
-        return ''
-    text = text.lower()
-    return ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
-
-
-def is_mulhouse_url(url: str) -> bool:
-    """Filtre Mulhouse par token de slug :
-    - 'mulhouse' en mot entier
-    - 'mulhousien(ne)(s)' (préfixe mulhous)
-    - concaténations légitimes ('mulhousebriand', 'agglomulhouse')
-    - exclut les pages d'édition locale ('rmulhouse' = rubrique RMulhouse)
-    """
-    tokens = url.split("/")[-1].lower().split("-")
-    if tokens == ["mulhouse"]:
-        return False
-    if tokens[0] == "mulhouse" and len(tokens) > 1 and tokens[1].isdigit():
-        return False
-    if tokens[0] == "r" and len(tokens) > 1 and tokens[1] == "mulhouse":
-        return False
-    for t in tokens:
-        if t == "mulhouse":
-            return True
-        if t.startswith("mulhous"):
-            return True
-        if t != "rmulhouse" and t.endswith("mulhouse"):
-            return True
-    return False
 
 
 def title_from_slug(slug: str) -> str:
@@ -170,7 +143,14 @@ def main():
     parser.add_argument("--start", type=str, default="2006-08-21", help="Date de début (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, default=None, help="Date de fin (YYYY-MM-DD), défaut : hier")
     parser.add_argument("--filter", type=str, default="mulhouse", choices=["mulhouse", "all"],
-                        help="Filtre des URLs : 'mulhouse' (défaut) ou 'all' (toutes)")
+                        help="Filtre des URLs : 'mulhouse' (défaut : slug + chemin d'édition) ou 'all'")
+    parser.add_argument(
+        "--check-page",
+        action="store_true",
+        help="Pour les URL hors filtre slug/chemin, ouvrir la page et garder "
+        "celles dont le fil d'Ariane est l'édition Mulhouse-Thann (ou geo 68224). "
+        "Le kicker « Centre-ville » seul ne suffit pas.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Compte les candidats sans rien insérer")
     parser.add_argument("--limit", type=int, default=0, help="Plafonne le nombre d'insertions (0 = illimité)")
     args = parser.parse_args()
@@ -213,7 +193,26 @@ def main():
         if not xml:
             errors += 1
             continue
-        entries = [e for e in parse_sitemap(xml) if args.filter == "all" or is_mulhouse_url(e["link"])]
+        parsed = parse_sitemap(xml)
+        if args.filter == "all":
+            entries = parsed
+        else:
+            entries = [e for e in parsed if is_mulhouse_url(e["link"])]
+            if args.check_page:
+                rest = [e for e in parsed if not is_mulhouse_url(e["link"])]
+                if existing_links:
+                    rest = [e for e in rest if e["link"] not in existing_links]
+                kept_page = 0
+                for j, e in enumerate(rest, 1):
+                    html = fetch_sitemap(e["link"])
+                    if html and html_is_mulhouse_edition(html):
+                        entries.append(e)
+                        kept_page += 1
+                    if j % 20 == 0 or j == len(rest):
+                        print(
+                            f"    fil d'Ariane {j}/{len(rest)} — retenus +{kept_page}"
+                        )
+                    time.sleep(random.uniform(0.25, 0.55))
         if not entries:
             continue
         print(f"[{i}/{len(sitemaps)}] {sm_url.split('/')[-1]} : {len(entries)} candidats Mulhouse")

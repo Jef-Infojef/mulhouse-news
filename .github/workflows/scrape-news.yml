@@ -69,7 +69,7 @@ jobs:
         run: |
           START=$(date -u -d "2 days ago" +%F)
           END=$(date -u +%F)
-          python scripts/scrape_alsace_archive.py --start "$START" --end "$END"
+          python scripts/scrape_alsace_archive.py --start "$START" --end "$END" --check-page
 
       - name: Run mplusinfo.fr scraper
         env:

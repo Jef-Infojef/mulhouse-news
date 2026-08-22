@@ -17,7 +17,7 @@ import time
 import random
 from urllib.parse import urljoin
 import unicodedata
-from scrape_utils import extract_image_caption
+from scrape_utils import extract_image_caption, html_is_mulhouse_edition, is_ebra_url, is_mulhouse_url
 import convex_client
 
 # Charger les variables d'environnement
@@ -327,16 +327,31 @@ def main():
             clean_title = normalize_text(title)
             clean_desc = normalize_text(desc_text)
             
+            link_tag = item.find("link")
+            raw_link = link_tag.text.strip() if link_tag else ""
+
             is_mulhouse = "mulhous" in clean_title or "mulhous" in clean_desc
-            
+            if not is_mulhouse and raw_link and not feed["is_google"]:
+                if is_mulhouse_url(raw_link):
+                    is_mulhouse = True
+                elif is_ebra_url(raw_link):
+                    # Titre « Maison de l'urbanisme au Grand Rex » : Mulhouse
+                    # est dans le fil d'Ariane, pas dans le slug ni le titre.
+                    try:
+                        peek = requests.get(
+                            raw_link, timeout=15, allow_redirects=True, impersonate="chrome110"
+                        )
+                        if peek.status_code == 200 and html_is_mulhouse_edition(peek.text):
+                            is_mulhouse = True
+                            print(f"    [fil d'Ariane] {title[:60]}...")
+                    except Exception:
+                        pass
+
             if not feed['is_google'] and not is_mulhouse:
                 continue
 
             if normalized_title in titles_seen_this_run:
                 continue
-            
-            link_tag = item.find("link")
-            raw_link = link_tag.text.strip() if link_tag else ""
             
             pub_date_tag = item.find("pubDate") or item.find("pubdate")
             pub_date_str = pub_date_tag.text.strip() if pub_date_tag else ""
