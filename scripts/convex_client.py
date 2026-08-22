@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -101,18 +102,27 @@ def _call(path: str, args: dict, *, mutation: bool) -> dict:
     url, key = _require_config()
     endpoint = f"{url}/api/{'mutation' if mutation else 'query'}"
     payload = {"path": path, "format": "json", "args": _strip_none(args) if args else {}}
-    try:
-        resp = requests.post(
-            endpoint,
-            data=json.dumps(payload, default=_json_default),
-            headers={
-                "Authorization": f"Convex {key}",
-                "Content-Type": "application/json",
-            },
-            timeout=90,
-        )
-    except requests.RequestException as exc:
-        raise ConvexError(f"Erreur HTTP Convex ({path}): {exc}") from exc
+    # Retry transitoire : les backfills longue durée meurent sinon sur un
+    # simple « Remote end closed connection ».
+    last_exc: Exception | None = None
+    for attempt in range(4):
+        try:
+            resp = requests.post(
+                endpoint,
+                data=json.dumps(payload, default=_json_default),
+                headers={
+                    "Authorization": f"Convex {key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=90,
+            )
+        except requests.RequestException as exc:
+            last_exc = exc
+            time.sleep(2 * (attempt + 1))
+            continue
+        break
+    else:
+        raise ConvexError(f"Erreur HTTP Convex ({path}) après 4 tentatives: {last_exc}")
     if resp.status_code != 200:
         raise ConvexError(
             f"Convex HTTP {resp.status_code} ({path}): {resp.text[:500]}"
@@ -140,6 +150,11 @@ def get_article_by_link(link: str) -> dict | None:
     return _call("scrapers:getArticleByLink", {"link": link}, mutation=False)
 
 
+def get_article_by_supabase_id(article_id: str) -> dict | None:
+    """Article complet (content inclus) via news_bridge:getArticleById."""
+    return _call("news_bridge:getArticleById", {"id": article_id}, mutation=False)
+
+
 def get_article_links(source: str | None = None, limit: int = 500) -> list[str]:
     """Toutes les links d'articles, paginées (filtre source optionnel)."""
     links: list[str] = []
@@ -155,6 +170,25 @@ def get_article_links(source: str | None = None, limit: int = 500) -> list[str]:
             break
         cursor = res["cursor"]
     return links
+
+
+def get_article_titles(source: str | None = None, limit: int = 500) -> list[dict]:
+    """Tous les {link, title} d'articles, paginé (filtre source optionnel).
+    Sans content : ~100x plus léger que getArticlesPage. Requiert la query
+    `scrapers:getArticleTitlesPage` (déployer les fonctions Convex avant use)."""
+    rows: list[dict] = []
+    cursor: str | None = None
+    while True:
+        res = _call(
+            "scrapers:getArticleTitlesPage",
+            {"source": source, "cursor": cursor, "limit": limit},
+            mutation=False,
+        )
+        rows.extend(res["articles"])
+        if res["isDone"]:
+            break
+        cursor = res["cursor"]
+    return rows
 
 
 def get_article_by_title_recent(title: str, hours: int = 48) -> dict | None:

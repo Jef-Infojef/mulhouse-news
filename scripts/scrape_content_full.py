@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 import psycopg2
 from bs4 import BeautifulSoup
@@ -97,6 +98,12 @@ load_dotenv(".envenv")
 load_dotenv(".env.local")
 load_dotenv(".env")
 
+# Console Windows : éviter les UnicodeEncodeError sur emojis/accents
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # Backend : Convex (cloud) si USE_CONVEX=1 ou CONVEX_DEPLOY_KEY définie.
@@ -112,6 +119,63 @@ def get_db_connection():
     clean_url = DATABASE_URL.replace("?pgbouncer=true", "").replace("&pgbouncer=true", "")
     return psycopg2.connect(clean_url)
 
+
+def list_missing_content_via_pages(limit: int) -> list[dict]:
+    """Articles lalsace.fr au contenu manquant/court.
+
+    1. Query dédiée `getArticlesMissingContentAll` (métadonnées seules, un
+       appel HTTP) — c'est le chemin rapide.
+    2. Repli : pagination `getArticlesPage` (CONTENT inclus, lourd). Un log
+       par page, sinon le terminal reste muet jusqu'à la 50ᵉ (~25 k docs).
+    """
+    print("[*] Recherche des articles lalsace.fr sans texte…", flush=True)
+    try:
+        found = convex_client.get_articles_missing_content_all(
+            limit=limit or 300,
+            max_pages=200,
+        )
+        if found:
+            print(f"[*] {len(found)} candidats (query dédiée, sans télécharger les textes)", flush=True)
+            return found
+        print("[*] Query dédiée : 0 candidat, scan page par page pour confirmer", flush=True)
+    except Exception as exc:
+        print(f"[!] Query dédiée indisponible ({exc}) — scan page par page", flush=True)
+
+    rows: list[dict] = []
+    cursor: str | None = None
+    page = 0
+    while True:
+        page += 1
+        print(f"[*] Scan Convex page {page} (~500 docs, textes complets)…", flush=True)
+        res = convex_client._call(
+            "news_bridge:getArticlesPage",
+            {"cursor": cursor, "limit": 500},
+            mutation=False,
+        )
+        for a in res["articles"]:
+            link = a.get("link") or ""
+            content = a.get("content")
+            if "lalsace.fr" not in link:
+                continue
+            if content and len(content) >= 150:
+                continue
+            rows.append({
+                "link": link,
+                "title": a.get("title") or "",
+                "description": a.get("description"),
+                "imageUrl": a.get("imageUrl"),
+                "imageCaption": None,
+                "supabaseId": a.get("id"),
+            })
+            if limit and len(rows) >= limit:
+                print(f"[*] {len(rows)} candidats trouvés (limite atteinte)", flush=True)
+                return rows
+        print(f"[*] … page {page} ok, {len(rows)} sans contenu pour l'instant", flush=True)
+        if res.get("isDone") or not res.get("cursor"):
+            print(f"[*] {len(rows)} articles lalsace.fr sans contenu (sur {page} pages)", flush=True)
+            return rows
+        cursor = res["cursor"]
+
 def get_app_config(conn, key):
     if USE_CONVEX:
         return convex_client.get_app_config(key)
@@ -122,6 +186,50 @@ def get_app_config(conn, key):
             return row[0] if row else None
     except:
         return None
+
+
+def load_ebra_cookies(conn=None) -> tuple[dict, bool]:
+    """Session EBRA (Poool) pour GRDC. Retourne (cookies, session_connue)."""
+    cookies_dict: dict = {}
+    db_session = get_app_config(conn, "EBRA_SESSION")
+    db_poool = get_app_config(conn, "EBRA_POOOL")
+    if db_session:
+        s_val = db_session.strip().replace('"', "").replace("'", "")
+        if "2=" in s_val:
+            s_val = s_val[s_val.find("2="):].split(";")[0].strip()
+        p_val = db_poool.strip().replace('"', "").replace("'", "") if db_poool else "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7"
+        if "_poool=" in p_val:
+            p_val = p_val.split("_poool=")[1].split(";")[0]
+        uuid_match = re.search(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", p_val
+        )
+        if uuid_match:
+            p_val = uuid_match.group(0)
+        cookies_dict = {
+            ".XCONNECT_SESSION": s_val,
+            ".XCONNECTKeepAlive": "2=1",
+            ".XCONNECT": "2=1",
+            "_poool": p_val,
+        }
+        return cookies_dict, True
+    fallback = get_app_config(conn, "EBRA_COOKIE") or os.environ.get("ALSACE_COOKIES")
+    if fallback:
+        clean = fallback.strip().replace('"', "").replace("'", "")
+        if ";" in clean and "=" in clean:
+            for item in clean.split(";"):
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    cookies_dict[k.strip()] = v.strip()
+        else:
+            session_val = clean[clean.find("2="):].split(";")[0] if "2=" in clean else clean
+            cookies_dict = {
+                ".XCONNECT_SESSION": session_val,
+                ".XCONNECTKeepAlive": "2=1",
+                ".XCONNECT": "2=1",
+                "_poool": "9aab6ee3-fda6-43fc-a90e-29de3c73d8f7",
+            }
+        return cookies_dict, True
+    return cookies_dict, False
 
 RETRY_COOLDOWN_KEY = "SCRAPE_CONTENT_RETRY_COOLDOWNS"
 RETRY_COOLDOWN_HOURS = 6
@@ -573,9 +681,7 @@ def main():
 
         if USE_CONVEX:
             if args.archive:
-                articles = convex_client.get_articles_missing_content_all(
-                    limit=args.limit or 300, max_pages=args.max_pages
-                )
+                articles = list_missing_content_via_pages(args.limit or 0)
             else:
                 articles = convex_client.get_articles_short_content(limit=args.limit or 50, hours=24)
         else:

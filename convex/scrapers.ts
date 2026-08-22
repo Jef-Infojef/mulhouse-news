@@ -289,6 +289,31 @@ export const getArticleLinks = query({
   },
 });
 
+// Titres + liens paginés (SANS content) — backfill de correction des titres
+// slugifiés (fix_alsace_slug_titles.py) : une pagination légère remplace une
+// lecture unitaire par article.
+export const getArticleTitlesPage = query({
+  args: {
+    source: v.optional(v.string()),
+    cursor: v.optional(v.union(v.null(), v.string())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { source, cursor, limit }) => {
+    const numItems = Math.min(Math.max(1, limit ?? 500), 1000);
+    const page = source
+      ? await ctx.db
+          .query("articles")
+          .withIndex("by_source", (q) => q.eq("source", source))
+          .paginate({ cursor: cursor ?? null, numItems })
+      : await ctx.db.query("articles").paginate({ cursor: cursor ?? null, numItems });
+    return {
+      articles: page.page.map((doc) => ({ link: doc.link, title: doc.title })),
+      cursor: page.continueCursor,
+      isDone: page.isDone,
+    };
+  },
+});
+
 export const getArticlesShortContent = query({
   args: {
     limit: v.optional(v.number()),
