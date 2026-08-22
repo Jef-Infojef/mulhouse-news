@@ -22,6 +22,7 @@ on:
       - Sauvegarde Incrémentale - Quotidienne
       - Cinema Scrape
       - Purge des logs de scraping
+      - Scrape Pharmacies de Garde
       - Keep-Alive
       - M68 Airport Sync
       - M68 Full Index

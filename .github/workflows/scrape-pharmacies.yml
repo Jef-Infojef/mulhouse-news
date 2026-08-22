@@ -1,0 +1,75 @@
+name: Scrape Pharmacies de Garde
+
+# Pharmacies de garde 3237.fr (avec résolution CAPTCHA 2captcha) → base
+# principale Turso de assocommercants (table pharmacies_garde). Porté depuis
+# le repo assocommercants (08/2026). L'écriture passe par
+# scripts/pharmacies-save.ts (API HTTP libSQL v2, sans Prisma).
+on:
+  schedule:
+    # 11h30 UTC = 13h30 (heure locale française CEST) + 23h00 UTC (minuit CET)
+    - cron: '30 11,23 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Node dependencies (tsx pour pharmacies-save.ts)
+        run: npm ci
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Installer les dépendances Python
+        run: |
+          pip install playwright requests beautifulsoup4 2captcha-python
+
+      - name: Installer Playwright Chromium
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Lancer le scraper (écriture directe BDD)
+        working-directory: scripts/pharmacies-garde
+        env:
+          HEADLESS: 'true'
+          SAVE_DIRECT_DB: 'true'
+          CAPTCHA_API_KEY: ${{ secrets.CAPTCHA_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          echo "Démarrage du scraper (sans appel Vercel)..."
+          python scrape_pharmacies_final.py
+
+      - name: Invalider le cache pharmacies (1 appel site/jour)
+        if: success()
+        run: |
+          curl -sf "https://www.mulhouse68.fr/api/cron/revalidate?tag=pharmacies-garde&key=${{ secrets.CRON_SECRET }}" \
+            && echo "Cache invalidé" \
+            || echo "Revalidation cache ignorée"
+
+      - name: Upload logs en cas d'erreur
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-logs
+          path: scripts/pharmacies-garde/*.log
+          retention-days: 7
+        continue-on-error: true
