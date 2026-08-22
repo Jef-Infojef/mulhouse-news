@@ -107,9 +107,15 @@ async function main() {
 
   console.log(`💊 Enregistrement de ${pharmacies.length} pharmacie(s)...`)
 
-  // dateGarde = minuit local du jour de scrape (identique au port Prisma).
-  const dateGarde = scrapeDate ? new Date(scrapeDate) : new Date()
-  dateGarde.setHours(0, 0, 0, 0)
+  // dateGarde = minuit UTC du jour de scrape — normalisation indispensable :
+  // un calcul "minuit local" donnerait des valeurs différentes selon la TZ
+  // d'exécution (CI UTC vs dev Europe/Paris) et casserait le dédoublonnage.
+  const dateGarde = new Date()
+  if (scrapeDate) {
+    const d = new Date(scrapeDate)
+    dateGarde.setUTCFullYear(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+  }
+  dateGarde.setUTCHours(0, 0, 0, 0)
 
   const results: SavePharmaciesResult = {
     created: 0,
@@ -171,8 +177,9 @@ async function main() {
         }
       }
 
-      // Candidats par nom + jour, filtrage adresse en JS (comparaison sémantique
-      // des dates indépendante du format TEXT stocké).
+      // Candidats par nom + jour (fenêtre ±26h), filtrage adresse en JS, et
+      // comparaison par jour calendaire : tolère les écarts de format/fuseau
+      // des anciennes lignes (ex. minuit local au lieu de minuit UTC).
       const rows = await sql(urlBase, token, [
         {
           sql: `SELECT "id","address","dateGarde" FROM "pharmacies_garde"
@@ -184,12 +191,18 @@ async function main() {
           ],
         },
       ])
+      const sameDay = (iso: string) => {
+        const t = Date.parse(iso)
+        if (!Number.isFinite(t)) return false
+        const a = new Date(t)
+        const b = new Date(dateGarde.getTime())
+        return a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth() && a.getUTCDate() === b.getUTCDate()
+      }
       const existing = (rows[0] || []).find((row) => {
         const addrOk =
           (row["address"]?.value ?? "") === normalizedAddress ||
           (!row["address"] && !normalizedAddress)
-        const ts = Date.parse(row["dateGarde"]?.value ?? "")
-        return addrOk && Number.isFinite(ts) && ts === dateGarde.getTime()
+        return addrOk && sameDay(row["dateGarde"]?.value ?? "")
       })
       existingRowId = existing?.["id"]?.value
       branch = existingRowId ? "update" : "insert"
