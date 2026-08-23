@@ -44,7 +44,6 @@ def build_google_news_url(query: str) -> str:
 
 FEEDS = [
     {"name": "L'Alsace", "url": "https://www.lalsace.fr/rss", "is_google": False},
-    {"name": "DNA", "url": "https://www.dna.fr/rss", "is_google": False},
     {"name": "Google News", "url": build_google_news_url("Mulhouse"), "is_google": True}
 ]
 MAX_CONSECUTIVE_DECODE_ERRORS = 3
@@ -345,6 +344,11 @@ def main():
             else:
                 real_url = raw_link
 
+            # Normalisation DNA -> L'Alsace (articles EBRA partagés)
+            if "dna.fr" in real_url:
+                real_url = real_url.replace("www.dna.fr", "www.lalsace.fr").replace("c.dna.fr", "www.lalsace.fr").replace("dna.fr", "lalsace.fr")
+                title = re.sub(r"\s*[-|]\s*(DNA|Dna\.fr|dna\.fr)\s*$", " - L'Alsace", title, flags=re.I)
+
             # Filtre de pertinence Mulhouse, par force de signal :
             # - fort   : « mulhous » dans le TITRE, ou présent dans l'URL réelle ;
             # - faible : « mulhous » dans le RÉSUMÉ seul (actu nationale qui cite
@@ -381,6 +385,8 @@ def main():
             if feed['is_google']:
                 source_tag = item.find("source")
                 source = source_tag.text if source_tag else "Inconnu"
+                if "dna" in source.lower():
+                    source = "L'Alsace"
             else:
                 source = feed['name']
 
