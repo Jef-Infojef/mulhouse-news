@@ -25,21 +25,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install Node dependencies (tsx pour pharmacies-save.ts)
         run: npm ci
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: scripts/pharmacies-garde/requirements.txt
 
       - name: Installer les dépendances Python
         run: |
+          python -m pip install --upgrade pip
           pip install -r scripts/pharmacies-garde/requirements.txt
 
       - name: Installer Playwright Chromium
@@ -54,6 +53,7 @@ jobs:
           SAVE_DIRECT_DB: 'true'
           CAPTCHA_API_KEY: ${{ secrets.CAPTCHA_API_KEY }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           DATABASE_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: |
           echo "Démarrage du scraper (sans appel Vercel)..."
