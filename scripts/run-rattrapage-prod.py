@@ -2,6 +2,9 @@
 rattrape_alsace_mulhouse.py avec les arguments passés.
 
     python scripts/run-rattrapage-prod.py --start 2011-12-01 --end 2011-12-31
+
+Rattrapage 2026 (sitemap + 68224, avant le cron sitemap du 15 min) :
+    python scripts/run-rattrapage-prod.py --start 2026-01-01 --end 2026-08-12
 """
 
 import os

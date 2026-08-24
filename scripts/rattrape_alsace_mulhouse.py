@@ -301,7 +301,7 @@ def process_one(
         stats["errors"] += 1
 
 
-def classify_entries(entries: list[dict]) -> list[dict]:
+def classify_entries(entries: list[dict], label: str = "") -> list[dict]:
     """Slug Mulhouse tout de suite ; les autres : GET HTML en parallèle."""
     keep: list[dict] = []
     need_html: list[dict] = []
@@ -319,12 +319,27 @@ def classify_entries(entries: list[dict]) -> list[dict]:
             return entry
         return None
 
+    done = 0
+    hits = 0
+    t0 = time.time()
+    prefix = f"    [{label}] " if label else "    "
     with ThreadPoolExecutor(max_workers=HTML_WORKERS) as pool:
         futures = [pool.submit(check, e) for e in need_html]
         for fut in as_completed(futures):
             hit = fut.result()
+            done += 1
             if hit:
+                hits += 1
                 keep.append(hit)
+            if done % 50 == 0 or done == len(need_html):
+                elapsed = time.time() - t0
+                rate = done / elapsed if elapsed else 0
+                left = (len(need_html) - done) / rate if rate else 0
+                print(
+                    f"{prefix}HTML {done}/{len(need_html)} | 68224+ {hits} | "
+                    f"{rate:.1f}/s | reste ~{int(left)}s",
+                    flush=True,
+                )
     return keep
 
 
@@ -373,7 +388,15 @@ def main() -> None:
     )
 
     sitemap_urls = list_daily_sitemaps(start, end_d)
-    print(f"[*] Téléchargement de {len(sitemap_urls)} sitemaps ({SITEMAP_WORKERS} //)…", flush=True)
+    n_days = len(sitemap_urls)
+    # ~12 s de HTML/jour (170–400 URL) + GRDC sur les manques : ordre de grandeur.
+    print(
+        f"[*] {n_days} jour(s) — HTML 68224 puis insert/GRDC/RAG des manques. "
+        f"Durée typique ~{max(n_days * 15 // 60, 1)}–{max(n_days * 25 // 60, 2)} min "
+        f"(filet URL déjà en base = skip).",
+        flush=True,
+    )
+    print(f"[*] Téléchargement de {n_days} sitemaps ({SITEMAP_WORKERS} //)…", flush=True)
     xml_by_url: dict[str, str | None] = {}
     with ThreadPoolExecutor(max_workers=SITEMAP_WORKERS) as pool:
         futs = {pool.submit(fetch_sitemap, u): u for u in sitemap_urls}
@@ -406,13 +429,17 @@ def main() -> None:
                 print(f"[{i}/{len(sitemap_urls)}] {sm_url.split('/')[-1]} : illisible", flush=True)
                 continue
             entries = parse_sitemap(xml)
-            keep = classify_entries(entries)
+            day_label = sm_url.split("/")[-1].replace("sitemap-", "").replace(".xml", "")
+            keep = classify_entries(entries, label=day_label)
             stats["not_mulhouse"] += len(entries) - len(keep)
-            if not keep and i % 50 != 0 and i != len(sitemap_urls):
-                continue
+            elapsed = time.time() - t0
+            eta = (elapsed / i) * (len(sitemap_urls) - i) if i else 0
             print(
                 f"[{i}/{len(sitemap_urls)}] {sm_url.split('/')[-1]} : "
-                f"{len(entries)} URL → {len(keep)} Mulhouse",
+                f"{len(entries)} URL → {len(keep)} Mulhouse | "
+                f"{int(elapsed // 60):02d}m{int(elapsed % 60):02d}s | "
+                f"ETA {int(eta // 60):02d}m{int(eta % 60):02d}s | "
+                f"créés {stats['created']} err {stats['errors']}",
                 flush=True,
             )
             for entry in keep:
