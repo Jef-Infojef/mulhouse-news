@@ -1,8 +1,8 @@
 import { getLatestArticles } from './actions'
 import HomeClient from '@/components/HomeClient'
 
-// Revalidation toutes les 15 minutes pour le SEO et la fraîcheur des données
-export const revalidate = 900 
+// Cache on-demand + fallback 24h
+export const revalidate = 86400 
 
 export default async function Home() {
   const { articles, error } = await getLatestArticles()
