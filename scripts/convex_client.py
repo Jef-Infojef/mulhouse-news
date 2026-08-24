@@ -150,6 +150,26 @@ def get_article_by_link(link: str) -> dict | None:
     return _call("scrapers:getArticleByLink", {"link": link}, mutation=False)
 
 
+def get_existing_links_for(links: list[str], batch_size: int = 100) -> set[str]:
+    """Liens déjà en base parmi `links` (index by_link, par lots).
+
+    Repli unitaire si `scrapers:getExistingLinks` n'est pas encore déployée.
+    """
+    existing: set[str] = set()
+    if not links:
+        return existing
+    for i in range(0, len(links), batch_size):
+        chunk = links[i : i + batch_size]
+        try:
+            res = _call("scrapers:getExistingLinks", {"links": chunk}, mutation=False)
+            existing.update(res.get("existing") or [])
+        except ConvexError:
+            for link in chunk:
+                if get_article_by_link(link):
+                    existing.add(link)
+    return existing
+
+
 def get_article_by_supabase_id(article_id: str) -> dict | None:
     """Article complet (content inclus) via news_bridge:getArticleById."""
     return _call("news_bridge:getArticleById", {"id": article_id}, mutation=False)

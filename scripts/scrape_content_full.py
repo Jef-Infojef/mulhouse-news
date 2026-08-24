@@ -232,11 +232,23 @@ def load_ebra_cookies(conn=None) -> tuple[dict, bool]:
     return cookies_dict, False
 
 RETRY_COOLDOWN_KEY = "SCRAPE_CONTENT_RETRY_COOLDOWNS"
-RETRY_COOLDOWN_HOURS = 6
+# Seuil de la query getArticlesShortContent : en dessous, l'article revient
+# à chaque cron. Un chapo / une description de 200 chars ne doit pas relancer
+# un HTTP toutes les 15 min.
+FULL_CONTENT_MIN = 500
+SAVE_CONTENT_MIN = 150
+# Tentative 1 → 6 h, 2 → 12 h, 3 → 24 h, 4 → 48 h, 5+ → 7 j
+BACKOFF_HOURS = (6, 12, 24, 48, 168)
+# 404 / article intrinsèquement court : pas la peine de retester avant 7 j
+PERMANENT_BACKOFF_HOURS = BACKOFF_HOURS[-1]
 
 
 def get_retry_cooldowns(conn):
-    """Cooldowns d'échec par article : {article_id: "YYYY-MM-DDTHH:MM:SS"}."""
+    """Cooldowns d'échec par article.
+
+    Format actuel : {id: {until, fails, reason}}.
+    Ancien format (string ISO) encore lu.
+    """
     raw = get_app_config(conn, RETRY_COOLDOWN_KEY)
     if not raw:
         return {}
@@ -247,18 +259,82 @@ def get_retry_cooldowns(conn):
         return {}
 
 
+def _parse_cooldown_entry(raw):
+    """Retourne (until: datetime | None, fails: int)."""
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw), 1
+        except ValueError:
+            return None, 1
+    if isinstance(raw, dict):
+        until = None
+        iso = raw.get("until")
+        if iso:
+            try:
+                until = datetime.fromisoformat(iso)
+            except ValueError:
+                until = None
+        try:
+            fails = max(int(raw.get("fails") or 1), 1)
+        except (TypeError, ValueError):
+            fails = 1
+        return until, fails
+    return None, 1
+
+
+def _backoff_hours(fails: int, reason: str) -> int:
+    if reason in ("http_404", "http_410", "short"):
+        return PERMANENT_BACKOFF_HOURS
+    idx = min(max(fails, 1) - 1, len(BACKOFF_HOURS) - 1)
+    return BACKOFF_HOURS[idx]
+
+
+def cooldown_active(cooldowns, art_id):
+    """True si l'article est encore en cooldown (ne pas refetch)."""
+    until, _ = _parse_cooldown_entry(cooldowns.get(art_id))
+    return bool(until and datetime.now() < until)
+
+
+def mark_retry_cooldown(cooldowns, art_id, reason: str, *, increment: bool = True):
+    """Enregistre un backoff. Conservé le compteur d'échecs après expiration."""
+    _, prev_fails = _parse_cooldown_entry(cooldowns.get(art_id))
+    if increment and art_id in cooldowns:
+        fails = prev_fails + 1
+    else:
+        fails = 1
+    hours = _backoff_hours(fails, reason)
+    until = datetime.now() + timedelta(hours=hours)
+    cooldowns[art_id] = {
+        "until": until.isoformat(),
+        "fails": fails,
+        "reason": reason,
+    }
+    return until, fails, hours
+
+
+def prune_retry_cooldowns(cooldowns):
+    """Droppe les entrées expirées depuis plus de 7 j (articles hors fenêtre)."""
+    cutoff = datetime.now() - timedelta(days=7)
+    drop = []
+    for key, raw in cooldowns.items():
+        until, _ = _parse_cooldown_entry(raw)
+        if until and until < cutoff:
+            drop.append(key)
+    for key in drop:
+        del cooldowns[key]
+
+
 def persist_retry_cooldowns(conn, cooldowns):
-    if not cooldowns:
-        return
     try:
+        payload = json.dumps(cooldowns)
         if USE_CONVEX:
-            convex_client.set_app_config(RETRY_COOLDOWN_KEY, json.dumps(cooldowns))
+            convex_client.set_app_config(RETRY_COOLDOWN_KEY, payload)
         else:
             with conn.cursor() as cur:
                 cur.execute(
                     'INSERT INTO "AppConfig" (key, value, "updatedAt") VALUES (%s, %s, NOW()) '
                     'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = NOW()',
-                    (RETRY_COOLDOWN_KEY, json.dumps(cooldowns)),
+                    (RETRY_COOLDOWN_KEY, payload),
                 )
             conn.commit()
     except Exception as e:
@@ -711,6 +787,8 @@ def main():
         cooldowns = get_retry_cooldowns(conn)
         total_articles = len(articles)
         total_chars_recovered = 0
+        skipped_cooldown = 0
+        session_lost = False
         print(f"[*] {total_articles} articles à traiter.")
 
         for i, article in enumerate(articles, 1):
@@ -733,17 +811,22 @@ def main():
                 supabase_id = None
 
             # Article déjà en échec : sauter tant que le cooldown n'est pas expiré
-            # (évite de retenter en boucle les pages injoignables à chaque run)
-            cooldown_until = cooldowns.get(art_id)
-            if cooldown_until:
-                try:
-                    until = datetime.fromisoformat(cooldown_until)
-                    if datetime.now() < until:
-                        print(f"    [⏳] En cooldown jusqu'à {until:%H:%M}, ignoré : {title[:40]}...")
-                        continue
-                except ValueError:
-                    pass
-                del cooldowns[art_id]
+            # (évite de retenter en boucle les pages injoignables / trop courtes)
+            if cooldown_active(cooldowns, art_id):
+                until, fails = _parse_cooldown_entry(cooldowns.get(art_id))
+                skipped_cooldown += 1
+                print(f"    [⏳] En cooldown jusqu'à {until:%H:%M} (essai {fails}), ignoré : {title[:40]}...")
+                continue
+
+            # Session EBRA perdue plus tôt dans ce run : ne pas refetch le paywall
+            is_ebra = any(d in link for d in ("lalsace.fr", "dna.fr", "estrepublicain.fr", "vosgesmatin.fr"))
+            if session_lost and is_ebra:
+                until, fails, hours = mark_retry_cooldown(
+                    cooldowns, art_id, "session_lost", increment=False
+                )
+                skipped_cooldown += 1
+                print(f"    [⏳] Session perdue, cooldown {hours}h : {title[:40]}...")
+                continue
 
             # Tentative d'extraction du contenu complet
             content, image_caption, active, err, images = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
@@ -766,9 +849,9 @@ def main():
                 status = "FALLBACK"
                 print(f"    [💡] Utilisation de la description pour : {title[:40]}...")
             
-            # On ne break plus si la session est perdue, on continue pour les autres
             if not active:
                 status = "SESSION_LOST"
+                session_lost = True
             
             updated = images_changed
             if image_caption:
@@ -781,7 +864,8 @@ def main():
                     )
                 updated = True
 
-            if final_content and len(final_content) >= 150:
+            current_len = len(final_content) if final_content else 0
+            if final_content and current_len >= SAVE_CONTENT_MIN:
                 if USE_CONVEX:
                     convex_client.upsert_article({
                         "link": art_id,
@@ -791,21 +875,36 @@ def main():
                 else:
                     cur.execute('UPDATE "Article" SET content = %s, "updatedAt" = NOW() WHERE id = %s', (final_content, art_id))
                 updated = True
-                if status != "FALLBACK": stats["success"] += 1
+                if status == "SUCCESS" and current_len >= FULL_CONTENT_MIN:
+                    stats["success"] += 1
             else:
-                # Contenu trop court ou absent : ne pas sauvegarder pour éviter la boucle
-                # (article restera NULL et sera retesté au prochain run)
                 if final_content:
-                    print(f"    [⚠️] Contenu trop court ({len(final_content)} chars), ignoré : {title[:40]}...")
+                    print(f"    [⚠️] Contenu trop court ({current_len} chars), ignoré : {title[:40]}...")
                 stats["error"] += 1
 
-            # Marquer les échecs d'un cooldown pour ne plus retenter en boucle
-            # (page injoignable, paywall bloqué, contenu introuvable...)
-            current_len = len(final_content) if final_content else 0
-            if status in ("FAILED", "SESSION_LOST") or current_len < 150:
-                cooldowns[art_id] = (datetime.now() + timedelta(hours=RETRY_COOLDOWN_HOURS)).isoformat()
-            else:
+            # Backoff : ne pas refetch à chaque cron 15 min.
+            #  - plein texte (>= 500) : succès, on oublie le cooldown
+            #  - article court mais réel : 7 j (le HTML ne grandira pas)
+            #  - 404/410 : 7 j
+            #  - fallback / échec réseau / paywall : backoff exponentiel
+            err_l = (err or "").lower()
+            if status == "SUCCESS" and current_len >= FULL_CONTENT_MIN:
                 cooldowns.pop(art_id, None)
+            else:
+                if "404" in err_l or (err or "").startswith("HTTP 404"):
+                    reason = "http_404"
+                elif "410" in err_l:
+                    reason = "http_410"
+                elif status == "SESSION_LOST":
+                    reason = "session_lost"
+                elif status == "FALLBACK":
+                    reason = "fallback"
+                elif status == "SUCCESS" and current_len < FULL_CONTENT_MIN:
+                    reason = "short"
+                else:
+                    reason = "failed"
+                until, fails, hours = mark_retry_cooldown(cooldowns, art_id, reason)
+                print(f"    [⏳] Cooldown {hours}h (essai {fails}, {reason}) : {title[:40]}...")
 
             if updated and not USE_CONVEX:
                 conn.commit()
@@ -820,7 +919,13 @@ def main():
 
         if total_chars_recovered:
             print(f"\n[*] Taille totale récupérée : {total_chars_recovered:,} chars ({total_chars_recovered/1_048_576:.2f} Mo)", flush=True)
+        print(
+            f"[*] Cooldown : {skipped_cooldown} ignorés (pas de refetch HTTP) / "
+            f"{total_articles} candidats",
+            flush=True,
+        )
 
+        prune_retry_cooldowns(cooldowns)
         persist_retry_cooldowns(conn, cooldowns)
 
         # Rattrapage légendes photo (articles récents sans imageCaption)

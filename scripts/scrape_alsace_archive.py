@@ -49,6 +49,9 @@ SITEMAP_INDEX = "https://www.lalsace.fr/sitemap-index.xml"
 SOURCE = "L'Alsace (archive)"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+# URLs déjà ouvertes et hors édition Mulhouse : ne pas re-HTTP à chaque cron 15 min
+REJECTED_KEY = "ALSACE_SITEMAP_NOT_MULHOUSE"
+REJECTED_TTL_DAYS = 7
 
 
 def title_from_slug(slug: str) -> str:
@@ -126,6 +129,77 @@ def sql_links_exist(cur, links: list[str]) -> set:
     return {row[0] for row in cur.fetchall()}
 
 
+def load_rejected_urls(use_convex: bool, cur) -> dict:
+    raw = None
+    try:
+        if use_convex:
+            raw = convex_client.get_app_config(REJECTED_KEY)
+        elif cur:
+            cur.execute('SELECT value FROM "AppConfig" WHERE key = %s', (REJECTED_KEY,))
+            row = cur.fetchone()
+            raw = row[0] if row else None
+    except Exception as e:
+        print(f"[!] Cache fil d'Ariane illisible : {e}")
+        return {}
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+    except Exception:
+        return {}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=REJECTED_TTL_DAYS)
+    live = {}
+    for url, iso in data.items():
+        try:
+            until = datetime.fromisoformat(iso)
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+            if until >= cutoff:
+                live[url] = iso
+        except ValueError:
+            continue
+    return live
+
+
+def persist_rejected_urls(use_convex: bool, conn, cur, rejected: dict):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=REJECTED_TTL_DAYS)
+    drop = []
+    for url, iso in rejected.items():
+        try:
+            until = datetime.fromisoformat(iso)
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+            if until < cutoff:
+                drop.append(url)
+        except ValueError:
+            drop.append(url)
+    for url in drop:
+        del rejected[url]
+    payload = json.dumps(rejected)
+    try:
+        if use_convex:
+            convex_client.set_app_config(REJECTED_KEY, payload)
+        elif cur and conn:
+            cur.execute(
+                'INSERT INTO "AppConfig" (key, value, "updatedAt") VALUES (%s, %s, NOW()) '
+                'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = NOW()',
+                (REJECTED_KEY, payload),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"[!] Cache fil d'Ariane non persisté : {e}")
+
+
+def lookup_existing(use_convex: bool, cur, links: list[str]) -> set[str]:
+    if not links:
+        return set()
+    if use_convex:
+        return convex_client.get_existing_links_for(links)
+    return sql_links_exist(cur, links)
+
+
 def insert_sql(cur, conn, row: dict) -> bool:
     cur.execute(
         """
@@ -176,17 +250,9 @@ def main():
     sitemaps = list_daily_sitemaps(start, end)
     inserted = skipped = errors = 0
     start_time = datetime.now()
-
-    # En Convex, on charge tous les liens existants en une passe (pagination)
-    # au lieu d'un get_article_by_link par URL (bien plus rapide pour un
-    # backfill de milliers d'articles).
-    existing_links = set()
-    if use_convex and not args.dry_run:
-        try:
-            existing_links = set(convex_client.get_article_links())
-            print(f"[*] {len(existing_links)} liens existants chargés (Convex)")
-        except Exception as e:
-            print(f"[!] Impossible de charger les liens existants : {e}")
+    rejected = {} if args.dry_run else load_rejected_urls(use_convex, cur)
+    check_skipped_cache = 0
+    check_fetched = 0
 
     for i, sm_url in enumerate(sitemaps, 1):
         xml = fetch_sitemap(sm_url)
@@ -200,17 +266,31 @@ def main():
             entries = [e for e in parsed if is_mulhouse_url(e["link"])]
             if args.check_page:
                 rest = [e for e in parsed if not is_mulhouse_url(e["link"])]
-                if existing_links:
-                    rest = [e for e in rest if e["link"] not in existing_links]
+                if not args.dry_run:
+                    already = lookup_existing(use_convex, cur, [e["link"] for e in rest])
+                    rest = [e for e in rest if e["link"] not in already]
+                now_iso = datetime.now(timezone.utc).isoformat()
+                to_fetch = []
+                for e in rest:
+                    cached = rejected.get(e["link"])
+                    if cached:
+                        check_skipped_cache += 1
+                        continue
+                    to_fetch.append(e)
                 kept_page = 0
-                for j, e in enumerate(rest, 1):
+                for j, e in enumerate(to_fetch, 1):
                     html = fetch_sitemap(e["link"])
+                    check_fetched += 1
                     if html and html_is_mulhouse_edition(html):
                         entries.append(e)
                         kept_page += 1
-                    if j % 20 == 0 or j == len(rest):
+                        rejected.pop(e["link"], None)
+                    else:
+                        rejected[e["link"]] = now_iso
+                    if j % 20 == 0 or j == len(to_fetch):
                         print(
-                            f"    fil d'Ariane {j}/{len(rest)} — retenus +{kept_page}"
+                            f"    fil d'Ariane {j}/{len(to_fetch)} — retenus +{kept_page} "
+                            f"(cache {check_skipped_cache})"
                         )
                     time.sleep(random.uniform(0.25, 0.55))
         if not entries:
@@ -221,11 +301,7 @@ def main():
             inserted += len(entries)
             continue
 
-        if use_convex:
-            existing = {e["link"] for e in entries if e["link"] in existing_links}
-        else:
-            links = [e["link"] for e in entries]
-            existing = sql_links_exist(cur, links)
+        existing = lookup_existing(use_convex, cur, [e["link"] for e in entries])
 
         for e in entries:
             if e["link"] in existing or (args.limit and inserted >= args.limit):
@@ -257,6 +333,13 @@ def main():
 
     label = "candidats" if args.dry_run else "articles insérés"
     print(f"\n[*] TERMINÉ : {inserted} {label}, {skipped} déjà présents/ignorés, {errors} erreurs.")
+    if args.check_page:
+        print(
+            f"[*] Fil d'Ariane : {check_fetched} pages ouvertes, "
+            f"{check_skipped_cache} déjà hors-Mulhouse (cache {REJECTED_TTL_DAYS} j)"
+        )
+    if not args.dry_run:
+        persist_rejected_urls(use_convex, conn, cur, rejected)
 
     if not args.dry_run and inserted > 0:
         try:

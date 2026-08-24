@@ -261,6 +261,24 @@ export const getArticleByLink = query({
   },
 });
 
+// Existence par lots (index by_link) : le cron 15 min ne doit plus paginer
+// les ~27 k articles complets juste pour dédupliquer 2 sitemaps du jour.
+export const getExistingLinks = query({
+  args: { links: v.array(v.string()) },
+  handler: async (ctx, { links }) => {
+    const batch = links.slice(0, 200);
+    const existing: string[] = [];
+    for (const link of batch) {
+      const doc = await ctx.db
+        .query("articles")
+        .withIndex("by_link", (q) => q.eq("link", link))
+        .first();
+      if (doc) existing.push(link);
+    }
+    return { existing };
+  },
+});
+
 export const getArticleLinks = query({
   args: {
     source: v.optional(v.string()),

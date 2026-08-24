@@ -19,7 +19,7 @@ MAX_KNOWLEDGE_AGE_H = 36
 # 4 Go faisait sonner tout le 16/08 : le jour restait à 5,45 Go (fuite
 # .take(500) déjà stoppée, ~2 Mo/scrape depuis). Plafond disable = 8 Go/j.
 IO_DAY_WARN_GB = 6.0
-IO_MONTH_WARN_GB = 36.0  # 80 % du plafond disable 45 Go
+IO_MONTH_WARN_GB = 64.0  # 80 % du plafond disable 80 Go
 
 
 def gh_json(args: list[str]):
@@ -78,7 +78,7 @@ def main() -> int:
         if day >= IO_DAY_WARN_GB:
             alerts.append(f"Convex Database I/O jour = {io.fmt_gb(day)} (seuil {IO_DAY_WARN_GB:.0f} Go)")
         if month >= IO_MONTH_WARN_GB:
-            alerts.append(f"Convex Database I/O mois = {io.fmt_gb(month)} (seuil {IO_MONTH_WARN_GB:.0f} Go / plafond 45)")
+            alerts.append(f"Convex Database I/O mois = {io.fmt_gb(month)} (seuil {IO_MONTH_WARN_GB:.0f} Go / plafond 80)")
     except Exception as exc:
         alerts.append(f"Impossible de lire l'I/O Convex : {exc}")
 
