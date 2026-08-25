@@ -47,6 +47,7 @@ startup_error.txt
 # Scripts d'analyse locale & temporaires (contenant potentiellement des secrets)
 scripts/eval_*.ts
 scripts/check_*.py
+!scripts/check_ebra_cookie.py
 scripts/check_*.ts
 scripts/migrate_*.py
 scripts/count_*.ts
