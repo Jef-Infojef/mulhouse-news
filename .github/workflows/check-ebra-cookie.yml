@@ -41,7 +41,7 @@ jobs:
         run: |
           python scripts/check_ebra_cookie.py
           echo "cookie_ok=true" >> "$GITHUB_OUTPUT"
-        continue-on-error: false
+        continue-on-error: true
 
       - name: Notifier Telegram (cookie KO)
         if: steps.cookie_check.outcome == 'failure'
