@@ -103,8 +103,9 @@ def _call(path: str, args: dict, *, mutation: bool) -> dict:
     endpoint = f"{url}/api/{'mutation' if mutation else 'query'}"
     payload = {"path": path, "format": "json", "args": _strip_none(args) if args else {}}
     # Retry transitoire : les backfills longue durée meurent sinon sur un
-    # simple « Remote end closed connection ».
+    # simple « Remote end closed connection » ou un HTTP 500/503 passager.
     last_exc: Exception | None = None
+    last_resp = None
     for attempt in range(4):
         try:
             resp = requests.post(
@@ -116,12 +117,20 @@ def _call(path: str, args: dict, *, mutation: bool) -> dict:
                 },
                 timeout=90,
             )
+            last_resp = resp
+            if resp.status_code in (429, 500, 502, 503, 504):
+                time.sleep(2 * (attempt + 1))
+                continue
         except requests.RequestException as exc:
             last_exc = exc
             time.sleep(2 * (attempt + 1))
             continue
         break
     else:
+        if last_resp is not None and last_resp.status_code != 200:
+            raise ConvexError(
+                f"Convex HTTP {last_resp.status_code} ({path}) après 4 tentatives: {last_resp.text[:500]}"
+            )
         raise ConvexError(f"Erreur HTTP Convex ({path}) après 4 tentatives: {last_exc}")
     if resp.status_code != 200:
         raise ConvexError(
