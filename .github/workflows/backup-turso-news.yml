@@ -105,7 +105,7 @@ jobs:
               FILE_DATE=$(echo "$line" | grep -oP "backup-${PREFIX}-\K[0-9]{8}" || true)
               FILE_NAME=$(echo "$line" | awk '{print $4}')
 
-              if [ ! -z "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
+              if [ -n "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
                 echo "Suppression : backups/${PREFIX}/${FILE_NAME}"
                 aws s3 rm "s3://asso-franklin-turso/backups/${PREFIX}/${FILE_NAME}" \
                   --endpoint-url https://s3.eu-central-003.backblazeb2.com || true
