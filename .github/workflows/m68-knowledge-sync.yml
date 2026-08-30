@@ -434,6 +434,14 @@ jobs:
         if: always() && github.event.schedule != '0 3 * * 3'
         run: echo "Bibliotheque d Alsace — 403 depuis les datacenters, sync locale uniquement"
 
+      - name: Sync annonces et offres immobilières
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/real-estate-listings-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
       # Relit le solde de chaque cle du magasin. Sans ce passage, le total de
       # reserve affiche par /jina reste une estimation a 10 M par cle. En
       # profite pour inscrire le secret JINA_API_KEY dans le magasin s'il n'y

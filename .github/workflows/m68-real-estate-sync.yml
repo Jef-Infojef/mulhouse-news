@@ -1,0 +1,41 @@
+name: M68 Real Estate Sync
+
+on:
+  schedule:
+    # Tous les matins à 4h30 UTC (5h30 / 6h30 heure française)
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  JINA_KEY_ENV: github
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout MulhouseGPT (deploy key lecture seule)
+        uses: actions/checkout@v4
+        with:
+          repository: Jef-Infojef/MulhouseGPT
+          ssh-key: ${{ secrets.MULHOUSEGPT_DEPLOY_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync annonces immobilières locales (Consult'Immo, Confidences, Topaze...)
+        run: npx tsx scripts/real-estate-listings-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
