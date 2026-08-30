@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { ChevronLeft, Copy, Check, Activity } from 'lucide-react'
+import { ChevronLeft, Copy, Check } from 'lucide-react'
 import Link from 'next/link'
 import { renderToStaticMarkup } from 'react-dom/server'
 

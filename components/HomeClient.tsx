@@ -78,7 +78,7 @@ function TopInfoBar({
 }: { 
   mounted: boolean, 
   currentTime: Date, 
-  weather: any, 
+  weather: { temp: number; code: number } | null, 
   onToggleTheme: () => void,
   resolvedTheme: string | undefined
 }) {
@@ -179,7 +179,7 @@ function PageHeader({
                 Mulhouse Actu
               </h1>
               <p className="text-sm sm:text-lg text-gray-600 dark:text-gray-400 mb-3">
-                Toute l'actu de Mulhouse en temps réel
+                Toute l&apos;actu de Mulhouse en temps réel
               </p>
               <div className="flex items-center gap-2 mb-3">
                 <Link
@@ -285,8 +285,9 @@ export default function HomeClient({ initialArticles }: { initialArticles: Artic
     let result
     try {
       result = await getLatestArticles(query)
-    } catch (err: any) {
-      dispatch({ type: 'SET_ERROR', payload: err.message || 'Une erreur est survenue' })
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Une erreur est survenue'
+      dispatch({ type: 'SET_ERROR', payload: msg })
       dispatch({ type: 'SET_LOADING', payload: false })
       return
     }
@@ -432,7 +433,7 @@ export default function HomeClient({ initialArticles }: { initialArticles: Artic
               </div>
               {state.displayCount < filteredCount && (
                 <div className="text-center py-8">
-                  <button onClick={() => dispatch({ type: 'LOAD_MORE' })} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">Charger plus d'articles</button>
+                  <button onClick={() => dispatch({ type: 'LOAD_MORE' })} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors">Charger plus d&apos;articles</button>
                 </div>
               )}
             </>

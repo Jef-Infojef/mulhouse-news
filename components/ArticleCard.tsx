@@ -110,7 +110,7 @@ export function ArticleCard({ article, isAdmin, onDelete }: ArticleProps) {
         alert('Erreur lors de la suppression : ' + res.error)
         dispatch({ type: 'SET_DELETING', payload: false })
       }
-    } catch (err) {
+    } catch {
       alert('Erreur technique')
       dispatch({ type: 'SET_DELETING', payload: false })
     }

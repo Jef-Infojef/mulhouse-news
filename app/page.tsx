@@ -5,7 +5,7 @@ import HomeClient from '@/components/HomeClient'
 export const revalidate = 86400 
 
 export default async function Home() {
-  const { articles, error } = await getLatestArticles()
+  const { articles } = await getLatestArticles()
 
   const jsonLd = {
     "@context": "https://schema.org",

@@ -194,7 +194,7 @@ export const getArticleImagesByArticleIds = query({
           if (resolvedUrl) {
             const image: {
               articleId: string;
-              url: row.url;
+              url: string;
               caption?: string;
               localImage: string | null;
               r2Url: string | null;
