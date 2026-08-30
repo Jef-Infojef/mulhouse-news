@@ -50,6 +50,40 @@ jobs:
             && echo "Cache sorties invalidé" \
             || echo "Revalidation cache ignorée"
 
+      - name: Checkout MulhouseGPT (deploy key)
+        if: success()
+        uses: actions/checkout@v4
+        with:
+          repository: Jef-Infojef/MulhouseGPT
+          ssh-key: ${{ secrets.MULHOUSEGPT_DEPLOY_KEY }}
+          path: mulhousegpt
+
+      - name: Setup Node.js
+        if: success()
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: mulhousegpt/package-lock.json
+
+      - name: Install MulhouseGPT dependencies
+        if: success()
+        working-directory: mulhousegpt
+        run: npm ci
+
+      - name: Sync sorties à venir (RAG)
+        if: success()
+        working-directory: mulhousegpt
+        env:
+          JINA_KEY_ENV: github
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+        run: npx tsx scripts/outings-sync.ts
+
       - name: Log failure to DB
         if: failure()
         env:

@@ -345,6 +345,7 @@ def classify_entries(entries: list[dict], label: str = "") -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Rattrapage L'Alsace 1 à 1 (Convex + GRDC + RAG).")
+    parser.add_argument("--prod", action="store_true", help="Convex prod (MulhouseGPT/.env.local)")
     parser.add_argument("--start", type=parse_day, required=True)
     parser.add_argument("--end", type=parse_day, default=None)
     parser.add_argument("--gpt-dir", type=Path, default=DEFAULT_GPT)
@@ -356,8 +357,14 @@ def main() -> None:
     gpt = args.gpt_dir.resolve()
     start = datetime.strptime(args.start, "%Y-%m-%d").date()
     end_d = datetime.strptime(end, "%Y-%m-%d").date()
-    load_dotenv(gpt / ".env.local")
-    load_dotenv(gpt / ".env")
+
+    if args.prod or (gpt / ".env.local").exists():
+        load_dotenv(gpt / ".env.local", override=True)
+        load_dotenv(gpt / ".env", override=True)
+        os.environ.setdefault("USE_CONVEX", "1")
+    else:
+        load_dotenv(gpt / ".env.local")
+        load_dotenv(gpt / ".env")
 
     rag_conn = rag_cur = None
     rag_url = (os.environ.get("RAG_DATABASE_URL") or os.environ.get("NEWS_DATABASE_URL") or "").replace(

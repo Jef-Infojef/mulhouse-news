@@ -12,7 +12,7 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 NEWS_ROOT = Path(__file__).resolve().parent.parent
@@ -106,6 +106,8 @@ def classify_day(day: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Audit couverture L'Alsace Mulhouse vs Convex")
     parser.add_argument("--prod", action="store_true", help="Convex prod (MulhouseGPT/.env.local)")
+    parser.add_argument("--start", type=str, default="", help="Date de début YYYY-MM-DD")
+    parser.add_argument("--end", type=str, default="", help="Date de fin YYYY-MM-DD")
     parser.add_argument(
         "--dates",
         type=str,
@@ -126,7 +128,15 @@ def main() -> int:
         return 1
     print(f"[*] Convex : {convex_client.get_convex_url()}", flush=True)
 
-    if args.dates:
+    if args.start:
+        start_d = datetime.strptime(args.start.strip(), "%Y-%m-%d").date()
+        end_d = datetime.strptime(args.end.strip(), "%Y-%m-%d").date() if args.end else start_d
+        cur = start_d
+        days = []
+        while cur <= end_d:
+            days.append(cur.strftime("%Y-%m-%d"))
+            cur += timedelta(days=1)
+    elif args.dates:
         days = [d.strip() for d in args.dates.split(",") if d.strip()]
     elif args.pre_2020 and not args.y2026:
         days = PRE_2020

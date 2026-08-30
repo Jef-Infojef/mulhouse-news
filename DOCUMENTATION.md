@@ -9,7 +9,7 @@ Ce document détaille l'architecture technique, le pipeline d'automatisation et 
 Le projet fonctionne sur une architecture hybride **Next.js + Python** :
 
 *   **Frontend & API :** Next.js (App Router) hébergé sur **Vercel**.
-*   **Base de Données :** PostgreSQL géré par **Neon** (Serverless Postgres).
+*   **Base de Données :** **Convex** (Déploiement prod : `academic-spoonbill-914`, cloud Convex).
 *   **Stockage Images :** **Backblaze B2** (Object Storage S3-compatible).
 *   **Moteur de Scraping :** Scripts Python exécutés via **GitHub Actions**.
 *   **Orchestration :** Déclencheur externe via **cron-job.org**.

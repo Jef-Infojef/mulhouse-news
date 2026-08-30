@@ -184,24 +184,61 @@ export const getArticleImagesByArticleIds = query({
         .query("articleImages")
         .withIndex("by_articleId", (q) => q.eq("articleId", articleId))
         .take(50);
-      for (const row of rows) {
-        const bestUrl = row.r2Url ?? row.localImage ?? row.url;
-        const image: {
-          articleId: string;
-          url: string;
-          caption?: string;
-          localImage: string | null;
-          r2Url: string | null;
-          bestUrl: string;
-        } = {
-          articleId,
-          url: row.url,
-          localImage: row.localImage ?? null,
-          r2Url: row.r2Url ?? null,
-          bestUrl,
-        };
-        if (row.caption) image.caption = row.caption;
-        images.push(image);
+      if (rows.length > 0) {
+        for (const row of rows) {
+          const resolvedUrl =
+            row.url ||
+            (row.r2Url && !row.r2Url.includes("backblazeb2.com") ? row.r2Url : "") ||
+            row.localImage ||
+            "";
+          if (resolvedUrl) {
+            const image: {
+              articleId: string;
+              url: row.url;
+              caption?: string;
+              localImage: string | null;
+              r2Url: string | null;
+              bestUrl: string;
+            } = {
+              articleId,
+              url: row.url,
+              localImage: row.localImage ?? null,
+              r2Url: row.r2Url ?? null,
+              bestUrl: resolvedUrl,
+            };
+            if (row.caption) image.caption = row.caption;
+            images.push(image);
+          }
+        }
+      } else {
+        const article = await ctx.db
+          .query("articles")
+          .withIndex("by_supabaseId", (q) => q.eq("supabaseId", articleId))
+          .first();
+        if (article && (article.imageUrl || article.r2Url)) {
+          const resolvedUrl =
+            article.imageUrl ||
+            (article.r2Url && !article.r2Url.includes("backblazeb2.com") ? article.r2Url : "") ||
+            "";
+          if (resolvedUrl) {
+            const image: {
+              articleId: string;
+              url: string;
+              caption?: string;
+              localImage: string | null;
+              r2Url: string | null;
+              bestUrl: string;
+            } = {
+              articleId,
+              url: article.imageUrl || article.r2Url || "",
+              localImage: null,
+              r2Url: article.r2Url ?? null,
+              bestUrl: resolvedUrl,
+            };
+            if (article.imageCaption) image.caption = article.imageCaption;
+            images.push(image);
+          }
+        }
       }
     }
     return { images };
