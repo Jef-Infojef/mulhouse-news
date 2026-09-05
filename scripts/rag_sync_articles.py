@@ -174,6 +174,19 @@ def ensure_fts_index(cur) -> None:
     )
 
 
+def press_metadata(source: str | None, published_at: str, image_url: str | None) -> dict:
+    """Metadonnees d'un article presse pour le RAG.
+
+    `imageUrl` illustre la carte de source cote MulhouseGPT ; l'omettre laissait
+    les articles recents sans photo alors que l'image existait dans Convex.
+    Cle absente plutot que vide : le lecteur teste la presence.
+    """
+    meta = {"source": source or "", "publishedAt": published_at}
+    if image_url:
+        meta["imageUrl"] = image_url
+    return meta
+
+
 def upsert_document(
     cur,
     *,
@@ -209,6 +222,21 @@ def upsert_document(
         existing.get(idx) == h for (idx, _), h in zip(chunks, hashes)
     )
     if unchanged:
+        # L'empreinte ne couvre que le texte : une metadonnee arrivee APRES la
+        # premiere indexation (illustration rattachee quelques minutes plus tard)
+        # n'entrait jamais dans l'index, et l'article restait sans photo sous
+        # les sources. On rafraichit title/url/metadata sans reinserer.
+        meta_json = Json(metadata) if metadata else None
+        cur.execute(
+            """
+            UPDATE "KnowledgeChunk"
+               SET metadata = %s, title = %s, url = %s
+             WHERE "sourceType" = %s AND "sourceId" = %s
+               AND (metadata IS DISTINCT FROM %s OR title IS DISTINCT FROM %s
+                    OR url IS DISTINCT FROM %s)
+            """,
+            (meta_json, title, url, source_type, source_id, meta_json, title, url),
+        )
         stats["skipped"] += 1
         return
 
@@ -263,12 +291,13 @@ def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool =
                         title=article["title"],
                         content=body,
                         url=article["link"],
-                        metadata={
-                            "source": article["source"] or "",
-                            "publishedAt": datetime.fromtimestamp(
+                        metadata=press_metadata(
+                            article["source"],
+                            datetime.fromtimestamp(
                                 article["publishedAt"] / 1000, tz=timezone.utc
                             ).isoformat(),
-                        },
+                            article.get("imageUrl") or article.get("r2Url"),
+                        ),
                         stats=stats,
                     )
                 except Exception as exc:
@@ -320,10 +349,11 @@ def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool =
                 title=article["title"],
                 content=body,
                 url=article["link"],
-                metadata={
-                    "source": article["source"] or "",
-                    "publishedAt": article["publishedAt"].isoformat() if article["publishedAt"] else "",
-                },
+                metadata=press_metadata(
+                    article["source"],
+                    article["publishedAt"].isoformat() if article["publishedAt"] else "",
+                    article.get("imageUrl"),
+                ),
                 stats=stats,
             )
         except Exception as exc:

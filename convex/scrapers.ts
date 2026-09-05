@@ -40,6 +40,8 @@ export const upsertArticle = mutation({
       localImage: v.optional(v.string()),
       r2Url: v.optional(v.string()),
       hidden: v.optional(v.boolean()),
+      author: v.optional(v.string()),
+      category: v.optional(v.string()),
       supabaseId: v.optional(v.string()),
     }),
   },
@@ -63,6 +65,8 @@ export const upsertArticle = mutation({
         "localImage",
         "r2Url",
         "hidden",
+        "author",
+        "category",
       ] as const;
       for (const key of keys) {
         if (row[key] !== undefined) patch[key] = row[key];
@@ -90,6 +94,8 @@ export const upsertArticle = mutation({
       localImage: row.localImage,
       r2Url: row.r2Url,
       hidden: row.hidden ?? false,
+      author: row.author,
+      category: row.category,
       supabaseId: row.supabaseId,
     });
     return { created: true, id, supabaseId: row.supabaseId ?? null };
@@ -255,6 +261,8 @@ export const getArticleByLink = query({
       updatedAt: doc.updatedAt ?? null,
       localImage: doc.localImage ?? null,
       r2Url: doc.r2Url ?? null,
+      author: doc.author ?? null,
+      category: doc.category ?? null,
       hidden: doc.hidden,
       supabaseId: doc.supabaseId ?? null,
     };
@@ -383,19 +391,21 @@ export const getArticlesMissingContentAll = query({
     maxPages: v.optional(v.number()),
     pageSize: v.optional(v.number()),
     minLength: v.optional(v.number()),
+    order: v.optional(v.union(v.literal("asc"), v.literal("desc"))),
   },
   handler: async (ctx, args) => {
     const limit = Math.min(Math.max(1, args.limit ?? 300), 500);
     const maxPages = Math.min(Math.max(1, args.maxPages ?? 200), 1000);
     const pageSize = Math.min(Math.max(1, args.pageSize ?? 500), 1000);
     const minLength = args.minLength ?? 150;
+    const orderDirection = args.order ?? "desc";
     const articles = [];
     let cursor: string | null = null;
     for (let page = 0; page < maxPages; page++) {
       const res = await ctx.db
         .query("articles")
         .withIndex("by_hidden_publishedAt", (q) => q.eq("hidden", false))
-        .order("asc")
+        .order(orderDirection)
         .paginate({ cursor, numItems: pageSize });
       for (const doc of res.page) {
         if (!doc.link || !doc.link.includes("lalsace.fr")) continue;
@@ -530,6 +540,11 @@ export const getRecentArticlesWithContent = query({
         link: doc.link,
         publishedAt: doc.publishedAt,
         updatedAt: doc.updatedAt,
+        // Illustration de la carte de source côté RAG : sans ces deux champs,
+        // le pont rag_sync_articles.py écrivait des chunks sans imageUrl et les
+        // articles récents s'affichaient sans photo (2026-09-05).
+        imageUrl: doc.imageUrl ?? null,
+        r2Url: doc.r2Url ?? null,
       });
       if (articles.length >= limit) break;
     }
@@ -570,6 +585,11 @@ export const getAllArticlesWithContent = query({
         link: doc.link,
         publishedAt: doc.publishedAt,
         updatedAt: doc.updatedAt,
+        // Illustration de la carte de source côté RAG : sans ces deux champs,
+        // le pont rag_sync_articles.py écrivait des chunks sans imageUrl et les
+        // articles récents s'affichaient sans photo (2026-09-05).
+        imageUrl: doc.imageUrl ?? null,
+        r2Url: doc.r2Url ?? null,
       });
       if (articles.length >= limit) break;
     }
