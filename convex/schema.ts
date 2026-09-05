@@ -31,6 +31,8 @@ export default defineSchema({
     localImage: v.optional(v.string()),
     r2Url: v.optional(v.string()),
     hidden: v.boolean(),
+    author: v.optional(v.string()),
+    category: v.optional(v.string()),
     // UUID Supabase d'origine (cuid Prisma), backfillé en Phase 2 : nécessaire
     // pour joindre articleGoogleTags/articleImages, qui stockent cet UUID.
     supabaseId: v.optional(v.string()),

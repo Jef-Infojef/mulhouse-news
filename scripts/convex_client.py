@@ -247,13 +247,13 @@ def get_articles_short_content(limit: int = 50, hours: int = 24) -> list[dict]:
     return res["articles"]
 
 
-def get_articles_missing_content_all(limit: int = 300, max_pages: int = 200) -> list[dict]:
+def get_articles_missing_content_all(limit: int = 300, max_pages: int = 200, order: str = "desc") -> list[dict]:
     """Articles lalsace.fr au contenu manquant, sans borne de date (backfill
-    d'archive). Scan paginé publishedAt asc : les plus anciens d'abord.
+    d'archive). Scan paginé publishedAt (défaut 'desc' : plus récents d'abord).
     Retourne les métadonnées (jamais le contenu)."""
     res = _call(
         "scrapers:getArticlesMissingContentAll",
-        {"limit": limit, "maxPages": max_pages},
+        {"limit": limit, "maxPages": max_pages, "order": order},
         mutation=False,
     )
     return res["articles"]

@@ -100,6 +100,8 @@ export const getRecentPressArticles = query({
         updatedAt: doc.updatedAt ?? null,
         imageUrl: doc.imageUrl ?? null,
         r2Url: doc.r2Url ?? null,
+        author: doc.author ?? null,
+        category: doc.category ?? null,
       });
       if (articles.length >= limit) break;
     }
@@ -327,6 +329,8 @@ export const getArticlesPage = query({
         updatedAt: doc.updatedAt ?? null,
         imageUrl: doc.imageUrl ?? null,
         r2Url: doc.r2Url ?? null,
+        author: doc.author ?? null,
+        category: doc.category ?? null,
       })),
       cursor: res.continueCursor,
       isDone: res.isDone,

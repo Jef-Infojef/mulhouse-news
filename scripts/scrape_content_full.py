@@ -17,6 +17,7 @@ from scrape_utils import (
     extract_article_images,
     fetch_page_caption,
     parse_mplusinfo_article,
+    parse_ebra_datalayer,
     _absolutize_media_url,
     _normalize_image_path,
 )
@@ -120,7 +121,7 @@ def get_db_connection():
     return psycopg2.connect(clean_url)
 
 
-def list_missing_content_via_pages(limit: int) -> list[dict]:
+def list_missing_content_via_pages(limit: int, order: str = "desc") -> list[dict]:
     """Articles lalsace.fr au contenu manquant/court.
 
     1. Query dédiée `getArticlesMissingContentAll` (métadonnées seules, un
@@ -128,11 +129,12 @@ def list_missing_content_via_pages(limit: int) -> list[dict]:
     2. Repli : pagination `getArticlesPage` (CONTENT inclus, lourd). Un log
        par page, sinon le terminal reste muet jusqu'à la 50ᵉ (~25 k docs).
     """
-    print("[*] Recherche des articles lalsace.fr sans texte…", flush=True)
+    print(f"[*] Recherche des articles lalsace.fr sans texte (ordre {order})…", flush=True)
     try:
         found = convex_client.get_articles_missing_content_all(
             limit=limit or 300,
             max_pages=200,
+            order=order,
         )
         if found:
             print(f"[*] {len(found)} candidats (query dédiée, sans télécharger les textes)", flush=True)
@@ -483,7 +485,7 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     raise ssl_err
             
         if resp.status_code != 200:
-            return None, None, True, f"HTTP {resp.status_code}", []
+            return None, None, True, f"HTTP {resp.status_code}", [], {}
 
         page_text = resp.text
         is_connected = any(x in page_text for x in ["Se déconnecter", "Mon compte", "Mon profil", "suscriber", "premium", "Abonné"])
@@ -509,8 +511,16 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                     if isinstance(item, dict) and item.get('articleBody'):
                         body = item['articleBody'].strip()
                         if len(body) > 100:
-                            return body, image_caption, True, None, images
+                            return body, image_caption, True, None, images, {}
             except: pass
+
+        extra_meta = {}
+        if "lalsace.fr" in target_url or "dna.fr" in target_url:
+            dl_meta = parse_ebra_datalayer(page_text)
+            if dl_meta.get("author"):
+                extra_meta["author"] = dl_meta["author"]
+            if dl_meta.get("category"):
+                extra_meta["category"] = dl_meta["category"]
 
         # Logique EBRA (L'Alsace, DNA...)
         if any(x in target_url for x in ["lalsace.fr", "dna.fr", "estrepublicain.fr", "vosgesmatin.fr"]):
@@ -526,12 +536,12 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
                         existing = {_normalize_image_path(i["url"]) for i in images}
                         images += [i for i in grdc_images if _normalize_image_path(i["url"]) not in existing]
                     print(f"    [GRDC] Contenu complet ({len(grdc_content)} chars) : {target_url[:45]}...")
-                    return grdc_content, image_caption, True, None, images
+                    return grdc_content, image_caption, True, None, images, extra_meta
 
             # 2) Refus du contenu partiel (session non abonnée) : L'Alsace
             if "lalsace.fr" in target_url and not is_connected and not is_video_page:
                 print(f"    [⛔] Contenu partiel refusé (Non connecté) pour : {target_url[:40]}")
-                return None, image_caption, False, "Not Connected (Partial content refused)", images
+                return None, image_caption, False, "Not Connected (Partial content refused)", images, extra_meta
 
             chapo = soup.find(class_='chapo') or soup.find(class_='article__chapo')
             if chapo: text_parts.append(chapo.get_text().strip())
@@ -658,10 +668,10 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
         if text_parts:
             # Nettoyage des caractères NULL (PostgreSQL n'aime pas ça)
             clean_parts = [p.replace('\x00', '') for p in text_parts if p]
-            return "\n\n".join(dict.fromkeys(clean_parts)), image_caption, True, None, images
-        return None, image_caption, True, "No content found", images
+            return "\n\n".join(dict.fromkeys(clean_parts)), image_caption, True, None, images, extra_meta
+        return None, image_caption, True, "No content found", images, extra_meta
     except Exception as e:
-        return None, None, True, str(e), []
+        return None, None, True, str(e), [], {}
 
 def run_image_scripts():
     """Lance les scripts TS et retourne un résumé."""
@@ -682,12 +692,16 @@ def main():
                         help="Nombre max d'articles à traiter (défaut : 50 en normal, 300 en archive)")
     parser.add_argument("--max-pages", type=int, default=200,
                         help="Convex archive : pages de scan maximales (défaut 200 x 500 docs)")
+    parser.add_argument("--order", type=str, default="desc", choices=["asc", "desc"],
+                        help="Ordre du scan d'archive ('desc' pour commencer par les plus récents, défaut)")
+    parser.add_argument("--skip-images", action="store_true",
+                        help="Ne pas exécuter les scripts de téléchargement/sync B2 en fin de run")
     args = parser.parse_args()
 
     start_time = datetime.now()
     print(f"=== SCRAPER PRODUCTION V2 (WITH LOGS) - {start_time.strftime('%H:%M:%S')} ===")
     if args.archive:
-        print("[*] MODE ARCHIVE : toutes les dates (backfill lalsace.fr)")
+        print(f"[*] MODE ARCHIVE : toutes les dates (backfill lalsace.fr, ordre {args.order})")
     
     conn = None
     cur = None
@@ -757,7 +771,7 @@ def main():
 
         if USE_CONVEX:
             if args.archive:
-                articles = list_missing_content_via_pages(args.limit or 0)
+                articles = list_missing_content_via_pages(args.limit or 0, order=args.order)
             else:
                 articles = convex_client.get_articles_short_content(limit=args.limit or 50, hours=24)
         else:
@@ -829,7 +843,7 @@ def main():
                 continue
 
             # Tentative d'extraction du contenu complet
-            content, image_caption, active, err, images = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
+            content, image_caption, active, err, images, extra_meta = fetch_article_content(link, cookies_dict, alsace_cookies is not None)
 
             # Enregistrement de toutes les images (hero + galerie) dans ArticleImage
             images_changed = False
@@ -867,11 +881,16 @@ def main():
             current_len = len(final_content) if final_content else 0
             if final_content and current_len >= SAVE_CONTENT_MIN:
                 if USE_CONVEX:
-                    convex_client.upsert_article({
+                    article_patch = {
                         "link": art_id,
                         "content": final_content,
                         "updatedAt": int(time.time() * 1000),
-                    })
+                    }
+                    if extra_meta.get("author"):
+                        article_patch["author"] = extra_meta["author"]
+                    if extra_meta.get("category"):
+                        article_patch["category"] = extra_meta["category"]
+                    convex_client.upsert_article(article_patch)
                 else:
                     cur.execute('UPDATE "Article" SET content = %s, "updatedAt" = NOW() WHERE id = %s', (final_content, art_id))
                 updated = True
@@ -967,7 +986,7 @@ def main():
             print(f"    Légendes récupérées : {caption_ok}/{len(caption_rows)}")
 
         # Image processing
-        img_status = run_image_scripts()
+        img_status = "Skipped" if args.skip_images else run_image_scripts()
 
         # Enregistrement du LOG final
         finished_at = datetime.now()

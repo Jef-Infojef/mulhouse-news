@@ -99,18 +99,73 @@ def is_mulhouse_url(url: str) -> bool:
     return False
 
 
+MULHOUSE_ZIPCODES = {"68070", "68100", "68200"}
+
+
+def parse_ebra_datalayer(html: str) -> dict:
+    """Extrait les métadonnées éditoriales riches depuis le bloc dataLayer EBRA."""
+    meta = {
+        "author": None,
+        "category": None,
+        "is_mulhouse": False,
+        "zipcodes": [],
+        "dimension38": None,
+        "published_at_iso": None,
+    }
+    if not html:
+        return meta
+
+    # Recherche directe des variables clés par expressions régulières (rapide et robuste aux erreurs JS)
+    m_author = re.search(r"['\"]dimension61['\"]\s*:\s*['\"]([^'\"]+)['\"]", html)
+    if m_author:
+        meta["author"] = m_author.group(1).strip() or None
+
+    m_cat = re.search(r"['\"]dimension15['\"]\s*:\s*['\"]([^'\"]+)['\"]", html)
+    if m_cat:
+        meta["category"] = m_cat.group(1).strip() or None
+
+    m_dim38 = re.search(r"['\"]dimension38['\"]\s*:\s*['\"]([0-9a-fA-F-]+)['\"]", html)
+    if m_dim38:
+        meta["dimension38"] = m_dim38.group(1).strip() or None
+
+    m_pub = re.search(r"['\"]dimension22['\"]\s*:\s*['\"]([^'\"]+)['\"]", html)
+    if m_pub:
+        meta["published_at_iso"] = m_pub.group(1).strip() or None
+
+    # Extraction des codes postaux (ex: 'zipcodes' : ['68070','68100'])
+    m_zips = re.search(r"['\"]zipcodes['\"]\s*:\s*\[(.*?)\]", html)
+    if m_zips:
+        zips = re.findall(r"['\"](\d{5})['\"]", m_zips.group(1))
+        meta["zipcodes"] = zips
+        if any(z in MULHOUSE_ZIPCODES for z in zips):
+            meta["is_mulhouse"] = True
+
+    # Vérification dimension28 (ex: 'Mulhouse (68070)')
+    m_commune = re.search(r"['\"]dimension28['\"]\s*:\s*['\"]([^'\"]+)['\"]", html)
+    if m_commune and "mulhouse" in m_commune.group(1).lower():
+        meta["is_mulhouse"] = True
+
+    return meta
+
+
 def html_is_mulhouse_edition(html: str) -> bool:
     """L'article EST classé Mulhouse, pas seulement la page L'Alsace.
 
     Interdit : le widget « Articles les plus lus Édition Mulhouse - Thann »
     présent sur TOUTES les pages (Indochine, Mika… ingérés par erreur).
 
-    On ne garde que :
+    On garde :
+    - le dataLayer (zipcodes 68100/68200/68070 ou dimension28 'Mulhouse')
     - le cran de fil d'Ariane commune `/edition-mulhouse-thann/mulhouse`
     - le tag geo INSEE 68224-mulhouse
     """
     if not html:
         return False
+
+    meta = parse_ebra_datalayer(html)
+    if meta["is_mulhouse"]:
+        return True
+
     low = html.lower()
     if "/edition-mulhouse-thann/mulhouse" in low:
         return True

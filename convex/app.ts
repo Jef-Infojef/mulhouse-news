@@ -125,6 +125,8 @@ export const getLatestArticles = query({
         updatedAt: doc.updatedAt ?? null,
         localImage: doc.localImage ?? null,
         r2Url: doc.r2Url ?? null,
+        author: doc.author ?? null,
+        category: doc.category ?? null,
         hidden: doc.hidden,
         ArticleGoogleTag,
       });
