@@ -320,7 +320,8 @@ def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool =
         where_clause += " AND \"updatedAt\" > NOW() - INTERVAL '25 hours'"
 
     sql = f"""
-        SELECT id, title, description, content, source, link, "publishedAt"
+        SELECT id, title, description, content, source, link, "publishedAt",
+               coalesce(NULLIF("r2Url", ''), "imageUrl") AS "imageUrl"
         FROM "Article"
         {where_clause}
         ORDER BY "publishedAt" DESC
@@ -336,6 +337,7 @@ def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool =
             "source": row[4],
             "link": row[5],
             "publishedAt": row[6],
+            "imageUrl": row[7],
         }
         body = format_press_article(article)
         if not body:
