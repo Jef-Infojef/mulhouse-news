@@ -454,6 +454,19 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
+      # Une cle passe en 'epuisee' des qu'un environnement est recharge, que son
+      # solde soit a zero ou non -- et un rechargement se declenche sur un seul
+      # refus 402/403, parfois du a un quota par minute. Sans ce passage, la
+      # reserve se vide toute seule : mesure le 2026-09-06, 16 cles marquees
+      # epuisees portaient encore 159 M de tokens. Ne touche jamais une cle
+      # active, et s'appuie sur le solde relu a l'etape precedente.
+      - name: Récupérer les clés Jina marquées épuisées à tort
+        if: always()
+        continue-on-error: true
+        run: npx tsx scripts/jina-keys-reclaim.ts --appliquer
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+
       - name: Vérifier le solde Jina
         if: always() && github.event.schedule != '0 3 * * 3'
         continue-on-error: true
