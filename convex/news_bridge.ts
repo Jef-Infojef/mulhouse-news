@@ -287,9 +287,12 @@ export const getAllArticleIds = query({
   },
   handler: async (ctx, { cursor, limit }) => {
     const numItems = Math.min(Math.max(1, limit ?? 500), 1000);
+    // Meme ensemble que getArticlesPage / getArticlesUpdatedSince (hidden=false) :
+    // la purge doit porter exactement sur les articles que l'indexation retient,
+    // sinon elle supprimerait les chunks d'articles parfaitement valides.
     const res = await ctx.db
       .query("articles")
-      .withIndex("by_publishedAt")
+      .withIndex("by_hidden_publishedAt", (q) => q.eq("hidden", false))
       .paginate({ cursor: cursor ?? null, numItems });
     return {
       ids: res.page.map((doc) => doc.supabaseId ?? doc._id),
@@ -334,6 +337,61 @@ export const getArticlesPage = query({
       })),
       cursor: res.continueCursor,
       isDone: res.isDone,
+    };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Query 8 bis — articles modifiés depuis `since`, paginés sur l'index
+// `by_updatedAt` (décroissant). Sert l'indexation RAG hebdomadaire : retraiter
+// les ~27 000 articles de l'archive pour n'y trouver que quelques centaines de
+// changements faisait déborder le job de 60 min (mesuré les 23/08, 30/08 et
+// 06/09/2026, trois runs annulés d'affilée). La purge, elle, continue de
+// s'appuyer sur getAllArticleIds, qui ne transporte que les identifiants.
+//
+// `isDone` vaut vrai dès que la page franchit `since` : l'appelant s'arrête là,
+// il n'a pas à parcourir tout l'historique.
+// ─────────────────────────────────────────────────────────────────────────────
+export const getArticlesUpdatedSince = query({
+  args: {
+    since: v.number(),
+    cursor: v.optional(v.union(v.null(), v.string())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { since, cursor, limit }) => {
+    const numItems = Math.min(Math.max(1, limit ?? 200), 500);
+    const res = await ctx.db
+      .query("articles")
+      .withIndex("by_updatedAt")
+      .order("desc")
+      .paginate({ cursor: cursor ?? null, numItems });
+    let depasse = false;
+    const articles = [];
+    for (const doc of res.page) {
+      if (typeof doc.updatedAt !== "number" || doc.updatedAt < since) {
+        depasse = true;
+        continue;
+      }
+      if (doc.hidden) continue;
+      articles.push({
+        id: doc.supabaseId ?? doc._id,
+        title: doc.title,
+        description: doc.description ?? null,
+        content: doc.content ?? null,
+        source: doc.source ?? null,
+        link: doc.link,
+        publishedAt: doc.publishedAt,
+        updatedAt: doc.updatedAt ?? null,
+        imageUrl: doc.imageUrl ?? null,
+        r2Url: doc.r2Url ?? null,
+        author: doc.author ?? null,
+        category: doc.category ?? null,
+      });
+    }
+    return {
+      articles,
+      cursor: res.continueCursor,
+      isDone: res.isDone || depasse,
     };
   },
 });
