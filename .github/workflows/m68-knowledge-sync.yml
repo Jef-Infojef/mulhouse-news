@@ -276,6 +276,25 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
+      # Offre Soléa au format GTFS (transport.data.gouv.fr) : arrêts, lignes,
+      # courses et horaires qui servent au calcul d'itinéraire. Hors index RAG,
+      # donc aucun embedding et pas de clé Jina.
+      #
+      # Le calculateur en ligne de Soléa traverse des phases où tout prend 18 à
+      # 22 s, cache serveur compris (3 requêtes abouties sur 60 le 2026-09-10) :
+      # les trajets se calculent désormais d'abord sur cette offre locale.
+      #
+      # Quotidien mais quasi gratuit : le script télécharge 4 Mo, compare
+      # feed_version et s'arrête en une seconde si l'offre est inchangée — elle ne
+      # bouge que quelques fois par an. Le passage sert aussi à garder l'import
+      # frais : au-delà de 30 jours le calculateur prévient dans les journaux,
+      # au-delà de 90 il refuse de répondre plutôt que de servir un horaire périmé.
+      - name: Sync offre Soléa (GTFS officiel m2A)
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/solea-gtfs-sync.ts
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+
       - name: Sync PDF isolés (via Vercel, IPs GitHub bloquées par mulhouse.fr)
         if: always() && github.event.schedule != '0 3 * * 3'
         run: |
