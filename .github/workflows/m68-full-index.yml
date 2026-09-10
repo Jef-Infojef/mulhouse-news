@@ -6,25 +6,15 @@ name: M68 Full Index
 # monuments/conseil municipal/emploi (France Travail), sources sans sync
 # quotidienne dédiée.
 #
-# Scindé en jobs parallèles (ciblés via --sources=) plutôt qu'un run
-# monolithique séquentiel : un run unique dépassait régulièrement la limite
-# de 2h (~45 sources dont plusieurs crawls lents — musées Puppeteer ~30 min
-# cumulées, emploi France Travail paginé et parfois lent) — confirmé le
-# 2026-07-24, run annulé par timeout après 2h00, bloqué ~24 min sur le
-# groupe emploi. Premier split en 5 groupes le même jour : 4/5 sont passés
-# largement sous les 60 min, mais "core" (shop/article/news_article/event/
-# document/magazine/city_page/wiki/landmark_directory/open_data/osm_poi/
-# outing) a lui-même timeout à 1h00 — probablement dominé par indexArticles
-# (tout l'historique presse, sans fenêtre temporelle, retraité intégralement
-# à chaque run). "core" re-scindé en 3 le même jour pour isoler ces sources
-# volumineuses les unes des autres. city_page n'est plus dans ce workflow :
-# le daily Vercel (knowledge-sync → /api/cron/city-sync) fait le même
-# lastmod, et mulhouse.fr bloque les IPs GitHub. runSource() (lib/rag/indexer.ts)
-# logue désormais la durée de chaque source individuellement pour affiner
-# ce découpage si besoin.
-# Chaque groupe a son propre budget de temps, un groupe lent ou en échec ne
-# bloque plus les autres. ensureFtsReady() (lib/rag/indexer.ts) est protégé
-# par un verrou advisory Postgres pour tolérer ces démarrages simultanés.
+# Groupes ciblés via --sources=, EN SÉRIE (max-parallel: 1).
+# Le split parallèle (2026-07-24) évitait le timeout 2h d'un job unique, mais
+# 4 groupes tapaient KnowledgeChunk en même temps : statement_timeout Aiven
+# en boucle, puis tuerie à 60 min (mesuré 2026-09-06, run 34021705536 —
+# core-articles / core-data / culture-tourisme / emploi). Un seul groupe à
+# la fois, chacun garde 60 min. Les groupes courts passent en premier pour
+# ne pas être coincés derrière un crawl UHA / France Travail.
+# city_page n'est plus ici : le daily Vercel (city-sync) fait le même lastmod,
+# et mulhouse.fr bloque les IPs GitHub.
 on:
   schedule:
     # Dimanche 4h UTC — index complet toutes sources + purge + embeddings
@@ -57,24 +47,25 @@ permissions:
 jobs:
   index:
     strategy:
-      # Un job en échec/timeout n'annule pas les autres groupes.
+      # Un timeout n'annule pas la file. max-parallel: 1 = un seul writer SQL.
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
-          - name: core-articles
-            sources: article,news_article
           - name: core-pages
             sources: wiki,landmark_directory
+          - name: administratif
+            sources: conseil_municipal_pdf,conseil_municipal_archive,library_page,library_event,airport_page,insee_profile
+          - name: musees
+            sources: museum_page,railway_page,electropolis_page,textile_museum_page,historical_museum_page,fine_arts_museum_page,mine_museum_page,wallpaper_museum_page,wesserling_page,kunsthalle_page,motoco_page,theatre_sinne_page,theatre_poche_ruelle_page,filature_page,temple_saint_etienne_page,noumatrouff_page,lentrepot_page
+          - name: core-articles
+            sources: article,news_article
           - name: core-data
             sources: shop,shop_social,event,document,magazine,open_data,osm_poi,outing
           - name: culture-tourisme
             sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory,demographics,association_directory,agglo_page,sivom_page,uha_page,universite_populaire_page,piscines_m2a
-          - name: musees
-            sources: museum_page,railway_page,electropolis_page,textile_museum_page,historical_museum_page,fine_arts_museum_page,mine_museum_page,wallpaper_museum_page,wesserling_page,kunsthalle_page,motoco_page,theatre_sinne_page,theatre_poche_ruelle_page,filature_page,temple_saint_etienne_page,noumatrouff_page,lentrepot_page
           - name: emploi
             sources: job_offer,labour_market_stats,territory_employment,employment_access,hiring_company,employment_event
-          - name: administratif
-            sources: conseil_municipal_pdf,conseil_municipal_archive,library_page,library_event,airport_page,insee_profile
     runs-on: ubuntu-latest
     timeout-minutes: 60
     name: Index (${{ matrix.name }})
