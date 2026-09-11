@@ -25,7 +25,6 @@ on:
       - Scrape Pharmacies de Garde
       - Keep-Alive
       - M68 Airport Sync
-      - M68 Full Index
       - M68 Library Catalog Sync
       - M68 Pages Changes Report
       - M68 Publish Scheduled

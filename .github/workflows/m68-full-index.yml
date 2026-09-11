@@ -43,6 +43,7 @@ env:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   index:
@@ -62,8 +63,10 @@ jobs:
             sources: article,news_article
           - name: core-data
             sources: shop,shop_social,event,document,magazine,open_data,osm_poi,outing
-          - name: culture-tourisme
-            sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory,demographics,association_directory,agglo_page,sivom_page,uha_page,universite_populaire_page,piscines_m2a
+          - name: tourisme-patrimoine
+            sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,piscines_m2a
+          - name: annuaires-territoire
+            sources: elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory,demographics,association_directory,agglo_page,sivom_page,uha_page,universite_populaire_page
           - name: emploi
             sources: job_offer,labour_market_stats,territory_employment,employment_access,hiring_company,employment_event
     runs-on: ubuntu-latest
@@ -113,3 +116,72 @@ jobs:
 
       - name: Calculer les embeddings manquants
         run: npx tsx scripts/rag-backfill-embeddings.ts
+
+  report:
+    needs: [index, embeddings]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mulhouse-news
+        uses: actions/checkout@v4
+
+      - name: Synthèse des durées et statuts des jobs
+        id: summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          # Récupérer les informations de chaque job via l'API GitHub
+          json=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" 2>/dev/null)
+          
+          # Formater la liste des jobs avec timer et statut
+          rapport=$(echo "$json" | jq -r '
+            .jobs[] |
+            select(.name != "report") |
+            (
+              if .conclusion == "success" then "✅"
+              elif .conclusion == "cancelled" then "⏱️ (timeout/annulé)"
+              elif .conclusion == "failure" then "❌"
+              else "⚪ \(.conclusion)"
+              end
+            ) as $status_icon |
+            (
+              if .started_at and .completed_at then
+                ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)) as $diff |
+                "\($diff / 60 | floor)m \($diff % 60)s"
+              else
+                "-"
+              end
+            ) as $duration |
+            "\($status_icon) \(.name) : \($duration)"
+          ')
+
+          has_failure=$(echo "$json" | jq -r '.jobs[] | select(.name != "report") | select(.conclusion != "success") | .name')
+          
+          if [ -z "$has_failure" ]; then
+            status="ok"
+            title="M68 Full Index — succès complet"
+          else
+            status="alerte"
+            title="M68 Full Index — terminé avec avertissements"
+          fi
+
+          {
+            echo "STATUS=$status"
+            echo "TITLE=$title"
+            echo "BODY<<EOF"
+            echo "Détail de l'indexation hebdomadaire :"
+            echo "$rapport"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notification Telegram
+        uses: ./.github/actions/telegram
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: ${{ steps.summary.outputs.STATUS }}
+          title: ${{ steps.summary.outputs.TITLE }}
+          body: ${{ steps.summary.outputs.BODY }}
