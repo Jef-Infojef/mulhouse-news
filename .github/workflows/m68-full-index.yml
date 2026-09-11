@@ -66,7 +66,11 @@ jobs:
           - name: tourisme-patrimoine
             sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,piscines_m2a
           - name: annuaires-territoire
-            sources: elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory,demographics,association_directory,agglo_page,sivom_page,uha_page,universite_populaire_page
+            sources: elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory,demographics,association_directory,agglo_page,sivom_page
+          - name: uha
+            sources: uha_page
+          - name: universite-populaire
+            sources: universite_populaire_page
           - name: emploi
             sources: job_offer,labour_market_stats,territory_employment,employment_access,hiring_company,employment_event
     runs-on: ubuntu-latest
