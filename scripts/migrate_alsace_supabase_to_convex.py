@@ -5,9 +5,13 @@ dans Convex (CONVEX_DEPLOY_KEY + NEXT_PUBLIC_CONVEX_URL) via
 `convex_client.upsert_article`. La déduplication par lien est gérée côté
 Convex (upsert), donc relancer est sûr (idempotent).
 
+La source écrite est celle de Supabase, telle quelle. Les articles encore
+étiquetés « L'Alsace (archive) » côté Supabase sont ramenés sous « L'Alsace »
+par `repair_alsace_articles.py`, qui en profite pour compléter titre et photo.
+
 Usage :
     USE_CONVEX=1 python scripts/migrate_alsace_supabase_to_convex.py
-    USE_CONVEX=1 python scripts/migrate_alsace_supabase_to_convex.py --source "L'Alsace (archive)"
+    USE_CONVEX=1 python scripts/migrate_alsace_supabase_to_convex.py --limit 500
 """
 
 import argparse

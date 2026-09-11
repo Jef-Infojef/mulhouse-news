@@ -21,6 +21,12 @@ Usage :
     python scripts/fix_alsace_slug_titles.py --reprendre        # reprise checkpoint
     python scripts/fix_alsace_slug_titles.py --from 3550        # saut manuel
     python scripts/fix_alsace_slug_titles.py --workers 8        # plus de parallélisme
+    python scripts/fix_alsace_slug_titles.py --source "L'Alsace (archive)"   # ancien libellé
+
+Depuis que `scrape_alsace_archive.py` lit la page à l'insertion, les titres
+arrivent déjà accentués : ce script ne sert plus qu'au stock antérieur. Pour
+réparer titre ET photo en une seule requête HTTP, préférer
+`repair_alsace_articles.py`.
 
 Backend : Convex uniquement (CONVEX_DEPLOY_KEY + NEXT_PUBLIC_CONVEX_URL requis,
 et la query `scrapers:getArticleTitlesPage` déployée — repli sur lectures
@@ -51,7 +57,10 @@ import convex_client
 load_dotenv(".env.local")
 load_dotenv()
 
-SOURCE_ARCHIVE = "L'Alsace (archive)"
+# Les articles issus du sitemap sont désormais insérés sous « L'Alsace », comme
+# ceux du flux RSS. L'ancien libellé reste accepté via --source tant que des
+# enregistrements n'ont pas été repris par repair_alsace_articles.py.
+SOURCE_DEFAULT = "L'Alsace"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 CHECKPOINT_FILE = ".fix_alsace_titles_progress.json"
 
@@ -203,6 +212,8 @@ def main() -> None:
                         help="Ignore les N premiers candidats de la liste (reprise)")
     parser.add_argument("--reprendre", action="store_true",
                         help="Reprend depuis le checkpoint du run précédent (fichier de progression)")
+    parser.add_argument("--source", type=str, default=SOURCE_DEFAULT,
+                        help=f"Source à balayer (défaut « {SOURCE_DEFAULT} »)")
     parser.add_argument("--workers", type=int, default=5, help="Threads parallèles (défaut 5)")
     parser.add_argument("--sleep", type=float, default=0.2, help="Pause par thread entre deux requêtes HTTP (s)")
     parser.add_argument("--timeout", type=float, default=30.0, help="Timeout HTTP par requête (s)")
@@ -224,11 +235,11 @@ def main() -> None:
         sys.exit(1)
     print(f"[*] Backend : Convex (cloud) — {convex_client.get_convex_url()}")
 
-    print(f"[*] Liste des titres {SOURCE_ARCHIVE}…")
-    rows = list_rows_fast(SOURCE_ARCHIVE)
+    print(f"[*] Liste des titres {args.source}…")
+    rows = list_rows_fast(args.source)
     if rows is None:
         print("[*] Repli sur les lectures unitaires (déployer scrapers:getArticleTitlesPage pour accélérer)…")
-        rows = list_rows_slow(SOURCE_ARCHIVE)
+        rows = list_rows_slow(args.source)
     print(f"[*] {len(rows)} articles d'archive")
 
     candidates = [r for r in rows if looks_slug_derived(r.get("title"))]

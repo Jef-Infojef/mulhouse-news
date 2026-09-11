@@ -184,6 +184,94 @@ def ebra_target_url(url: str, alsace_cookies_active: bool) -> str:
     return url
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Métadonnées d'une page EBRA (L'Alsace, DNA…) depuis le HTML déjà téléchargé.
+#
+# Les sitemaps quotidiens ne fournissent ni titre ni photo : sans cette lecture,
+# les articles découverts par `scrape_alsace_archive.py` restaient avec un titre
+# dérivé du slug (sans accents) et `imageUrl` vide — donc affichés avec la
+# favicon Google par ArticleCard. Le HTML est de toute façon téléchargé pour le
+# contrôle du fil d'Ariane (`html_is_mulhouse_edition`) : l'extraction est
+# gratuite en requêtes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Seules les photos du CDN L'Alsace sont exploitables. `ALS_placeholder.png`
+# (cdn-files.prsmedia.fr) est l'og:image servi par défaut quand l'article n'a
+# pas de photo : l'enregistrer reviendrait à afficher un gris vide.
+EBRA_CDN_IMAGE_RE = re.compile(r"^https://cdn-s-www\.(?:lalsace|dna|estrepublicain|vosgesmatin)\.fr/images/", re.I)
+
+_OG_META_RES = {
+    "title": "og:title",
+    "description": "og:description",
+    "image": "og:image",
+    "image_alt": "og:image:alt",
+}
+
+# Suffixe de site ajouté par EBRA aux og:title (« … | L'Alsace »).
+_TITLE_SITE_SUFFIX_RE = re.compile(r"\s*[|]\s*(?:L'Alsace|DNA|Est Républicain|Vosges Matin)\s*$", re.I)
+
+
+def _og_content(soup: BeautifulSoup, prop: str) -> str | None:
+    tag = soup.find("meta", property=prop)
+    if not tag:
+        tag = soup.find("meta", attrs={"name": prop})
+    value = (tag.get("content") if tag else None) or ""
+    value = htmllib.unescape(value).strip()
+    return re.sub(r"\s+", " ", value) or None
+
+
+def parse_ebra_page_meta(html: str, url: str = "") -> dict:
+    """Titre, description, photo et métadonnées éditoriales d'une page EBRA.
+
+    Retourne un dict aux clés `title`, `description`, `image_url`,
+    `image_caption`, `author`, `category`, `published_at_iso` — chacune à None
+    si absente ou non exploitable. Ne lève jamais : un HTML tronqué ou une page
+    d'erreur renvoie simplement des valeurs vides, l'appelant garde ses valeurs
+    de repli (titre dérivé du slug, lastmod du sitemap).
+    """
+    meta = {
+        "title": None,
+        "description": None,
+        "image_url": None,
+        "image_caption": None,
+        "author": None,
+        "category": None,
+        "published_at_iso": None,
+    }
+    if not html:
+        return meta
+
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return meta
+
+    title = _og_content(soup, _OG_META_RES["title"])
+    if not title and soup.title and soup.title.string:
+        title = re.sub(r"\s+", " ", htmllib.unescape(soup.title.string)).strip() or None
+    if title:
+        title = _TITLE_SITE_SUFFIX_RE.sub("", title).strip() or None
+    meta["title"] = title
+
+    meta["description"] = _og_content(soup, _OG_META_RES["description"])
+
+    image = _og_content(soup, _OG_META_RES["image"])
+    if image and EBRA_CDN_IMAGE_RE.match(image):
+        meta["image_url"] = image
+        # La légende de l'og:image est souvent vide ; extract_image_caption sait
+        # remonter celle du <figcaption> à partir de l'URL de la photo.
+        meta["image_caption"] = (
+            _clean_caption(_og_content(soup, _OG_META_RES["image_alt"]))
+            or extract_image_caption(soup, url, image)
+        )
+
+    data_layer = parse_ebra_datalayer(html)
+    meta["author"] = data_layer.get("author")
+    meta["category"] = data_layer.get("category")
+    meta["published_at_iso"] = data_layer.get("published_at_iso")
+    return meta
+
+
 def _clean_caption(text: str | None) -> str | None:
     if not text:
         return None

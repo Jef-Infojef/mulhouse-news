@@ -6,8 +6,17 @@ directement l'index de sitemaps du site :
 → ~6 340 sitemaps journaliers `sitemap-YYYY-MM-DD.xml`, chacun contenant
   l'ensemble des URLs publiées ce jour-là (dont les plus anciennes).
 
-Les articles détectés (titre dérivé du slug, publishedAt = lastmod) sont
-insérés avec content = NULL ; le contenu est ensuite rempli par
+Pour chaque article réellement nouveau, la page est ouverte afin d'en lire les
+métadonnées (`parse_ebra_page_meta`) : vrai titre accentué, description,
+**photo `og:image`**, légende, auteur, rubrique et date de publication réelle.
+Sans cette lecture, le sitemap ne fournit qu'un titre dérivé du slug et aucune
+image — et rien en aval ne les répare (`scrape_content_full.py` ne patche pas
+`imageUrl`). En mode `--check-page`, la page est déjà téléchargée pour le
+contrôle du fil d'Ariane : l'enrichissement ne coûte alors aucune requête.
+
+Les articles sont insérés sous la source `L'Alsace`, comme ceux du flux RSS de
+`scrape_and_seed.py` : seul le canal de découverte diffère, pas le journal. Ils
+le sont avec content = NULL ; le contenu est ensuite rempli par
 `scrape_content_full.py --archive` (API GRDC + cookie EBRA).
 
 Usage :
@@ -41,12 +50,21 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import convex_client
-from scrape_utils import html_is_mulhouse_edition, is_mulhouse_url
+from scrape_utils import html_is_mulhouse_edition, is_mulhouse_url, parse_ebra_page_meta
 
+# .env.local d'abord (c'est là que vivent les clés Convex en local), .env en
+# complément. Sans cela, le script annonçait « Backend : Convex si les clés sont
+# définies » mais ne les voyait jamais hors CI et retombait silencieusement sur
+# Supabase — même ordre de chargement que les autres scripts Convex.
+load_dotenv(".env.local")
 load_dotenv()
 
 SITEMAP_INDEX = "https://www.lalsace.fr/sitemap-index.xml"
-SOURCE = "L'Alsace (archive)"
+# Source unique pour tout lalsace.fr : le libellé « L'Alsace (archive) » d'origine
+# séparait artificiellement les articles selon leur canal de découverte
+# (sitemap vs RSS de scrape_and_seed.py) alors qu'il s'agit du même journal.
+# Le stock inséré sous l'ancien libellé est repris par repair_alsace_articles.py.
+SOURCE = "L'Alsace"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
 # URLs déjà ouvertes et hors édition Mulhouse : ne pas re-HTTP à chaque cron 15 min
@@ -61,7 +79,7 @@ def title_from_slug(slug: str) -> str:
     return " ".join(words).strip().capitalize() if words else "Sans titre"
 
 
-def fetch_sitemap(url: str) -> str | None:
+def fetch_url(url: str) -> str | None:
     for attempt in range(3):
         try:
             resp = curl_requests.get(url, timeout=30, impersonate="chrome110", headers={"User-Agent": UA})
@@ -74,8 +92,41 @@ def fetch_sitemap(url: str) -> str | None:
     return None
 
 
+def enrich_from_page(entry: dict, html: str | None) -> dict:
+    """Complète une entrée de sitemap avec les métadonnées de sa page.
+
+    Le sitemap ne donne que `<loc>` et `<lastmod>` : sans cette lecture, les
+    articles étaient insérés avec un titre dérivé du slug (sans accents), sans
+    description et surtout **sans `imageUrl`** — donc rendus avec la favicon
+    Google par ArticleCard, jamais réparés ensuite (scrape_content_full.py ne
+    patche pas `imageUrl`).
+
+    Les valeurs du sitemap restent le repli : une page injoignable ou sans
+    `og:image` n'empêche pas l'insertion, le rattrapage la corrigera plus tard.
+    """
+    enriched = dict(entry)
+    meta = parse_ebra_page_meta(html or "", entry["link"])
+    if meta["title"]:
+        enriched["title"] = meta["title"]
+    for key, meta_key in (("description", "description"), ("imageUrl", "image_url"),
+                          ("imageCaption", "image_caption"), ("author", "author"),
+                          ("category", "category")):
+        if meta[meta_key]:
+            enriched[key] = meta[meta_key]
+    # La date du dataLayer est la vraie date de publication ; `lastmod` bouge à
+    # chaque retouche de l'article et le ferait remonter en tête de la home.
+    if meta["published_at_iso"]:
+        try:
+            enriched["publishedAt"] = datetime.fromisoformat(
+                meta["published_at_iso"].replace("Z", "+00:00")
+            )
+        except ValueError:
+            pass
+    return enriched
+
+
 def list_daily_sitemaps(start: date, end: date) -> list[str]:
-    xml = fetch_sitemap(SITEMAP_INDEX)
+    xml = fetch_url(SITEMAP_INDEX)
     if not xml:
         raise RuntimeError("Impossible de récupérer l'index de sitemaps")
     urls = re.findall(r"<loc>(https://www\.lalsace\.fr/sitemap-(\d{4}-\d{2}-\d{2})\.xml)</loc>", xml)
@@ -201,12 +252,17 @@ def lookup_existing(use_convex: bool, cur, links: list[str]) -> set[str]:
 
 
 def insert_sql(cur, conn, row: dict) -> bool:
+    # `author` et `category` n'existent que dans le schéma Convex : la table
+    # Supabase "Article" (prisma/schema.prisma) ne les a pas. Elles sont donc
+    # volontairement absentes de cet INSERT.
     cur.execute(
         """
-        INSERT INTO "Article" (id, title, link, source, "publishedAt", "updatedAt")
-        VALUES (gen_random_uuid(), %s, %s, %s, %s, NOW())
+        INSERT INTO "Article" (id, title, link, source, description, "imageUrl",
+                               "imageCaption", "publishedAt", "updatedAt")
+        VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, %s, %s, NOW())
         """,
-        (row["title"], row["link"], SOURCE, row["publishedAt"]),
+        (row["title"], row["link"], SOURCE, row.get("description"), row.get("imageUrl"),
+         row.get("imageCaption"), row["publishedAt"]),
     )
     conn.commit()
     return True
@@ -253,9 +309,11 @@ def main():
     rejected = {} if args.dry_run else load_rejected_urls(use_convex, cur)
     check_skipped_cache = 0
     check_fetched = 0
+    meta_fetched = 0
+    with_image = 0
 
     for i, sm_url in enumerate(sitemaps, 1):
-        xml = fetch_sitemap(sm_url)
+        xml = fetch_url(sm_url)
         if not xml:
             errors += 1
             continue
@@ -279,9 +337,12 @@ def main():
                     to_fetch.append(e)
                 kept_page = 0
                 for j, e in enumerate(to_fetch, 1):
-                    html = fetch_sitemap(e["link"])
+                    html = fetch_url(e["link"])
                     check_fetched += 1
                     if html and html_is_mulhouse_edition(html):
+                        # Page déjà en main pour le fil d'Ariane : on en tire
+                        # aussi titre/photo, sans requête supplémentaire.
+                        e["_html"] = html
                         entries.append(e)
                         kept_page += 1
                         rejected.pop(e["link"], None)
@@ -307,12 +368,26 @@ def main():
             if e["link"] in existing or (args.limit and inserted >= args.limit):
                 skipped += 1
                 continue
+            # Lecture de la page uniquement pour ce qui va réellement être
+            # inséré (les doublons ont été écartés juste au-dessus). En mode
+            # --check-page le HTML est déjà là : aucune requête en plus.
+            html = e.pop("_html", None)
+            if html is None:
+                html = fetch_url(e["link"])
+                meta_fetched += 1
+                time.sleep(random.uniform(0.25, 0.55))
+            e = enrich_from_page(e, html)
             try:
                 if use_convex:
                     convex_client.upsert_article({
                         "title": e["title"],
                         "link": e["link"],
                         "source": SOURCE,
+                        "description": e.get("description"),
+                        "imageUrl": e.get("imageUrl"),
+                        "imageCaption": e.get("imageCaption"),
+                        "author": e.get("author"),
+                        "category": e.get("category"),
                         "publishedAt": int(e["publishedAt"].timestamp() * 1000) if e["publishedAt"] else None,
                         "updatedAt": int(time.time() * 1000),
                         "supabaseId": str(uuid.uuid4()),
@@ -320,6 +395,8 @@ def main():
                 else:
                     insert_sql(cur, conn, e)
                 inserted += 1
+                if e.get("imageUrl"):
+                    with_image += 1
             except Exception as ex:
                 errors += 1
                 print(f"    [!] Insertion échouée ({e['link']}): {ex}")
@@ -333,6 +410,11 @@ def main():
 
     label = "candidats" if args.dry_run else "articles insérés"
     print(f"\n[*] TERMINÉ : {inserted} {label}, {skipped} déjà présents/ignorés, {errors} erreurs.")
+    if not args.dry_run:
+        print(
+            f"[*] Métadonnées : {with_image}/{inserted} insérés avec photo "
+            f"({meta_fetched} pages ouvertes en plus du fil d'Ariane)"
+        )
     if args.check_page:
         print(
             f"[*] Fil d'Ariane : {check_fetched} pages ouvertes, "
@@ -345,9 +427,19 @@ def main():
         try:
             details = json.dumps({"sitemaps": len(sitemaps), "skipped": skipped, "errors": errors})
             if use_convex:
-                convex_client.insert_scraping_log(start_time, datetime.now(), status="SUCCESS",
-                                                  articles_count=len(sitemaps), success_count=inserted,
-                                                  error_count=errors, details=details)
+                # `insert_scraping_log(started_at, status, *, finished_at=…)` :
+                # passer la date de fin en 2e positionnel l'envoyait sur `status`,
+                # et le run échouait à se journaliser dès qu'il insérait quelque
+                # chose. Mêmes mots-clés que les autres scrapers.
+                convex_client.insert_scraping_log(
+                    started_at=start_time,
+                    finished_at=datetime.now(),
+                    status="SUCCESS",
+                    articles_count=len(sitemaps),
+                    success_count=inserted,
+                    error_count=errors,
+                    details=details,
+                )
             else:
                 cur.execute("""
                     INSERT INTO "ScrapingLog" (id, "startedAt", "finishedAt", status, "articlesCount", "successCount", "errorCount", details)

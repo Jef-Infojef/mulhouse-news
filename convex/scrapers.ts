@@ -315,6 +315,54 @@ export const getArticleLinks = query({
   },
 });
 
+// Articles L'Alsace à réparer, du PLUS RÉCENT au plus ancien
+// (repair_alsace_articles.py). L'ordre compte : la home n'affiche que les plus
+// récents, donc un run plafonné doit les traiter d'abord — ce que ni
+// `by_source` ni la pagination brute de table ne garantissent.
+//
+// Deux motifs de réparation :
+//  • `source` encore à l'ancien libellé « L'Alsace (archive) » ;
+//  • `imageUrl` absent (article inséré depuis le sitemap avant lecture de page).
+//
+// Scan indexé (by_publishedAt desc) + filtre JS : `source` et `imageUrl` ne
+// partagent pas d'index composé. La pagination borne chaque exécution — ne pas
+// monter `limit` trop haut, les `content` HTML comptent dans les 16 Mo lus.
+export const getArticlesToRepairPage = query({
+  args: {
+    sources: v.array(v.string()),
+    legacySource: v.string(),
+    cursor: v.optional(v.union(v.null(), v.string())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { sources, legacySource, cursor, limit }) => {
+    const numItems = Math.min(Math.max(1, limit ?? 200), 500);
+    const res = await ctx.db
+      .query("articles")
+      .withIndex("by_publishedAt")
+      .order("desc")
+      .paginate({ cursor: cursor ?? null, numItems });
+    const articles = [];
+    for (const doc of res.page) {
+      if (!doc.source || !sources.includes(doc.source)) continue;
+      const needsSource = doc.source === legacySource;
+      const needsImage = doc.imageUrl === undefined || doc.imageUrl === null || doc.imageUrl === "";
+      if (!needsSource && !needsImage) continue;
+      articles.push({
+        link: doc.link,
+        source: doc.source,
+        needsSource,
+        needsImage,
+        publishedAt: doc.publishedAt,
+      });
+    }
+    return {
+      articles,
+      cursor: res.continueCursor,
+      isDone: res.isDone,
+    };
+  },
+});
+
 // Titres + liens paginés (SANS content) — backfill de correction des titres
 // slugifiés (fix_alsace_slug_titles.py) : une pagination légère remplace une
 // lecture unitaire par article.
@@ -333,7 +381,14 @@ export const getArticleTitlesPage = query({
           .paginate({ cursor: cursor ?? null, numItems })
       : await ctx.db.query("articles").paginate({ cursor: cursor ?? null, numItems });
     return {
-      articles: page.page.map((doc) => ({ link: doc.link, title: doc.title })),
+      // `imageUrl` permet aux scripts de rattrapage de repérer les articles sans
+      // photo sans relire la table via news_bridge:getArticlesPage (qui ramène
+      // aussi les `content` HTML volumineux).
+      articles: page.page.map((doc) => ({
+        link: doc.link,
+        title: doc.title,
+        imageUrl: doc.imageUrl ?? null,
+      })),
       cursor: page.continueCursor,
       isDone: page.isDone,
     };

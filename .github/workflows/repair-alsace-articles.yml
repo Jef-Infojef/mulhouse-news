@@ -1,0 +1,86 @@
+name: Repair L'Alsace articles
+
+# Deux usages :
+#  • le cron quotidien répare les articles RÉCENTS (ordre 'recent') : filet de
+#    sécurité pour les insertions dont la lecture de page a échoué, puisque
+#    c'est ce que la home affiche ;
+#  • le déclenchement manuel en ordre 'source' écoule le stock d'archive
+#    (~100 000 articles encore sous « L'Alsace (archive) »), par tranches, avec
+#    reprise sur checkpoint.
+#
+# Volontairement HORS de scrape-news.yml (cron 15 min) : lister les candidats
+# pagine la table des articles, un coût d'I/O Convex à ne pas payer 96 fois par
+# jour (cf. la note de cadence en tête de scrape-news.yml).
+
+on:
+  schedule:
+    - cron: '40 5 * * *'
+  workflow_dispatch:
+    inputs:
+      order:
+        description: "Ordre : 'recent' (home d'abord) ou 'source' (stock d'archive)"
+        required: false
+        default: 'recent'
+        type: choice
+        options:
+          - recent
+          - source
+      limit:
+        description: 'Nombre max d''articles (0 = tout)'
+        required: false
+        default: '500'
+      dry_run:
+        description: 'Sonder sans écrire'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Deux runs simultanés répareraient les mêmes articles : inutile et coûteux.
+  group: repair-alsace-articles
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install beautifulsoup4 curl_cffi lxml python-dotenv requests
+
+      - name: Repair L'Alsace articles
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
+          USE_CONVEX: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          ORDER='${{ inputs.order || 'recent' }}'
+          LIMIT='${{ inputs.limit || '500' }}'
+          ARGS="--order $ORDER --limit $LIMIT --workers 6"
+          if [ "$ORDER" = 'source' ]; then
+            # Stock d'archive : on ne balaie que l'ancienne source. Ajouter la
+            # population « L'Alsace sans photo » paginerait en plus les dizaines
+            # de milliers d'articles déjà migrés, pour rien — le cron 'recent'
+            # s'en charge, et un article réparé sort de lui-même de la liste.
+            ARGS="$ARGS --only-legacy"
+          fi
+          if [ '${{ inputs.dry_run }}' = 'true' ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "Arguments : $ARGS"
+          python scripts/repair_alsace_articles.py $ARGS

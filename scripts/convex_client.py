@@ -202,9 +202,10 @@ def get_article_links(source: str | None = None, limit: int = 500) -> list[str]:
 
 
 def get_article_titles(source: str | None = None, limit: int = 500) -> list[dict]:
-    """Tous les {link, title} d'articles, paginé (filtre source optionnel).
-    Sans content : ~100x plus léger que getArticlesPage. Requiert la query
-    `scrapers:getArticleTitlesPage` (déployer les fonctions Convex avant use)."""
+    """Tous les {link, title, imageUrl} d'articles, paginé (filtre source
+    optionnel). Sans content : ~100x plus léger que getArticlesPage. Requiert la
+    query `scrapers:getArticleTitlesPage` (déployer les fonctions Convex avant
+    usage ; `imageUrl` est absent des déploiements antérieurs)."""
     rows: list[dict] = []
     cursor: str | None = None
     while True:
@@ -218,6 +219,38 @@ def get_article_titles(source: str | None = None, limit: int = 500) -> list[dict
             break
         cursor = res["cursor"]
     return rows
+
+
+def get_articles_to_repair(
+    sources: list[str],
+    legacy_source: str,
+    limit: int = 200,
+    max_articles: int = 0,
+) -> list[dict]:
+    """Articles L'Alsace à réparer, du plus récent au plus ancien.
+
+    Chaque page est un scan indexé borné (by_publishedAt desc) : `max_articles`
+    permet d'arrêter la pagination dès qu'on en a assez, sans parcourir les
+    ~100 000 articles d'archive.
+    """
+    rows: list[dict] = []
+    cursor: str | None = None
+    while True:
+        res = _call(
+            "scrapers:getArticlesToRepairPage",
+            {
+                "sources": sources,
+                "legacySource": legacy_source,
+                "cursor": cursor,
+                "limit": limit,
+            },
+            mutation=False,
+        )
+        rows.extend(res["articles"])
+        if res["isDone"] or (max_articles and len(rows) >= max_articles):
+            break
+        cursor = res["cursor"]
+    return rows[:max_articles] if max_articles else rows
 
 
 def get_article_by_title_recent(title: str, hours: int = 48) -> dict | None:
