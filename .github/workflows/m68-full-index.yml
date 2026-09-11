@@ -54,19 +54,35 @@ jobs:
       matrix:
         include:
           - name: wikipedia
-            sources: wiki,landmark_directory
-          - name: conseil-municipal
-            sources: conseil_municipal_pdf,conseil_municipal_archive
-          - name: bibliotheques
-            sources: library_page,library_event
+            sources: wiki
+          - name: monuments-emblematiques
+            sources: landmark_directory
+          - name: conseil-municipal-recent
+            sources: conseil_municipal_pdf
+          - name: conseil-municipal-archives
+            sources: conseil_municipal_archive
+          - name: bibliotheques-pages
+            sources: library_page
+          - name: bibliotheques-agenda
+            sources: library_event
           - name: euroairport
             sources: airport_page
-          - name: insee-stats
-            sources: demographics,insee_profile
-          - name: associations
+          - name: insee-demographie
+            sources: demographics
+          - name: insee-profil-eco
+            sources: insee_profile
+          - name: associations-rna
             sources: association_directory
-          - name: annuaires-publics
-            sources: elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory
+          - name: elus-repertoire
+            sources: elected_officials
+          - name: boites-aux-lettres
+            sources: mailbox_directory
+          - name: bureaux-de-poste
+            sources: post_office_directory
+          - name: repertoire-rues-ban
+            sources: street_directory
+          - name: quartiers-mulhouse
+            sources: quartier_directory
           - name: cite-du-train
             sources: railway_page
           - name: electropolis
@@ -85,8 +101,14 @@ jobs:
             sources: historical_museum_page
           - name: musee-mine
             sources: mine_museum_page
-          - name: musees-art-contemporain
-            sources: museum_page,kunsthalle_page,motoco_page,temple_saint_etienne_page
+          - name: musees-portail
+            sources: museum_page
+          - name: kunsthalle
+            sources: kunsthalle_page
+          - name: motoco
+            sources: motoco_page
+          - name: temple-saint-etienne
+            sources: temple_saint_etienne_page
           - name: la-filature
             sources: filature_page
           - name: theatre-sinne
@@ -97,8 +119,16 @@ jobs:
             sources: noumatrouff_page
           - name: lentrepot
             sources: lentrepot_page
-          - name: tourisme-patrimoine
-            sources: tourism_page,bilingual_plaque,street_art_page,radio_directory,piscines_m2a
+          - name: office-tourisme
+            sources: tourism_page
+          - name: plaques-bilingues
+            sources: bilingual_plaque
+          - name: street-art
+            sources: street_art_page
+          - name: piscines-m2a
+            sources: piscines_m2a
+          - name: radios-locales
+            sources: radio_directory
           - name: m2a-agglo
             sources: agglo_page
           - name: sivom
@@ -107,12 +137,34 @@ jobs:
             sources: uha_page
           - name: universite-populaire
             sources: universite_populaire_page
-          - name: presse-articles
-            sources: article,news_article
-          - name: commerces-sorties
-            sources: shop,shop_social,event,document,magazine,open_data,osm_poi,outing
-          - name: emploi
-            sources: job_offer,labour_market_stats,territory_employment,employment_access,hiring_company,employment_event
+          - name: presse-actualites
+            sources: news_article
+          - name: presse-articles-locaux
+            sources: article
+          - name: commerces-locaux
+            sources: shop
+          - name: commerces-reseaux-sociaux
+            sources: shop_social
+          - name: agenda-evenements
+            sources: event
+          - name: documents-publics
+            sources: document
+          - name: magazines-mplus
+            sources: magazine
+          - name: open-data-territoire
+            sources: open_data
+          - name: points-interet-osm
+            sources: osm_poi
+          - name: sorties-agenda
+            sources: outing
+          - name: emploi-offres
+            sources: job_offer
+          - name: emploi-stats-marche
+            sources: labour_market_stats
+          - name: emploi-territoire-acces
+            sources: territory_employment,employment_access
+          - name: emploi-entreprises-recrutement
+            sources: hiring_company,employment_event
     runs-on: ubuntu-latest
     timeout-minutes: 60
     name: Index (${{ matrix.name }})
