@@ -53,14 +53,40 @@ jobs:
       max-parallel: 1
       matrix:
         include:
-          - name: core-pages
+          - name: wikipedia
             sources: wiki,landmark_directory
-          - name: administratif
-            sources: conseil_municipal_pdf,conseil_municipal_archive,library_page,library_event,airport_page,insee_profile
+          - name: conseil-municipal
+            sources: conseil_municipal_pdf,conseil_municipal_archive
+          - name: bibliotheques
+            sources: library_page,library_event
+          - name: euroairport
+            sources: airport_page
+          - name: insee-stats
+            sources: demographics,insee_profile
+          - name: associations
+            sources: association_directory
+          - name: annuaires-publics
+            sources: elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory
           - name: cite-du-train
             sources: railway_page
           - name: electropolis
             sources: electropolis_page
+          - name: zoo-mulhouse
+            sources: zoo_page
+          - name: wesserling
+            sources: wesserling_page
+          - name: musee-textile
+            sources: textile_museum_page
+          - name: musee-papier-peint
+            sources: wallpaper_museum_page
+          - name: musee-beaux-arts
+            sources: fine_arts_museum_page
+          - name: musee-historique
+            sources: historical_museum_page
+          - name: musee-mine
+            sources: mine_museum_page
+          - name: musees-art-contemporain
+            sources: museum_page,kunsthalle_page,motoco_page,temple_saint_etienne_page
           - name: la-filature
             sources: filature_page
           - name: theatre-sinne
@@ -71,16 +97,8 @@ jobs:
             sources: noumatrouff_page
           - name: lentrepot
             sources: lentrepot_page
-          - name: musees-patrimoine
-            sources: museum_page,textile_museum_page,historical_museum_page,fine_arts_museum_page,mine_museum_page,wallpaper_museum_page,wesserling_page,kunsthalle_page,motoco_page,temple_saint_etienne_page
-          - name: core-articles
-            sources: article,news_article
-          - name: core-data
-            sources: shop,shop_social,event,document,magazine,open_data,osm_poi,outing
           - name: tourisme-patrimoine
-            sources: tourism_page,bilingual_plaque,zoo_page,street_art_page,radio_directory,piscines_m2a
-          - name: annuaires-territoire
-            sources: elected_officials,mailbox_directory,post_office_directory,street_directory,quartier_directory,demographics,association_directory
+            sources: tourism_page,bilingual_plaque,street_art_page,radio_directory,piscines_m2a
           - name: m2a-agglo
             sources: agglo_page
           - name: sivom
@@ -89,6 +107,10 @@ jobs:
             sources: uha_page
           - name: universite-populaire
             sources: universite_populaire_page
+          - name: presse-articles
+            sources: article,news_article
+          - name: commerces-sorties
+            sources: shop,shop_social,event,document,magazine,open_data,osm_poi,outing
           - name: emploi
             sources: job_offer,labour_market_stats,territory_employment,employment_access,hiring_company,employment_event
     runs-on: ubuntu-latest
