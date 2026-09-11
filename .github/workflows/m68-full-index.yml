@@ -161,10 +161,14 @@ jobs:
             sources: job_offer
           - name: emploi-stats-marche
             sources: labour_market_stats
-          - name: emploi-territoire-acces
-            sources: territory_employment,employment_access
-          - name: emploi-entreprises-recrutement
-            sources: hiring_company,employment_event
+          - name: emploi-territoire
+            sources: territory_employment
+          - name: emploi-acces
+            sources: employment_access
+          - name: emploi-entreprises
+            sources: hiring_company
+          - name: emploi-evenements
+            sources: employment_event
     runs-on: ubuntu-latest
     timeout-minutes: 60
     name: Index (${{ matrix.name }})
