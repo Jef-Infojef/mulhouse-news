@@ -71,16 +71,18 @@ jobs:
         run: |
           ORDER='${{ inputs.order || 'recent' }}'
           LIMIT='${{ inputs.limit || '500' }}'
-          ARGS="--order $ORDER --limit $LIMIT --workers 6"
+          # Tableau bash plutôt qu'une chaîne : pas de découpage de mots à la
+          # volée, donc pas de SC2086 au passage d'actionlint.
+          ARGS=(--order "$ORDER" --limit "$LIMIT" --workers 6)
           if [ "$ORDER" = 'source' ]; then
             # Stock d'archive : on ne balaie que l'ancienne source. Ajouter la
             # population « L'Alsace sans photo » paginerait en plus les dizaines
             # de milliers d'articles déjà migrés, pour rien — le cron 'recent'
             # s'en charge, et un article réparé sort de lui-même de la liste.
-            ARGS="$ARGS --only-legacy"
+            ARGS+=(--only-legacy)
           fi
           if [ '${{ inputs.dry_run }}' = 'true' ]; then
-            ARGS="$ARGS --dry-run"
+            ARGS+=(--dry-run)
           fi
-          echo "Arguments : $ARGS"
-          python scripts/repair_alsace_articles.py $ARGS
+          echo "Arguments : ${ARGS[*]}"
+          python scripts/repair_alsace_articles.py "${ARGS[@]}"
