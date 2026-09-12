@@ -3,6 +3,12 @@
 import { convex } from '@/lib/prisma'
 import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
+import {
+  hasAivenNews,
+  fetchAivenLatestArticles,
+  fetchAivenArticleContent,
+  setAivenArticleHidden,
+} from '@/lib/aiven-news'
 import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { createAdminSession, isAdminAuthenticated, safeEqual } from '@/lib/adminAuth'
@@ -90,7 +96,12 @@ const errorMessage = (error: unknown): string =>
 export async function getLatestArticles(query?: string) {
   try {
     const trimmed = query?.trim()
-    const { articles } = await convex.query(api.app.getLatestArticles, trimmed ? { query: trimmed } : {})
+    // L'Aiven d'abord : c'est la seule base que les scrapers tiennent à jour
+    // quoi qu'il arrive à Convex, coupé pour quota le 11/09/2026 — cette page
+    // affichait « Aucun article trouvé » pendant que la collecte continuait.
+    const articles = hasAivenNews()
+      ? await fetchAivenLatestArticles(trimmed)
+      : (await convex.query(api.app.getLatestArticles, trimmed ? { query: trimmed } : {})).articles
 
     const mapped = (articles ?? []).map((article) => ({
       ...article,
@@ -152,7 +163,12 @@ export async function getLatestArticles(query?: string) {
 export async function getArticleContent(id: string) {
   if (!(await isAdminAuthenticated())) return { content: null, error: 'Non autorisé' }
   try {
-    // `id` est l'id Convex de l'article (celui renvoyé par getLatestArticles).
+    // `id` vient de getLatestArticles : UUID quand la liste sort de l'Aiven,
+    // id Convex sinon. Lire au meme endroit que la liste, sans quoi l'id ne
+    // designe rien.
+    if (hasAivenNews()) {
+      return { content: await fetchAivenArticleContent(id), error: null }
+    }
     const { content } = await convex.query(api.app.getArticleContent, { id: id as Id<'articles'> })
     return { content: content ?? null, error: null }
   } catch (error: unknown) {
@@ -216,6 +232,15 @@ export async function testEbraConnection(sessionValue: string, pooolValue?: stri
 export async function deleteArticle(id: string) {
   if (!(await isAdminAuthenticated())) return { success: false, error: 'Non autorisé' }
   try {
+    // Cote Aiven on MASQUE au lieu d'effacer : la ligne reste la fiche de
+    // reference de l'article, et la purge du pont RAG retire de l'index du chat
+    // les articles masques. L'effet visible est le meme, en reversible.
+    if (hasAivenNews()) {
+      const ok = await setAivenArticleHidden(id, true)
+      return ok
+        ? { success: true, error: null }
+        : { success: false, error: 'Article introuvable' }
+    }
     await convex.mutation(api.app.deleteArticle, { id: id as Id<'articles'> })
     return { success: true, error: null }
   } catch (error: unknown) {
