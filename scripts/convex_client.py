@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -148,11 +149,69 @@ def _call(path: str, args: dict, *, mutation: bool) -> dict:
 # Articles
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Journal RAG : court-circuit de Convex pour l'indexation
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Le RAG de MulhouseGPT était alimenté en relisant Convex après le scraping
+# (`rag_sync_articles.py`, lecture sur 25 h). Convex était donc un maillon
+# obligatoire du chemin : son déploiement coupé le 11/09/2026 pour dépassement
+# de quota, plus un seul article n'a atteint le RAG pendant 36 h, et « les actus
+# du jour » répondaient avec l'avant-veille.
+#
+# Les scrapers ont pourtant l'article complet en main au moment de l'écriture.
+# On le consigne donc ici, dans un fichier JSONL que `rag_sync_articles.py
+# --journal` indexe en SQL direct sur l'Aiven, sans passer par Convex.
+#
+# Écrit AVANT de dépendre du résultat de l'appel : une écriture Convex en échec
+# doit quand même laisser l'article joignable pour le RAG.
+
+_RAG_JOURNAL_ENV = "RAG_JOURNAL_PATH"
+
+# Champs de fond nécessaires à l'indexation (cf. format_press_article) : ni les
+# horodatages de service, ni les identifiants de jointure.
+_JOURNAL_KEYS = {
+    "link", "title", "source", "description", "content",
+    "publishedAt", "imageUrl", "r2Url", "imageCaption", "hidden",
+}
+
+
+def _journal_article(row: dict, stable_id: str | None) -> None:
+    """Consigne un article pour l'indexation RAG directe. Jamais bloquant."""
+    path = os.environ.get(_RAG_JOURNAL_ENV)
+    if not path or not row.get("link"):
+        return
+    entry = {k: v for k, v in row.items() if k in _JOURNAL_KEYS and v is not None}
+    # `supabaseId` — PAS l'_id Convex — est le `sourceId` du RAG : c'est ce que
+    # rend get_recent_articles_with_content (« sourceId stable ») et donc ce sous
+    # quoi les 127 785 articles sont deja indexes. Enregistrer l'_id ferait entrer
+    # chaque article une seconde fois.
+    #
+    # Il n'est retenu que confirme par Convex : un scraper qui ne sait pas si
+    # l'article existe deja (dedup tolerante, Convex coupe) genere un UUID NEUF
+    # pour un article connu, ce qui creerait un second document. Faute de
+    # confirmation, l'indexeur retombe sur une cle derivee du lien, stable d'un
+    # run a l'autre, qu'il supprime au retour de Convex.
+    if stable_id:
+        entry["stableId"] = stable_id
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False, default=_json_default) + "\n")
+    except OSError as exc:
+        print(f"[journal] ecriture impossible ({exc})", file=sys.stderr)
+
+
 def upsert_article(row: dict) -> dict:
     """Insère ou met à jour un article (dédup par link). Champs fournis mis à
     jour, les autres conservés. `supabaseId` (UUID frais pour les nouveaux
     articles) permet les jointures tags/images."""
-    return _call("scrapers:upsertArticle", {"row": _strip_none(row)}, mutation=True)
+    try:
+        result = _call("scrapers:upsertArticle", {"row": _strip_none(row)}, mutation=True)
+    except Exception:
+        _journal_article(row, None)
+        raise
+    _journal_article(row, (result or {}).get("supabaseId"))
+    return result
 
 
 def get_article_by_link(link: str) -> dict | None:
@@ -179,12 +238,59 @@ def get_existing_links_for(links: list[str], batch_size: int = 100) -> set[str]:
     return existing
 
 
+_indispo_signalee = False
+
+
+def _signaler_convex_indisponible(exc: Exception) -> None:
+    """Avertit une fois par run que la dedup est aveugle."""
+    global _indispo_signalee
+    if not _indispo_signalee:
+        _indispo_signalee = True
+        print(
+            f"[convex] indisponible ({exc}) : dedup impossible, les articles seront "
+            f"retraites et consignes dans le journal RAG",
+            file=sys.stderr,
+        )
+
+
+def get_article_by_link_tolerant(link: str) -> dict | None:
+    """`get_article_by_link` qui rend None quand Convex ne repond pas.
+
+    Les scrapers demandent « ce lien est-il deja connu ? » AVANT de traiter
+    l'article, et hors du try/except qui protege la boucle : une exception ici
+    tuait le run entier avant le moindre article (constate le 11/09/2026,
+    deploiement coupe pour quota). Or « je ne sais pas » doit valoir « je
+    traite » : l'article sera retraite et consigne dans le journal RAG, et
+    `upsert_document` ignorera un contenu inchange cote Aiven.
+    """
+    try:
+        return get_article_by_link(link)
+    except Exception as exc:
+        _signaler_convex_indisponible(exc)
+        return None
+
+
+def get_existing_links_for_tolerant(links: list[str]) -> set[str]:
+    """`get_existing_links_for` qui rend un ensemble vide si Convex est coupe.
+
+    Meme raison : mieux vaut retraiter des articles deja connus que de ne rien
+    collecter du tout. Voir get_article_by_link_tolerant.
+    """
+    try:
+        return get_existing_links_for(links)
+    except Exception as exc:
+        _signaler_convex_indisponible(exc)
+        return set()
+
+
 def get_article_by_supabase_id(article_id: str) -> dict | None:
     """Article complet (content inclus) via news_bridge:getArticleById."""
     return _call("news_bridge:getArticleById", {"id": article_id}, mutation=False)
 
 
-def get_article_links(source: str | None = None, limit: int = 500) -> list[str]:
+def get_article_links(
+    source: str | None = None, limit: int = 500, max_links: int | None = None
+) -> list[str]:
     """Toutes les links d'articles, paginées (filtre source optionnel)."""
     links: list[str] = []
     cursor: str | None = None
@@ -195,13 +301,15 @@ def get_article_links(source: str | None = None, limit: int = 500) -> list[str]:
             mutation=False,
         )
         links.extend(res["links"])
-        if res["isDone"]:
+        if res["isDone"] or (max_links and len(links) >= max_links):
             break
         cursor = res["cursor"]
-    return links
+    return links[:max_links] if max_links else links
 
 
-def get_article_titles(source: str | None = None, limit: int = 500) -> list[dict]:
+def get_article_titles(
+    source: str | None = None, limit: int = 500, max_articles: int | None = None
+) -> list[dict]:
     """Tous les {link, title, imageUrl} d'articles, paginé (filtre source
     optionnel). Sans content : ~100x plus léger que getArticlesPage. Requiert la
     query `scrapers:getArticleTitlesPage` (déployer les fonctions Convex avant
@@ -215,10 +323,10 @@ def get_article_titles(source: str | None = None, limit: int = 500) -> list[dict
             mutation=False,
         )
         rows.extend(res["articles"])
-        if res["isDone"]:
+        if res["isDone"] or (max_articles and len(rows) >= max_articles):
             break
         cursor = res["cursor"]
-    return rows
+    return rows[:max_articles] if max_articles else rows
 
 
 def get_articles_to_repair(
@@ -235,7 +343,9 @@ def get_articles_to_repair(
     """
     rows: list[dict] = []
     cursor: str | None = None
+    pages = 0
     while True:
+        pages += 1
         res = _call(
             "scrapers:getArticlesToRepairPage",
             {
@@ -247,6 +357,8 @@ def get_articles_to_repair(
             mutation=False,
         )
         rows.extend(res["articles"])
+        if pages % 10 == 0 and not max_articles:
+            print(f"[*] Chargement des candidats : {len(rows)} trouvés...", flush=True)
         if res["isDone"] or (max_articles and len(rows) >= max_articles):
             break
         cursor = res["cursor"]

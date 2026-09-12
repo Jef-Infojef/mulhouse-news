@@ -247,7 +247,7 @@ def lookup_existing(use_convex: bool, cur, links: list[str]) -> set[str]:
     if not links:
         return set()
     if use_convex:
-        return convex_client.get_existing_links_for(links)
+        return convex_client.get_existing_links_for_tolerant(links)
     return sql_links_exist(cur, links)
 
 

@@ -53,6 +53,9 @@ export const upsertArticle = mutation({
 
     if (existing) {
       const patch: Record<string, unknown> = {};
+      // Champs de FOND : une différence ici, et seulement là, justifie d'écrire.
+      // `scrapedAt` n'y est pas — il vaut Date.now() à chaque passage et rendrait
+      // toute comparaison vaine.
       const keys = [
         "title",
         "imageUrl",
@@ -60,7 +63,6 @@ export const upsertArticle = mutation({
         "source",
         "description",
         "publishedAt",
-        "scrapedAt",
         "content",
         "localImage",
         "r2Url",
@@ -69,14 +71,36 @@ export const upsertArticle = mutation({
         "category",
       ] as const;
       for (const key of keys) {
-        if (row[key] !== undefined) patch[key] = row[key];
+        const valeur = row[key];
+        if (valeur !== undefined && valeur !== existing[key]) patch[key] = valeur;
       }
       if (row.supabaseId !== undefined && existing.supabaseId !== row.supabaseId) {
         patch["supabaseId"] = row.supabaseId;
       }
+      const finalSupabaseId = (patch["supabaseId"] as string) ?? existing.supabaseId ?? null;
+
+      // Rien n'a bougé : on n'écrit RIEN, pas même updatedAt. Un ctx.db.patch,
+      // même réduit à un seul horodatage, réécrit le document entier (content
+      // compris) et en laisse une version de plus. C'est ce qui a porté la table
+      // `articles` à 6,76 Go pour 196 Mo de données réelles (export B2 du
+      // 06/09/2026), jusqu'à la coupure du déploiement pour dépassement de quota
+      // le 11/09/2026 : plus aucun article collecté, et « les actus du jour »
+      // répondant avec l'avant-veille.
+      if (Object.keys(patch).length === 0) {
+        return { created: false, id: existing._id, supabaseId: finalSupabaseId, unchanged: true };
+      }
+
+      // `updatedAt` n'est pas dans `keys` : sans cette ligne, une mise à jour ne
+      // le bouge plus, l'article ne remonte pas dans l'index by_updatedAt, et
+      // news_bridge:getArticlesUpdatedSince — la synchro RAG incrémentale — ne
+      // voit jamais la modification. Il ne doit en revanche PAS bouger seul.
       patch["updatedAt"] = row.updatedAt ?? Date.now();
+      // Même logique pour `scrapedAt` : suivi avec une vraie modification, jamais
+      // à lui seul. Il signifie donc désormais « dernier passage qui a changé
+      // quelque chose », pas « dernier passage » (lu par app.ts et stats.ts).
+      if (row.scrapedAt !== undefined) patch["scrapedAt"] = row.scrapedAt;
       await ctx.db.patch(existing._id, patch);
-      return { created: false, id: existing._id, supabaseId: existing.supabaseId ?? null };
+      return { created: false, id: existing._id, supabaseId: finalSupabaseId, unchanged: false };
     }
 
     const id = await ctx.db.insert("articles", {
@@ -352,6 +376,8 @@ export const getArticlesToRepairPage = query({
         source: doc.source,
         needsSource,
         needsImage,
+        hasContent: typeof doc.content === "string" && doc.content.length > 200,
+        supabaseId: doc.supabaseId ?? null,
         publishedAt: doc.publishedAt,
       });
     }

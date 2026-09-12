@@ -270,6 +270,104 @@ def upsert_document(
         stats["by_source"][source_type] = stats["by_source"].get(source_type, 0) + 1
 
 
+def surrogate_source_id(link: str) -> str:
+    """`sourceId` de secours, derive du lien, quand l'id Convex est inconnu.
+
+    KnowledgeChunk deduplique sur (sourceType, sourceId) et n'a AUCUN index sur
+    url : la reconciliation doit donc passer par une cle calculable, jamais par
+    une recherche sur l'URL, sous peine de scanner une table de 446 Mo par
+    article. Prefixe explicite pour qu'un tel document se reconnaisse.
+    """
+    return "link:" + hashlib.sha1(link.encode("utf-8")).hexdigest()
+
+
+def sync_journal(rag_cur, path: str, stats: dict) -> None:
+    """Indexe les articles consignes par les scrapers, SANS lire Convex.
+
+    C'est le court-circuit : `convex_client._journal_article` ecrit un JSONL au
+    fil du scraping, y compris quand l'ecriture Convex echoue. Le RAG n'a donc
+    plus besoin que Convex reponde pour recevoir l'actualite du jour.
+
+    Un meme lien apparait plusieurs fois (decouverte sans contenu, puis contenu
+    complet, puis image) : les entrees sont fusionnees, la derniere valeur non
+    vide gagne.
+    """
+    if not os.path.exists(path):
+        print(f"[journal] aucun fichier a {path} : rien a indexer")
+        return
+
+    fusionnes: dict[str, dict] = {}
+    lignes = 0
+    with open(path, encoding="utf-8") as handle:
+        for ligne in handle:
+            ligne = ligne.strip()
+            if not ligne:
+                continue
+            lignes += 1
+            try:
+                entree = json.loads(ligne)
+            except json.JSONDecodeError:
+                stats["errors"] += 1
+                continue
+            lien = entree.get("link")
+            if not lien:
+                continue
+            cible = fusionnes.setdefault(lien, {})
+            for cle, valeur in entree.items():
+                if valeur is not None and valeur != "":
+                    cible[cle] = valeur
+
+    print(f"[journal] {lignes} entrees -> {len(fusionnes)} articles distincts")
+
+    for lien, article in fusionnes.items():
+        if article.get("hidden"):
+            stats["skipped"] += 1
+            continue
+        # Le journal porte des epoch ms (format Convex) ; format_press_article
+        # ne les lit ainsi que sous USE_CONVEX. On normalise en datetime pour
+        # que l'indexation soit independante du backend de lecture configure.
+        publie = article.get("publishedAt")
+        if isinstance(publie, (int, float)):
+            publie = datetime.fromtimestamp(publie / 1000, tz=timezone.utc)
+        elif not isinstance(publie, datetime):
+            publie = None
+        body = format_press_article({**article, "publishedAt": publie})
+        if not body:
+            stats["skipped"] += 1
+            continue
+
+        # `stableId` = supabaseId confirme par Convex : le meme sourceId que
+        # celui sous lequel l'article est deja indexe. Voir _journal_article.
+        stable_id = article.get("stableId")
+        source_id = stable_id or surrogate_source_id(lien)
+        try:
+            upsert_document(
+                rag_cur,
+                source_type="article",
+                source_id=source_id,
+                title=article.get("title") or "",
+                content=body,
+                url=lien,
+                metadata=press_metadata(
+                    article.get("source"),
+                    publie.isoformat() if publie else "",
+                    article.get("imageUrl") or article.get("r2Url"),
+                ),
+                stats=stats,
+            )
+            if stable_id:
+                # Convex repond de nouveau : le document de secours eventuel,
+                # indexe sous la cle derivee pendant la coupure, ferait doublon.
+                # Suppression par cle exacte (index knowledge_chunk_source_idx).
+                rag_cur.execute(
+                    'DELETE FROM "KnowledgeChunk" WHERE "sourceType" = %s AND "sourceId" = %s',
+                    ("article", surrogate_source_id(lien)),
+                )
+        except Exception as exc:
+            stats["errors"] += 1
+            print(f"  [ERR] journal {lien}: {exc}", file=sys.stderr)
+
+
 def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool = False, use_convex_mode: bool = False) -> None:
     if use_convex_mode:
         try:
@@ -414,6 +512,11 @@ def main() -> int:
     parser.add_argument("--full", action="store_true",
                         help="Backfill complet : indexe tous les articles avec contenu (ignore la borne 25h)")
     parser.add_argument("--postgres", action="store_true", help="Force la lecture PostgreSQL directe")
+    parser.add_argument("--journal", metavar="CHEMIN",
+                        help="Indexe d'abord les articles consignes par les scrapers (JSONL ecrit via "
+                             "RAG_JOURNAL_PATH), sans lire Convex. Court-circuite le maillon Convex.")
+    parser.add_argument("--journal-only", action="store_true",
+                        help="S'arrete apres le journal : n'interroge ni Convex ni PostgreSQL.")
     args = parser.parse_args()
 
     if not RAG_URL:
@@ -439,9 +542,16 @@ def main() -> int:
         rag_cur = rag_conn.cursor()
         ensure_fts_index(rag_cur)
         news_cur = news_conn.cursor() if news_conn else None
-        sync_press_articles(rag_cur, news_cur, args.press_limit, stats, full=args.full, use_convex_mode=use_convex)
-        if news_cur:
-            sync_news_articles(rag_cur, news_cur, args.news_limit, stats, site_url, full=args.full)
+        if args.journal:
+            sync_journal(rag_cur, args.journal, stats)
+            # Validation immediate : le commit final est hors de portee si la
+            # lecture Convex qui suit echoue, et le travail du journal — la seule
+            # part qui ne depende pas de Convex — serait annule avec elle.
+            rag_conn.commit()
+        if not args.journal_only:
+            sync_press_articles(rag_cur, news_cur, args.press_limit, stats, full=args.full, use_convex_mode=use_convex)
+            if news_cur:
+                sync_news_articles(rag_cur, news_cur, args.news_limit, stats, site_url, full=args.full)
         rag_conn.commit()
         if news_conn:
             news_conn.commit()

@@ -15,6 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
+    # Journal RAG : chaque scraper y consigne l'article qu'il ecrit, AVANT de
+    # savoir si Convex a accepte. L'etape « Sync RAG index » l'indexe ensuite en
+    # SQL direct sur l'Aiven, sans relire Convex. Sans cela, un deploiement
+    # Convex coupe (quota depasse le 11/09/2026) arrete net l'alimentation du
+    # RAG : 36 h sans le moindre article, et « les actus du jour » servant
+    # l'avant-veille. Defini au niveau du job : toutes les etapes le partagent.
+    env:
+      # `runner.temp` n'est pas resolu dans un env de niveau job (contextes
+      # autorises : github, needs, vars, secrets, inputs) : workspace, donc.
+      RAG_JOURNAL_PATH: ${{ github.workspace }}/rag-journal.jsonl
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -117,7 +128,10 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
           NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
           USE_CONVEX: '1'
-        run: python scripts/rag_sync_articles.py
+        # --journal d'abord (aucune dependance a Convex, commit immediat),
+        # puis la lecture Convex habituelle, qui ne retrouvera que des chunks
+        # inchanges et les ignorera.
+        run: python scripts/rag_sync_articles.py --journal "$RAG_JOURNAL_PATH"
 
       - name: Log Convex I/O du run
         if: always()

@@ -401,7 +401,9 @@ def main():
 
             # 2. Vérifier doublon final (Lien)
             if USE_CONVEX:
-                existing_by_link = convex_client.get_article_by_link(real_url)
+                # Tolerant : Convex muet ne doit pas tuer le run avant la boucle,
+                # l'article part alors au traitement et au journal RAG.
+                existing_by_link = convex_client.get_article_by_link_tolerant(real_url)
                 if existing_by_link:
                     titles_seen_this_run.add(normalized_title)
                     stats["duplicates_link"] += 1

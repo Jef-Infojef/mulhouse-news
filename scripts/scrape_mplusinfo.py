@@ -73,7 +73,7 @@ def get_existing_links(cur, urls: list[str] | None = None) -> set[str]:
     if USE_CONVEX:
         if not urls:
             return set()
-        return {url for url in urls if convex_client.get_article_by_link(url)}
+        return convex_client.get_existing_links_for_tolerant(urls)
     cur.execute('SELECT link FROM "Article" WHERE link LIKE %s', ("%mplusinfo.fr%",))
     return {row[0] for row in cur.fetchall()}
 
