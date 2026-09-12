@@ -161,7 +161,14 @@ def load_tags(cur):
     """Charge tous les tags depuis le backend et retourne [(id, name, slug, keywords)].
     Convex : id = supabaseId (cuid) des newsTags ; Supabase : id de la table NewsTag."""
     if USE_CONVEX:
-        rows = convex_client.get_news_tags()
+        # Tolerant : les tags sont un confort de classement, pas une condition
+        # du scraping. Une lecture Convex qui echoue ici tuait le run entier
+        # avant le moindre article (constate le 13/09/2026, deploiement coupe).
+        try:
+            rows = convex_client.get_news_tags()
+        except Exception as exc:
+            print(f"[!] Tags indisponibles ({exc}) : articles collectes sans tag.")
+            rows = []
         db_rows = [(t["id"], t["name"], t["slug"]) for t in rows]
     else:
         cur.execute('SELECT id, name, slug FROM "NewsTag"')
@@ -356,6 +363,13 @@ def main():
             #   l'édition Mulhouse (fil d'Ariane ou tag INSEE 68224).
             title_hit = "mulhous" in clean_title
             url_hit = is_mulhouse_url(real_url)
+
+            # Initialise avant les branches : la branche « signal faible » ne
+            # l'affecte que si la page confirme l'edition Mulhouse. Une page
+            # injoignable ou non confirmee laissait la variable non definie, et
+            # le `if not is_mulhouse` juste apres levait UnboundLocalError, ce
+            # qui tuait TOUT le run de scraping, pas seulement cet article.
+            is_mulhouse = False
 
             if title_hit or url_hit:
                 is_mulhouse = True
