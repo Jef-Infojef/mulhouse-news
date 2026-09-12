@@ -351,6 +351,27 @@ def store_tag(cur, entree: dict) -> None:
     )
 
 
+def purge_articles_masques(rag_cur) -> int:
+    """Retire de l'index les articles passes en `hidden` APRES leur indexation.
+
+    Aucun chemin n'indexe un article masque — ni le journal, ni la lecture
+    Convex, ni le repli SQL. Mais rien ne le retirait quand il le devenait
+    ensuite : constate le 13/09/2026, 61 articles masques cote site, dont 46
+    que le chat continuait de servir.
+
+    Le texte n'est pas perdu : la table Article le conserve, un article
+    re-publie sera reindexe au prochain passage qui le touche.
+    """
+    rag_cur.execute(
+        """
+        DELETE FROM "KnowledgeChunk" k
+        USING "Article" a
+        WHERE a.id = k."sourceId" AND a.hidden AND k."sourceType" = 'article'
+        """
+    )
+    return rag_cur.rowcount or 0
+
+
 def sync_journal(rag_cur, path: str, stats: dict) -> None:
     """Indexe les articles consignes par les scrapers, SANS lire Convex.
 
@@ -647,6 +668,10 @@ def main() -> int:
             # Validation immediate : le commit final est hors de portee si la
             # lecture Convex qui suit echoue, et le travail du journal — la seule
             # part qui ne depende pas de Convex — serait annule avec elle.
+            rag_conn.commit()
+        retires = purge_articles_masques(rag_cur)
+        if retires:
+            print(f"[purge] {retires} chunks d'articles masques retires de l'index")
             rag_conn.commit()
         if not args.journal_only:
             sync_press_articles(rag_cur, news_cur, args.press_limit, stats, full=args.full, use_convex_mode=use_convex)
