@@ -178,9 +178,74 @@ def list_missing_content_via_pages(limit: int, order: str = "desc") -> list[dict
             return rows
         cursor = res["cursor"]
 
+def maj_article(payload: dict) -> None:
+    """Ecrit un article dans Convex, sans faire echouer le run s'il refuse.
+
+    Depuis le journal RAG, une ecriture Convex refusee n'est plus une perte :
+    convex_client consigne l'article avant de lever, et rag_sync_articles
+    --journal l'indexe. Laisser l'exception remonter tuait au contraire tout le
+    scraping de contenu des le premier article (constate le 13/09/2026).
+    """
+    try:
+        convex_client.upsert_article(payload)
+    except Exception as exc:
+        print(f"    [!] Convex refuse l'ecriture ({str(exc).splitlines()[0][:70]}) - journalisee")
+
+
+def worklist_depuis_aiven(limit: int, archive: bool, order: str) -> list[dict]:
+    """Articles a completer, lus dans la table Article de l'Aiven.
+
+    La liste de travail habituelle vient de Convex. Deploiement coupe pour
+    depassement de quota le 11/09/2026, elle est inaccessible — alors meme que
+    les articles rattrapes depuis attendent leur texte integral.
+
+    La table Article de l'Aiven porte les memes colonnes depuis le 13/09/2026 et
+    la remplace. Rien d'autre ne change : les ECRITURES passent toujours par
+    convex_client, donc par le journal RAG, qui les fera revenir dans l'index et
+    dans cette meme table.
+
+    Rend des dictionnaires, la forme que la boucle attend en mode Convex.
+    """
+    url = os.environ.get("RAG_DATABASE_URL") or os.environ.get("NEWS_DATABASE_URL")
+    if not url:
+        raise SystemExit("RAG_DATABASE_URL manquant : impossible de lire la liste de travail.")
+
+    if archive:
+        condition = "link LIKE '%%lalsace.fr%%' AND (content IS NULL OR LENGTH(content) < 150)"
+        tri = "ASC"
+    else:
+        condition = "(content IS NULL OR LENGTH(content) < 500) AND \"publishedAt\" > NOW() - INTERVAL '7 days'"
+        tri = "DESC" if order == "desc" else "ASC"
+
+    with psycopg2.connect(url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'''SELECT id, title, link, description, "imageUrl", "imageCaption"
+                    FROM "Article"
+                    WHERE hidden = false AND {condition}
+                    ORDER BY "publishedAt" {tri} NULLS LAST
+                    LIMIT %s''',
+                (limit if limit > 0 else 500,),
+            )
+            lignes = cur.fetchall()
+
+    return [
+        {"supabaseId": r[0], "title": r[1], "link": r[2],
+         "description": r[3], "imageUrl": r[4], "imageCaption": r[5]}
+        for r in lignes
+    ]
+
+
 def get_app_config(conn, key):
     if USE_CONVEX:
-        return convex_client.get_app_config(key)
+        # Tolerant : cookie EBRA et cooldowns sont des confforts de cache. Une
+        # lecture Convex qui echoue ne doit pas empecher le scraping de contenu,
+        # surtout quand c'est precisement la panne Convex qu'on rattrape.
+        try:
+            return convex_client.get_app_config(key)
+        except Exception as exc:
+            print(f"[!] Config {key} illisible ({exc}) : on continue sans.")
+            return None
     try:
         with conn.cursor() as cur:
             cur.execute('SELECT value FROM "AppConfig" WHERE key = %s', (key,))
@@ -376,7 +441,14 @@ def sync_article_images(conn, article_id, images, image_url, image_caption):
                 }
             )
         if rows:
-            convex_client.upsert_article_images(rows)
+            # Best-effort, comme maj_article : convex_client journalise les images
+            # avant de lever, et rag_sync_articles --journal les ecrit dans la
+            # table ArticleImage de l'Aiven. Laisser l'exception remonter arretait
+            # tout le scraping de contenu.
+            try:
+                convex_client.upsert_article_images(rows)
+            except Exception as exc:
+                print(f"    [!] Convex refuse les images ({str(exc).splitlines()[0][:60]}) - journalisees")
         return True
 
     changed = False
@@ -694,6 +766,9 @@ def main():
                         help="Convex archive : pages de scan maximales (défaut 200 x 500 docs)")
     parser.add_argument("--order", type=str, default="desc", choices=["asc", "desc"],
                         help="Ordre du scan d'archive ('desc' pour commencer par les plus récents, défaut)")
+    parser.add_argument("--worklist-aiven", action="store_true",
+                        help="Lit la liste des articles a completer dans la table Article de "
+                             "l'Aiven au lieu de Convex (indispensable quand Convex est coupe)")
     parser.add_argument("--skip-images", action="store_true",
                         help="Ne pas exécuter les scripts de téléchargement/sync B2 en fin de run")
     args = parser.parse_args()
@@ -769,7 +844,12 @@ def main():
             
         print(f"[*] État initial connexion : {'✅' if stats['is_connected'] else '❌'}")
 
-        if USE_CONVEX:
+        if args.worklist_aiven:
+            if not USE_CONVEX:
+                raise SystemExit("--worklist-aiven suppose le mode Convex pour les ecritures "
+                                 "(CONVEX_DEPLOY_KEY + NEXT_PUBLIC_CONVEX_URL).")
+            articles = worklist_depuis_aiven(args.limit or 50, args.archive, args.order)
+        elif USE_CONVEX:
             if args.archive:
                 articles = list_missing_content_via_pages(args.limit or 0, order=args.order)
             else:
@@ -870,7 +950,7 @@ def main():
             updated = images_changed
             if image_caption:
                 if USE_CONVEX:
-                    convex_client.upsert_article({"link": art_id, "imageCaption": image_caption})
+                    maj_article({"link": art_id, "imageCaption": image_caption})
                 else:
                     cur.execute(
                         'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',
@@ -890,7 +970,7 @@ def main():
                         article_patch["author"] = extra_meta["author"]
                     if extra_meta.get("category"):
                         article_patch["category"] = extra_meta["category"]
-                    convex_client.upsert_article(article_patch)
+                    maj_article(article_patch)
                 else:
                     cur.execute('UPDATE "Article" SET content = %s, "updatedAt" = NOW() WHERE id = %s', (final_content, art_id))
                 updated = True
@@ -949,7 +1029,13 @@ def main():
 
         # Rattrapage légendes photo (articles récents sans imageCaption)
         if USE_CONVEX:
-            caption_rows = convex_client.get_articles_missing_captions(limit=30)
+            # Rattrapage annexe : il ne doit pas annuler le travail principal,
+            # deja valide, si Convex ne repond pas.
+            try:
+                caption_rows = convex_client.get_articles_missing_captions(limit=30)
+            except Exception as exc:
+                print(f"[!] Legendes a rattraper illisibles ({str(exc).splitlines()[0][:60]}) : etape sautee.")
+                caption_rows = []
         else:
             cur.execute("""
                 SELECT id, link FROM "Article"
@@ -974,7 +1060,7 @@ def main():
                 caption_result = fetch_page_caption(link, cookies_dict, alsace_cookies is not None)
                 if caption_result.caption:
                     if USE_CONVEX:
-                        convex_client.upsert_article({"link": art_id, "imageCaption": caption_result.caption})
+                        maj_article({"link": art_id, "imageCaption": caption_result.caption})
                     else:
                         cur.execute(
                             'UPDATE "Article" SET "imageCaption" = %s WHERE id = %s',

@@ -323,6 +323,33 @@ def store_article(cur, source_id: str, lien: str, article: dict, publie) -> None
     )
 
 
+def store_article_partiel(cur, lien: str, article: dict) -> None:
+    """Enrichit une fiche existante sans l'indexer.
+
+    Le scraper de contenu consigne des entrees partielles — `{link,
+    imageCaption}` par exemple — qui ne portent ni titre ni texte : elles n'ont
+    rien a dire a l'index, mais completent la fiche. Pas d'INSERT : une fiche
+    sans titre n'aurait aucun sens, et Article.title est NOT NULL.
+    """
+    champs = {
+        "description": article.get("description"),
+        "imageUrl": article.get("imageUrl"),
+        "imageCaption": article.get("imageCaption"),
+        "localImage": article.get("localImage"),
+        "r2Url": article.get("r2Url"),
+        "author": article.get("author"),
+        "category": article.get("category"),
+    }
+    presents = {k: v for k, v in champs.items() if v}
+    if not presents:
+        return
+    sets = ", ".join(f'"{k}" = COALESCE(%s, "Article"."{k}")' for k in presents)
+    cur.execute(
+        f'UPDATE "Article" SET {sets}, "updatedAt" = now() WHERE link = %s',
+        (*presents.values(), lien),
+    )
+
+
 def store_image(cur, entree: dict) -> None:
     """Une image d'article. L'id Convex est inconnu hors ligne : cle derivee de
     (articleId, url), ce que Convex deduplique aussi."""
@@ -427,6 +454,22 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
             publie = datetime.fromtimestamp(publie / 1000, tz=timezone.utc)
         elif not isinstance(publie, datetime):
             publie = None
+        if not article.get("title"):
+            # Le scraper de contenu ecrit PAR LIEN, sans repeter le titre : une
+            # entree qui apporte le texte integral n'en porte pas. Le titre est
+            # dans la fiche — l'y chercher permet d'indexer quand meme, au lieu
+            # de jeter le contenu qu'on vient de scraper.
+            rag_cur.execute('SELECT title FROM "Article" WHERE link = %s LIMIT 1', (lien,))
+            connu = rag_cur.fetchone()
+            if connu and connu[0]:
+                article["title"] = connu[0]
+            else:
+                # Ni titre fourni, ni fiche connue : rien a indexer, on se
+                # contente d'enrichir si la fiche existe.
+                store_article_partiel(rag_cur, lien, article)
+                stats["skipped"] += 1
+                continue
+
         body = format_press_article({**article, "publishedAt": publie})
         if not body:
             stats["skipped"] += 1
