@@ -281,6 +281,76 @@ def surrogate_source_id(link: str) -> str:
     return "link:" + hashlib.sha1(link.encode("utf-8")).hexdigest()
 
 
+def store_article(cur, source_id: str, lien: str, article: dict, publie) -> None:
+    """Ecrit la FICHE de l'article dans la table Article de l'Aiven.
+
+    KnowledgeChunk ne porte que le texte : ni hidden, ni auteur, ni categorie,
+    ni legende. Ces colonnes n'existaient que dans Convex jusqu'au chargement du
+    13/09/2026 ; sans cette ecriture, la table se figerait a cette date.
+
+    COALESCE sur la mise a jour : une entree de decouverte, sans contenu ni
+    image, ne doit pas effacer ce qu'un passage precedent avait rempli.
+    """
+    cur.execute(
+        """
+        INSERT INTO "Article" (id, link, title, source, description, content, author,
+                               category, hidden, "imageUrl", "imageCaption", "localImage",
+                               "r2Url", "publishedAt", "scrapedAt", "updatedAt")
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+        ON CONFLICT (id) DO UPDATE SET
+            link = EXCLUDED.link,
+            title = COALESCE(EXCLUDED.title, "Article".title),
+            source = COALESCE(EXCLUDED.source, "Article".source),
+            description = COALESCE(EXCLUDED.description, "Article".description),
+            content = COALESCE(EXCLUDED.content, "Article".content),
+            author = COALESCE(EXCLUDED.author, "Article".author),
+            category = COALESCE(EXCLUDED.category, "Article".category),
+            hidden = EXCLUDED.hidden,
+            "imageUrl" = COALESCE(EXCLUDED."imageUrl", "Article"."imageUrl"),
+            "imageCaption" = COALESCE(EXCLUDED."imageCaption", "Article"."imageCaption"),
+            "localImage" = COALESCE(EXCLUDED."localImage", "Article"."localImage"),
+            "r2Url" = COALESCE(EXCLUDED."r2Url", "Article"."r2Url"),
+            "publishedAt" = COALESCE(EXCLUDED."publishedAt", "Article"."publishedAt"),
+            "updatedAt" = now()
+        """,
+        (
+            source_id, lien, article.get("title") or "", article.get("source"),
+            article.get("description"), article.get("content"), article.get("author"),
+            article.get("category"), bool(article.get("hidden")), article.get("imageUrl"),
+            article.get("imageCaption"), article.get("localImage"), article.get("r2Url"),
+            publie,
+        ),
+    )
+
+
+def store_image(cur, entree: dict) -> None:
+    """Une image d'article. L'id Convex est inconnu hors ligne : cle derivee de
+    (articleId, url), ce que Convex deduplique aussi."""
+    article_id = entree.get("articleId")
+    url = entree.get("url")
+    if not article_id or not url:
+        return
+    cle = hashlib.sha1(f"{article_id}|{url}".encode("utf-8")).hexdigest()
+    cur.execute(
+        """
+        INSERT INTO "ArticleImage" (id, "articleId", url, caption, source, position, "createdAt")
+        VALUES (%s, %s, %s, %s, %s, %s, now())
+        ON CONFLICT (id) DO UPDATE SET
+            caption = COALESCE(EXCLUDED.caption, "ArticleImage".caption),
+            source = COALESCE(EXCLUDED.source, "ArticleImage".source),
+            position = COALESCE(EXCLUDED.position, "ArticleImage".position)
+        """,
+        (cle, article_id, url, entree.get("caption"), entree.get("source"), entree.get("position")),
+    )
+
+
+def store_tag(cur, entree: dict) -> None:
+    cur.execute(
+        'INSERT INTO "ArticleTag" ("articleId", "tagId") VALUES (%s, %s) ON CONFLICT DO NOTHING',
+        (entree["articleId"], entree["tagId"]),
+    )
+
+
 def sync_journal(rag_cur, path: str, stats: dict) -> None:
     """Indexe les articles consignes par les scrapers, SANS lire Convex.
 
@@ -297,6 +367,7 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
         return
 
     fusionnes: dict[str, dict] = {}
+    annexes: list[dict] = []
     lignes = 0
     with open(path, encoding="utf-8") as handle:
         for ligne in handle:
@@ -308,6 +379,10 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
                 entree = json.loads(ligne)
             except json.JSONDecodeError:
                 stats["errors"] += 1
+                continue
+            genre = entree.get("kind")
+            if genre in ("image", "tag"):
+                annexes.append(entree)
                 continue
             lien = entree.get("link")
             if not lien:
@@ -336,10 +411,22 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
             stats["skipped"] += 1
             continue
 
-        # `stableId` = supabaseId confirme par Convex : le meme sourceId que
-        # celui sous lequel l'article est deja indexe. Voir _journal_article.
+        # Identite de l'article, par ordre de fiabilite decroissante :
+        #   1. supabaseId confirme par Convex (stableId) ;
+        #   2. l'id deja enregistre pour ce lien dans la table Article — c'est
+        #      elle qui fait autorite quand Convex est muet, son index sur link
+        #      rend la resolution immediate ;
+        #   3. l'UUID que le scraper vient d'attribuer a un article neuf : c'est
+        #      celui que portent ses images et ses tags, donc la fiche doit le
+        #      partager, sans quoi rien ne se joint ;
+        #   4. a defaut, une cle derivee du lien, stable d'un run a l'autre.
         stable_id = article.get("stableId")
-        source_id = stable_id or surrogate_source_id(lien)
+        if not stable_id:
+            rag_cur.execute('SELECT id FROM "Article" WHERE link = %s LIMIT 1', (lien,))
+            connu = rag_cur.fetchone()
+            if connu:
+                stable_id = connu[0]
+        source_id = stable_id or article.get("supabaseId") or surrogate_source_id(lien)
         try:
             upsert_document(
                 rag_cur,
@@ -355,6 +442,7 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
                 ),
                 stats=stats,
             )
+            store_article(rag_cur, source_id, lien, article, publie)
             if stable_id:
                 # Convex repond de nouveau : le document de secours eventuel,
                 # indexe sous la cle derivee pendant la coupure, ferait doublon.
@@ -366,6 +454,18 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
         except Exception as exc:
             stats["errors"] += 1
             print(f"  [ERR] journal {lien}: {exc}", file=sys.stderr)
+
+    for entree in annexes:
+        try:
+            if entree.get("kind") == "image":
+                store_image(rag_cur, entree)
+            else:
+                store_tag(rag_cur, entree)
+        except Exception as exc:
+            stats["errors"] += 1
+            print(f"  [ERR] annexe {entree.get('kind')}: {exc}", file=sys.stderr)
+    if annexes:
+        print(f"[journal] {len(annexes)} images/tags ecrits dans le magasin de fiches")
 
 
 def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool = False, use_convex_mode: bool = False) -> None:

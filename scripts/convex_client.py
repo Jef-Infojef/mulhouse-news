@@ -173,7 +173,44 @@ _RAG_JOURNAL_ENV = "RAG_JOURNAL_PATH"
 _JOURNAL_KEYS = {
     "link", "title", "source", "description", "content",
     "publishedAt", "imageUrl", "r2Url", "imageCaption", "hidden",
+    # Portes par scrape_content_full : la table Article de l'Aiven les stocke,
+    # les omettre laisserait ces colonnes vides pour tout nouvel article.
+    "author", "category", "localImage", "scrapedAt",
+    # L'UUID que le scraper attribue a un article neuf : c'est lui que portent
+    # ses images et ses tags. Sans lui, une coupure Convex indexe la fiche sous
+    # une cle derivee du lien pendant que les images gardent l'UUID, et les deux
+    # ne se rejoignent jamais. Le risque de doublon est ecarte cote indexeur, qui
+    # resout d'abord le lien dans la table Article.
+    "supabaseId",
 }
+
+
+def _journal_ecrire(entry: dict) -> None:
+    """Ajoute une entree au journal RAG. Jamais bloquant."""
+    path = os.environ.get(_RAG_JOURNAL_ENV)
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False, default=_json_default) + "\n")
+    except OSError as exc:
+        print(f"[journal] ecriture impossible ({exc})", file=sys.stderr)
+
+
+def _journal_images(rows: list[dict]) -> None:
+    """Consigne les images d'article. L'Aiven porte depuis le 13/09/2026 une
+    table ArticleImage (images multiples, legendes) que seul Convex nourrissait :
+    sans ce journal, elle serait figee au chargement initial."""
+    for row in rows:
+        if row.get("articleId") and row.get("url"):
+            _journal_ecrire({"kind": "image", **{k: v for k, v in row.items() if v is not None}})
+
+
+def _journal_tags(rows: list[dict]) -> None:
+    """Consigne les liaisons article <-> tag, meme raison."""
+    for row in rows:
+        if row.get("articleId") and row.get("tagId"):
+            _journal_ecrire({"kind": "tag", "articleId": row["articleId"], "tagId": row["tagId"]})
 
 
 def _journal_article(row: dict, stable_id: str | None) -> None:
@@ -194,11 +231,7 @@ def _journal_article(row: dict, stable_id: str | None) -> None:
     # run a l'autre, qu'il supprime au retour de Convex.
     if stable_id:
         entry["stableId"] = stable_id
-    try:
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False, default=_json_default) + "\n")
-    except OSError as exc:
-        print(f"[journal] ecriture impossible ({exc})", file=sys.stderr)
+    _journal_ecrire(entry)
 
 
 def upsert_article(row: dict) -> dict:
@@ -425,20 +458,26 @@ def delete_article_by_link(link: str) -> dict:
 def upsert_article_images(rows: list[dict]) -> dict:
     """Upsert d'images d'articles (dédup par (articleId, url)). `articleId` est
     l'UUID Supabase d'origine (champ supabaseId de l'article)."""
-    return _call(
-        "scrapers:upsertArticleImages",
-        {"rows": [_strip_none(r) for r in rows]},
-        mutation=True,
-    )
+    try:
+        return _call(
+            "scrapers:upsertArticleImages",
+            {"rows": [_strip_none(r) for r in rows]},
+            mutation=True,
+        )
+    finally:
+        _journal_images(rows)
 
 
 def upsert_article_google_tags(rows: list[dict]) -> dict:
     """Insère les liens article<->tag (dédup par (articleId, tagId), UUIDs)."""
-    return _call(
-        "scrapers:upsertArticleGoogleTags",
-        {"rows": [_strip_none(r) for r in rows]},
-        mutation=True,
-    )
+    try:
+        return _call(
+            "scrapers:upsertArticleGoogleTags",
+            {"rows": [_strip_none(r) for r in rows]},
+            mutation=True,
+        )
+    finally:
+        _journal_tags(rows)
 
 
 def get_news_tags() -> list[dict]:
