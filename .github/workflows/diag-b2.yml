@@ -66,6 +66,17 @@ jobs:
           DISTANT=$(aws s3api head-object --bucket "$B2_BACKUP_BUCKET" --key "aiven-dumps/diag/gros-sans-checksum.bin" "--endpoint-url=https://$B2_ENDPOINT" --query ContentLength --output text 2>/dev/null || echo 0)
           echo "gros sans checksum : code $CODE, $DISTANT / $ATTENDU"
 
+      - name: Conversation HTTP reelle (--debug)
+        run: |
+          head -c 1048576 /dev/urandom > debug.bin
+          CODE=0
+          aws s3 cp debug.bin "s3://$B2_BACKUP_BUCKET/aiven-dumps/diag/debug.bin" "--endpoint-url=https://$B2_ENDPOINT" --debug > debug.log 2>&1 || CODE=$?
+          echo "code retour : $CODE"
+          echo "--- statuts HTTP vus ---"
+          grep -oE "https?://[^ ]*|Response headers|StatusCode: [0-9]+|<Code>[^<]*</Code>|<Message>[^<]*</Message>|error|Error" debug.log | sort | uniq -c | sort -rn | head -15
+          echo "--- 30 dernieres lignes ---"
+          tail -30 debug.log
+
       - name: Nettoyer les fichiers de test
         if: always()
         run: |
