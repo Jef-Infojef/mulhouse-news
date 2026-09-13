@@ -97,6 +97,13 @@ jobs:
         env:
           FICHIER: ${{ steps.backup-file.outputs.filename }}
           DATE_JOUR: ${{ steps.backup-file.outputs.date }}
+          # L'AWS CLI récent joint un checksum CRC32 à chaque partie, que l'API
+          # S3 de Backblaze refuse : l'envoi multipart échoue alors en quelques
+          # secondes, sans message. Les petits fichiers (sauvegarde Convex,
+          # 40 Mo) passent en une seule requête et ne rencontrent pas le
+          # problème — d'où un workflow voisin qui fonctionne depuis des mois.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         # `aws s3 cp` est sorti avec un code de SUCCÈS après n'avoir transféré que
         # 10 Mio sur 1,6 Gio (13/09/2026) : le workflow s'est déclaré vert et rien
         # n'est arrivé sur B2. On ne fait donc plus confiance au code de retour —
@@ -106,9 +113,15 @@ jobs:
           CLE="aiven-dumps/$DATE_JOUR/$FICHIER"
           ATTENDU=$(stat -c%s "$FICHIER")
 
+          aws --version
+
           for essai in 1 2 3; do
             echo "Envoi, tentative $essai (attendu : $ATTENDU octets)"
-            aws s3 cp "$FICHIER" "s3://$B2_BACKUP_BUCKET/$CLE" "--endpoint-url=https://$B2_ENDPOINT" --only-show-errors || true
+            # `set -e` est actif : sans ce `&&/||`, un envoi en échec couperait
+            # l'étape avant les tentatives suivantes.
+            CODE=0
+            aws s3 cp "$FICHIER" "s3://$B2_BACKUP_BUCKET/$CLE" "--endpoint-url=https://$B2_ENDPOINT" --no-progress || CODE=$?
+            echo "aws s3 cp a rendu le code $CODE"
 
             DISTANT=$(aws s3api head-object --bucket "$B2_BACKUP_BUCKET" --key "$CLE" "--endpoint-url=https://$B2_ENDPOINT" --query ContentLength --output text 2>/dev/null || echo 0)
             echo "Taille sur B2 : $DISTANT"
