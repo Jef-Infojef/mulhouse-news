@@ -6,8 +6,8 @@ name: Scrape Pharmacies de Garde
 # scripts/pharmacies-save.ts (API HTTP libSQL v2, sans Prisma).
 on:
   schedule:
-    # 11h30 UTC = 13h30 (heure locale française CEST) + 23h00 UTC (minuit CET)
-    - cron: '30 11,23 * * *'
+    # 06h30 UTC = 08h30 locale (matin) + 11h30 UTC = 13h30 (après-midi) + 23h00 UTC = 01h00 (nuit/lendemain)
+    - cron: '30 6,11,23 * * *'
   workflow_dispatch:
 
 permissions:
