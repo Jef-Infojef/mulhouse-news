@@ -136,11 +136,16 @@ jobs:
           echo "::error::Envoi vers B2 incomplet après 3 tentatives."
           exit 1
 
-      - name: Purger les sauvegardes de plus de 8 semaines
+      - name: Purger les sauvegardes de plus de 2 semaines
+        # Un dump pèse 1,76 Gio et le compte B2 plafonne à 10 Go, dont 3 Go
+        # d'images et 1,5 Go de sauvegardes Turso : huit copies hebdomadaires
+        # (14 Go) auraient rempli le compte à elles seules et refait tomber
+        # TOUTES les sauvegardes, comme le 20/08 et le 30/08. Deux copies
+        # tiennent ; au-delà, il faut relever le plafond (~0,09 $/mois).
         run: |
           aws s3 ls "s3://$B2_BACKUP_BUCKET/aiven-dumps/" "--endpoint-url=https://$B2_ENDPOINT" --recursive > aiven-dump-list.txt || true
 
-          CUTOFF_DATE=$(date -d '56 days ago' +%Y-%m-%d)
+          CUTOFF_DATE=$(date -d '14 days ago' +%Y-%m-%d)
 
           while IFS= read -r line; do
             FILE_KEY=$(echo "$line" | awk '{print $4}')
