@@ -31,6 +31,11 @@ from datetime import datetime, timezone
 
 import requests
 
+try:  # module voisin ; absent dans certains contextes d'import isole
+    import aiven_client
+except ImportError:  # pragma: no cover
+    aiven_client = None  # type: ignore[assignment]
+
 
 def get_convex_url() -> str | None:
     return os.environ.get("NEXT_PUBLIC_CONVEX_URL") or None
@@ -168,6 +173,16 @@ def _call(path: str, args: dict, *, mutation: bool) -> dict:
 
 _RAG_JOURNAL_ENV = "RAG_JOURNAL_PATH"
 
+# Depuis le 13/09/2026, l'actualite vit sur l'Aiven : le chat et les trois sites
+# l'y lisent, et les articles Convex ne servaient plus qu'a remplir un quota
+# depasse (6,76 Go pour 401 Mo de donnees reelles). Les ecritures d'articles y
+# sont donc coupees par defaut ; le journal RAG, lui, recoit tout.
+#
+# CONVEX_ARTICLE_WRITES=1 les retablit — a faire AVANT de revenir a Convex comme
+# magasin de reference, sans quoi sa table resterait figee.
+def ecritures_articles_actives() -> bool:
+    return os.environ.get("CONVEX_ARTICLE_WRITES", "").strip().lower() in ("1", "true", "on", "yes")
+
 # Champs de fond nécessaires à l'indexation (cf. format_press_article) : ni les
 # horodatages de service, ni les identifiants de jointure.
 _JOURNAL_KEYS = {
@@ -238,6 +253,10 @@ def upsert_article(row: dict) -> dict:
     """Insère ou met à jour un article (dédup par link). Champs fournis mis à
     jour, les autres conservés. `supabaseId` (UUID frais pour les nouveaux
     articles) permet les jointures tags/images."""
+    if not ecritures_articles_actives():
+        # Journal seul : c'est lui qui alimente l'Aiven, magasin de reference.
+        _journal_article(row, None)
+        return {"created": False, "id": None, "supabaseId": row.get("supabaseId")}
     try:
         result = _call("scrapers:upsertArticle", {"row": _strip_none(row)}, mutation=True)
     except Exception:
@@ -286,6 +305,14 @@ def _signaler_convex_indisponible(exc: Exception) -> None:
         )
 
 
+def _aiven_dispo() -> bool:
+    """L'Aiven porte-t-il la table Article ? C'est lui qui fait autorite pour la
+    dedup depuis le 13/09/2026 : il est a jour, indexe sur `link`, et repond
+    meme quand Convex est coupe. Indispensable avant de vider les articles cote
+    Convex — sinon une table vide ferait paraitre tous les liens inconnus."""
+    return bool(aiven_client and aiven_client.disponible())
+
+
 def get_article_by_link_tolerant(link: str) -> dict | None:
     """`get_article_by_link` qui rend None quand Convex ne repond pas.
 
@@ -296,6 +323,8 @@ def get_article_by_link_tolerant(link: str) -> dict | None:
     traite » : l'article sera retraite et consigne dans le journal RAG, et
     `upsert_document` ignorera un contenu inchange cote Aiven.
     """
+    if _aiven_dispo():
+        return aiven_client.article_par_lien(link)
     try:
         return get_article_by_link(link)
     except Exception as exc:
@@ -309,6 +338,8 @@ def get_existing_links_for_tolerant(links: list[str]) -> set[str]:
     Meme raison : mieux vaut retraiter des articles deja connus que de ne rien
     collecter du tout. Voir get_article_by_link_tolerant.
     """
+    if _aiven_dispo():
+        return aiven_client.liens_connus(links)
     try:
         return get_existing_links_for(links)
     except Exception as exc:
@@ -458,6 +489,9 @@ def delete_article_by_link(link: str) -> dict:
 def upsert_article_images(rows: list[dict]) -> dict:
     """Upsert d'images d'articles (dédup par (articleId, url)). `articleId` est
     l'UUID Supabase d'origine (champ supabaseId de l'article)."""
+    if not ecritures_articles_actives():
+        _journal_images(rows)
+        return {"inserted": 0, "updated": 0}
     try:
         return _call(
             "scrapers:upsertArticleImages",
@@ -470,6 +504,9 @@ def upsert_article_images(rows: list[dict]) -> dict:
 
 def upsert_article_google_tags(rows: list[dict]) -> dict:
     """Insère les liens article<->tag (dédup par (articleId, tagId), UUIDs)."""
+    if not ecritures_articles_actives():
+        _journal_tags(rows)
+        return {"inserted": 0}
     try:
         return _call(
             "scrapers:upsertArticleGoogleTags",

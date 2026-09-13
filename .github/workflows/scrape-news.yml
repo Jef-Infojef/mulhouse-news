@@ -25,6 +25,11 @@ jobs:
       # `runner.temp` n'est pas resolu dans un env de niveau job (contextes
       # autorises : github, needs, vars, secrets, inputs) : workspace, donc.
       RAG_JOURNAL_PATH: ${{ github.workspace }}/rag-journal.jsonl
+      # Les scrapers y cherchent si un lien est deja connu : depuis le
+      # 13/09/2026 c'est la table Article de l'Aiven qui fait autorite, plus
+      # Convex. Sans cette variable la dedup serait aveugle et chaque passage
+      # re-traiterait tout le sitemap.
+      RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
 
     steps:
       - name: Checkout repository
