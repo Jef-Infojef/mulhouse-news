@@ -49,9 +49,21 @@ jobs:
           aws configure set region us-west-002
 
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          aws s3 cp backup-turso.sql.gz "s3://asso-franklin-turso/backups/turso/backup-turso-${TIMESTAMP}.sql.gz" \
-            --endpoint-url https://s3.eu-central-003.backblazeb2.com
-          echo "[OK] Backup Turso téléchargé avec succès"
+          CLE="backups/turso/backup-turso-${TIMESTAMP}.sql.gz"
+          ATTENDU=$(stat -c%s backup-turso.sql.gz)
+          CODE=0
+          aws s3 cp backup-turso.sql.gz "s3://asso-franklin-turso/$CLE" --endpoint-url https://s3.eu-central-003.backblazeb2.com --no-progress || CODE=$?
+
+          # Ne pas se fier au code de retour : quand le compte B2 atteint son
+          # plafond, l'API S3 ferme la connexion sur une réponse malformée et
+          # `aws s3 cp` sort avec 0 sans rien avoir déposé. Ces sauvegardes se
+          # sont ainsi déclarées vertes du 20/08 au 13/09 en n'écrivant rien.
+          DISTANT=$(aws s3api head-object --bucket asso-franklin-turso --key "$CLE" --endpoint-url https://s3.eu-central-003.backblazeb2.com --query ContentLength --output text 2>/dev/null || echo 0)
+          if [ "$DISTANT" != "$ATTENDU" ]; then
+            echo "::error::Sauvegarde Turso absente de B2 ($DISTANT / $ATTENDU octets, code $CODE)."
+            exit 1
+          fi
+          echo "[OK] Sauvegarde Turso vérifiée sur B2 ($DISTANT octets)"
 
       - name: Backup POSTGRES (News)
         env:
@@ -77,9 +89,21 @@ jobs:
           aws configure set region us-west-002
 
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-          aws s3 cp backup-news.sql.gz "s3://asso-franklin-turso/backups/news/backup-news-${TIMESTAMP}.sql.gz" \
-            --endpoint-url https://s3.eu-central-003.backblazeb2.com
-          echo "[OK] Backup PostgreSQL téléchargé avec succès"
+          CLE="backups/news/backup-news-${TIMESTAMP}.sql.gz"
+          ATTENDU=$(stat -c%s backup-news.sql.gz)
+          CODE=0
+          aws s3 cp backup-news.sql.gz "s3://asso-franklin-turso/$CLE" --endpoint-url https://s3.eu-central-003.backblazeb2.com --no-progress || CODE=$?
+
+          # Ne pas se fier au code de retour : quand le compte B2 atteint son
+          # plafond, l'API S3 ferme la connexion sur une réponse malformée et
+          # `aws s3 cp` sort avec 0 sans rien avoir déposé. Ces sauvegardes se
+          # sont ainsi déclarées vertes du 20/08 au 13/09 en n'écrivant rien.
+          DISTANT=$(aws s3api head-object --bucket asso-franklin-turso --key "$CLE" --endpoint-url https://s3.eu-central-003.backblazeb2.com --query ContentLength --output text 2>/dev/null || echo 0)
+          if [ "$DISTANT" != "$ATTENDU" ]; then
+            echo "::error::Sauvegarde PostgreSQL absente de B2 ($DISTANT / $ATTENDU octets, code $CODE)."
+            exit 1
+          fi
+          echo "[OK] Sauvegarde PostgreSQL vérifiée sur B2 ($DISTANT octets)"
 
       - name: Purger les sauvegardes de plus de 90 jours
         env:

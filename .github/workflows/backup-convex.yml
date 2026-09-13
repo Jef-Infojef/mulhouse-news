@@ -71,9 +71,22 @@ jobs:
           B2_BACKUP_BUCKET: mulhouse-news-backups-private
         run: |
           BACKUP_DATE=$(date +%Y-%m-%d)
-          aws s3 cp convex-backup.zip \
-            "s3://$B2_BACKUP_BUCKET/convex-exports/$BACKUP_DATE/${{ steps.backup-file.outputs.filename }}" \
-            "--endpoint-url=https://$B2_ENDPOINT"
+          CLE="convex-exports/$BACKUP_DATE/${{ steps.backup-file.outputs.filename }}"
+          ATTENDU=$(stat -c%s convex-backup.zip)
+          CODE=0
+          aws s3 cp convex-backup.zip "s3://$B2_BACKUP_BUCKET/$CLE" "--endpoint-url=https://$B2_ENDPOINT" --no-progress || CODE=$?
+
+          # Ne pas se fier au code de retour : quand le compte B2 atteint son
+          # plafond, l'API S3 ferme la connexion sur une réponse malformée et
+          # `aws s3 cp` sort avec 0 sans rien avoir déposé. Cette sauvegarde
+          # s'est ainsi déclarée verte le 06/09 alors que le dernier fichier
+          # réellement arrivé datait du 30/08.
+          DISTANT=$(aws s3api head-object --bucket "$B2_BACKUP_BUCKET" --key "$CLE" "--endpoint-url=https://$B2_ENDPOINT" --query ContentLength --output text 2>/dev/null || echo 0)
+          if [ "$DISTANT" != "$ATTENDU" ]; then
+            echo "::error::Export Convex absent de B2 ($DISTANT / $ATTENDU octets, code $CODE)."
+            exit 1
+          fi
+          echo "Export Convex vérifié sur B2 ($DISTANT octets)."
 
       - name: Nettoyer les anciens exports Convex (garder 8 semaines)
         env:
