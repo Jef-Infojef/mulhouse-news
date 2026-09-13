@@ -9,6 +9,13 @@ import {
   fetchAivenArticleContent,
   setAivenArticleHidden,
 } from '@/lib/aiven-news'
+import {
+  getConfigValue,
+  setConfigValue,
+  deleteConfigValue,
+  incrementRateLimit,
+  fetchScrapingLogs,
+} from '@/lib/site-db'
 import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { createAdminSession, isAdminAuthenticated, safeEqual } from '@/lib/adminAuth'
@@ -37,14 +44,12 @@ async function clientIp(): Promise<string> {
 async function isRateLimited(): Promise<boolean> {
   const key = RL_PREFIX + (await clientIp())
   try {
-    // La logique du compteur (JSON {c,t}, fenêtre glissante, purge opportuniste)
-    // vit dans la mutation Convex app:incRateLimit, qui renvoie le compteur à jour.
-    const count = await convex.mutation(api.app.incRateLimit, {
-      key,
-      prefix: RL_PREFIX,
-      max: MAX_ATTEMPTS,
-      windowMs: ATTEMPT_WINDOW_MS,
-    })
+    // Compteur (JSON {c,t}, fenêtre glissante, purge opportuniste) dans la table
+    // AppConfig de la base principale — là où il a toujours vécu. Il lisait
+    // Convex, dont la coupure du 11/09/2026 refermait ce portillon à chaque
+    // tentative : l'admin était inaccessible alors que toutes ses données
+    // étaient joignables.
+    const count = await incrementRateLimit(key, RL_PREFIX, ATTEMPT_WINDOW_MS)
     return count > MAX_ATTEMPTS
   } catch (error) {
     // En cas d'indisponibilité de la base, on refuse la tentative plutôt que de
@@ -57,7 +62,7 @@ async function isRateLimited(): Promise<boolean> {
 
 async function clearRateLimit(): Promise<void> {
   try {
-    await convex.mutation(api.app.deleteAppConfig, { key: RL_PREFIX + (await clientIp()) })
+    await deleteConfigValue(RL_PREFIX + (await clientIp()))
   } catch {
     // Rien à nettoyer (ou base indisponible) : sans conséquence.
   }
@@ -180,15 +185,10 @@ export async function getArticleContent(id: string) {
 export async function getScrapingLogs() {
   if (!(await isAdminAuthenticated())) return { logs: [], error: 'Non autorisé' }
   try {
-    const { logs } = await convex.query(api.app.getScrapingLogs, { limit: 100 })
-    return {
-      logs: (logs ?? []).map((log) => ({
-        ...log,
-        startedAt: new Date(log.startedAt),
-        finishedAt: log.finishedAt ? new Date(log.finishedAt) : null,
-      })),
-      error: null,
-    }
+    // Table ScrapingLog de la base principale : les scrapers y écrivent, Convex
+    // n'en recevait qu'une copie.
+    const logs = await fetchScrapingLogs(100)
+    return { logs, error: null }
   } catch (error: unknown) {
     console.error('Erreur récupération logs:', error)
     return { logs: [], error: errorMessage(error) }
@@ -198,8 +198,7 @@ export async function getScrapingLogs() {
 export async function getAppConfig(key: string) {
   if (!(await isAdminAuthenticated())) return { value: null, error: 'Non autorisé' }
   try {
-    const { value } = await convex.query(api.app.getAppConfig, { key })
-    return { value: value ?? null, error: null }
+    return { value: await getConfigValue(key), error: null }
   } catch (error: unknown) {
     return { value: null, error: errorMessage(error) }
   }
@@ -208,7 +207,7 @@ export async function getAppConfig(key: string) {
 export async function updateAppConfig(key: string, value: string) {
   if (!(await isAdminAuthenticated())) return { success: false, error: 'Non autorisé' }
   try {
-    await convex.mutation(api.app.setAppConfig, { key, value })
+    await setConfigValue(key, value)
     return { success: true, error: null }
   } catch (error: unknown) {
     return { success: false, error: errorMessage(error) }
