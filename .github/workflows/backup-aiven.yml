@@ -2,8 +2,8 @@ name: Sauvegarde Aiven (RAG) - Hebdomadaire
 
 # L'Aiven porte désormais TOUT : le corpus RAG et ses vecteurs, le magasin de
 # fiches d'articles (Article, ArticleImage, ArticleTag, NewsTag), le GTFS et le
-# ChatLog. Depuis le 13/09/2026, ni le chat ni les sites ne dépendent plus de
-# Convex — cette base est donc le seul point dont la perte serait irréparable.
+# ChatLog. Depuis le 13/09/2026 ni le chat ni les sites ne dépendent plus de
+# Convex — c'est le seul point dont la perte serait irréparable.
 #
 # Aiven prend ses propres sauvegardes managées ; celle-ci est HORS de chez eux,
 # restaurable sur n'importe quel PostgreSQL 17, et suit la convention déjà en
@@ -20,7 +20,12 @@ permissions:
 jobs:
   backup:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
+
+    env:
+      B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+      B2_BACKUP_BUCKET: mulhouse-news-backups-private
+      PGBIN: /usr/lib/postgresql/17/bin
 
     steps:
       - name: Checkout du code
@@ -30,14 +35,11 @@ jobs:
         # Le runner fournit pg_dump 16, qui REFUSE de lire un serveur 17.10.
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
-            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
-          /usr/lib/postgresql/17/bin/pg_dump --version
+          "$PGBIN/pg_dump" --version
 
       - name: Nom du fichier de sauvegarde
         id: backup-file
@@ -48,41 +50,42 @@ jobs:
       - name: Dump de la base RAG
         env:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          FICHIER: ${{ steps.backup-file.outputs.filename }}
         run: |
           if [ -z "$RAG_DATABASE_URL" ]; then
             echo "::error::Secret RAG_DATABASE_URL absent — sauvegarde impossible."
             exit 1
           fi
 
-          /usr/lib/postgresql/17/bin/pg_dump -Fc -Z 6 \
-            --no-owner --no-privileges \
-            -d "$RAG_DATABASE_URL" \
-            -f "${{ steps.backup-file.outputs.filename }}"
+          "$PGBIN/pg_dump" -Fc -Z 6 --no-owner --no-privileges -d "$RAG_DATABASE_URL" -f "$FICHIER"
+          ls -lh "$FICHIER"
 
-          ls -lh "${{ steps.backup-file.outputs.filename }}"
-
-          # Un dump complet pèse ~290 Mo (300 000 chunks dont 299 854 vectorisés).
-          # En dessous de 100 Mo, quelque chose a été tronqué : mieux vaut échouer
+          # Un dump complet pèse ~1,6 Gio (300 000 chunks dont 299 854 vectorisés).
+          # En dessous de 1 Gio, quelque chose a été tronqué : mieux vaut échouer
           # bruyamment que remplacer une sauvegarde valide par une coquille.
-          TAILLE=$(stat -c%s "${{ steps.backup-file.outputs.filename }}")
-          if [ "$TAILLE" -lt 100000000 ]; then
-            echo "::error::Sauvegarde suspecte : $TAILLE octets (< 100 Mo)."
+          TAILLE=$(stat -c%s "$FICHIER")
+          if [ "$TAILLE" -lt 1000000000 ]; then
+            echo "::error::Sauvegarde suspecte : $TAILLE octets (< 1 Gio)."
             exit 1
           fi
 
       - name: Vérifier que le dump est relisible
-        # Un fichier de bonne taille peut être illisible : on décompresse une
-        # section entière plutôt que de se fier au seul sommaire.
+        env:
+          FICHIER: ${{ steps.backup-file.outputs.filename }}
+        # Le sommaire d'un dump custom est écrit en TÊTE de fichier : un dump
+        # tronqué le présente intact, et contrôler une seule table peut passer si
+        # elle a été écrite tôt. C'est arrivé le 13/09/2026 — un fichier
+        # incomplet déclaré valide. On relit donc TOUT : pg_restore échoue sur
+        # une archive tronquée ou corrompue.
         run: |
-          /usr/lib/postgresql/17/bin/pg_restore -l "${{ steps.backup-file.outputs.filename }}" \
-            | grep -c "TABLE DATA"
-          LIGNES=$(/usr/lib/postgresql/17/bin/pg_restore --data-only -t Article -f - \
-            "${{ steps.backup-file.outputs.filename }}" | wc -l)
-          echo "Table Article : $LIGNES lignes relues"
-          if [ "$LIGNES" -lt 1000 ]; then
-            echo "::error::Section Article illisible ou vide."
+          TABLES=$("$PGBIN/pg_restore" -l "$FICHIER" | grep -c "TABLE DATA")
+          echo "Tables avec données : $TABLES"
+          if [ "$TABLES" -lt 15 ]; then
+            echo "::error::Sommaire incomplet : $TABLES tables seulement."
             exit 1
           fi
+          "$PGBIN/pg_restore" --data-only -f /dev/null "$FICHIER"
+          echo "Archive relue intégralement, sans erreur."
 
       - name: Configurer les credentials B2
         run: |
@@ -90,22 +93,39 @@ jobs:
           aws configure set aws_secret_access_key "${{ secrets.B2_APPLICATION_KEY }}"
           aws configure set default.region us-west-002
 
-      - name: Uploader vers B2 (aiven-dumps/<date>/)
+      - name: Uploader vers B2 et vérifier l'arrivée
         env:
-          B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
-          B2_BACKUP_BUCKET: mulhouse-news-backups-private
+          FICHIER: ${{ steps.backup-file.outputs.filename }}
+          DATE_JOUR: ${{ steps.backup-file.outputs.date }}
+        # `aws s3 cp` est sorti avec un code de SUCCÈS après n'avoir transféré que
+        # 10 Mio sur 1,6 Gio (13/09/2026) : le workflow s'est déclaré vert et rien
+        # n'est arrivé sur B2. On ne fait donc plus confiance au code de retour —
+        # la taille de l'objet distant est comparée à celle du fichier local, et
+        # l'envoi est retenté tant qu'elles diffèrent.
         run: |
-          aws s3 cp "${{ steps.backup-file.outputs.filename }}" \
-            "s3://$B2_BACKUP_BUCKET/aiven-dumps/${{ steps.backup-file.outputs.date }}/${{ steps.backup-file.outputs.filename }}" \
-            "--endpoint-url=https://$B2_ENDPOINT"
+          CLE="aiven-dumps/$DATE_JOUR/$FICHIER"
+          ATTENDU=$(stat -c%s "$FICHIER")
+
+          for essai in 1 2 3; do
+            echo "Envoi, tentative $essai (attendu : $ATTENDU octets)"
+            aws s3 cp "$FICHIER" "s3://$B2_BACKUP_BUCKET/$CLE" "--endpoint-url=https://$B2_ENDPOINT" --only-show-errors || true
+
+            DISTANT=$(aws s3api head-object --bucket "$B2_BACKUP_BUCKET" --key "$CLE" "--endpoint-url=https://$B2_ENDPOINT" --query ContentLength --output text 2>/dev/null || echo 0)
+            echo "Taille sur B2 : $DISTANT"
+
+            if [ "$DISTANT" = "$ATTENDU" ]; then
+              echo "Sauvegarde vérifiée sur B2 ($DISTANT octets)."
+              exit 0
+            fi
+            echo "::warning::Tentative $essai incomplète ($DISTANT / $ATTENDU)."
+          done
+
+          echo "::error::Envoi vers B2 incomplet après 3 tentatives."
+          exit 1
 
       - name: Purger les sauvegardes de plus de 8 semaines
-        env:
-          B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
-          B2_BACKUP_BUCKET: mulhouse-news-backups-private
         run: |
-          aws s3 ls "s3://$B2_BACKUP_BUCKET/aiven-dumps/" \
-            "--endpoint-url=https://$B2_ENDPOINT" --recursive > aiven-dump-list.txt || true
+          aws s3 ls "s3://$B2_BACKUP_BUCKET/aiven-dumps/" "--endpoint-url=https://$B2_ENDPOINT" --recursive > aiven-dump-list.txt || true
 
           CUTOFF_DATE=$(date -d '56 days ago' +%Y-%m-%d)
 
@@ -115,8 +135,7 @@ jobs:
 
             if [ -n "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
               echo "Suppression : $FILE_KEY"
-              aws s3 rm "s3://$B2_BACKUP_BUCKET/$FILE_KEY" \
-                "--endpoint-url=https://$B2_ENDPOINT" || true
+              aws s3 rm "s3://$B2_BACKUP_BUCKET/$FILE_KEY" "--endpoint-url=https://$B2_ENDPOINT" || true
             fi
           done < aiven-dump-list.txt
 
