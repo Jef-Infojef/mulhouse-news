@@ -135,14 +135,35 @@ def chunk_text(text: str) -> list[tuple[int, str]]:
     return chunks
 
 
+def normaliser_date(valeur) -> datetime | None:
+    """Date de parution, quelle que soit la forme sous laquelle elle arrive.
+
+    Le journal JSONL serialise les datetime en epoch ms (_json_default), mais un
+    scraper qui pose deja une chaine ISO dans `publishedAt` la voit traverser
+    telle quelle : elle n'etait alors ni int ni datetime, et la date partait a
+    la poubelle sans un mot.
+    """
+    if isinstance(valeur, datetime):
+        return valeur if valeur.tzinfo else valeur.replace(tzinfo=timezone.utc)
+    if isinstance(valeur, (int, float)):
+        return datetime.fromtimestamp(valeur / 1000, tz=timezone.utc)
+    if isinstance(valeur, str) and valeur.strip():
+        texte = valeur.strip()
+        try:
+            # fromisoformat ne lit le Z qu'a partir de Python 3.11.
+            parsee = datetime.fromisoformat(texte.replace("Z", "+00:00"))
+            return parsee if parsee.tzinfo else parsee.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
 def format_press_article(row: dict) -> str | None:
-    pub = row.get("publishedAt")
-    if USE_CONVEX and isinstance(pub, (int, float)):
-        pub_str = datetime.fromtimestamp(pub / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
-    elif isinstance(pub, datetime):
-        pub_str = pub.strftime("%Y-%m-%d")
-    else:
-        pub_str = ""
+    # Une seule lecture de date pour tout le pont : le decodage local qui
+    # n'acceptait les epoch ms que sous USE_CONVEX laissait passer des articles
+    # sans la ligne « Publié le: », donc introuvables par une recherche datee.
+    pub = normaliser_date(row.get("publishedAt"))
+    pub_str = pub.strftime("%Y-%m-%d") if pub else ""
     parts = [
         f"Titre: {row['title']}",
         f"Source: {row['source']}" if row.get("source") else None,
@@ -180,8 +201,19 @@ def press_metadata(source: str | None, published_at: str, image_url: str | None)
     `imageUrl` illustre la carte de source cote MulhouseGPT ; l'omettre laissait
     les articles recents sans photo alors que l'image existait dans Convex.
     Cle absente plutot que vide : le lecteur teste la presence.
+
+    Une chaine vide n'est PAS une absence pour le lecteur : `new Date("")` rend
+    un NaN, que fetchRecentIndexedNews traite comme une date illisible et qui
+    fait disparaitre l'article du fil d'actualite sans le moindre message. 43
+    articles — dont toute la presse du 12/09/2026 — y ont ete perdus. On omet
+    donc la cle plutot que d'y mettre du vide, comme le dit le paragraphe
+    ci-dessus : le code ne le faisait pas.
     """
-    meta = {"source": source or "", "publishedAt": published_at}
+    meta = {}
+    if source:
+        meta["source"] = source
+    if published_at:
+        meta["publishedAt"] = published_at
     if image_url:
         meta["imageUrl"] = image_url
     return meta
@@ -449,11 +481,18 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
         # Le journal porte des epoch ms (format Convex) ; format_press_article
         # ne les lit ainsi que sous USE_CONVEX. On normalise en datetime pour
         # que l'indexation soit independante du backend de lecture configure.
-        publie = article.get("publishedAt")
-        if isinstance(publie, (int, float)):
-            publie = datetime.fromtimestamp(publie / 1000, tz=timezone.utc)
-        elif not isinstance(publie, datetime):
-            publie = None
+        publie = normaliser_date(article.get("publishedAt"))
+        if publie is None:
+            # Sans date, l'article s'indexe quand meme mais sort du fil
+            # d'actualite : le lecteur ne garde que ce qu'il peut dater. La
+            # fiche Article, elle, porte la date — c'est le scraper qui ne l'a
+            # pas repetee dans l'entree de journal apportant le contenu. On la
+            # relit plutot que de publier un article sans date (43 perdus
+            # ainsi le 12/09/2026).
+            rag_cur.execute('SELECT "publishedAt" FROM "Article" WHERE link = %s LIMIT 1', (lien,))
+            connu = rag_cur.fetchone()
+            if connu and connu[0]:
+                publie = normaliser_date(connu[0])
         if not article.get("title"):
             # Le scraper de contenu ecrit PAR LIEN, sans repeter le titre : une
             # entree qui apporte le texte integral n'en porte pas. Le titre est
@@ -659,9 +698,10 @@ def sync_news_articles(rag_cur, news_cur, limit: int, stats: dict, site_url: str
                 title=article["title"],
                 content=body,
                 url=url,
-                metadata={
-                    "publishedAt": article["publishedAt"].isoformat() if article["publishedAt"] else "",
-                },
+                # Cle omise plutot que vide : voir press_metadata, une chaine
+                # vide fait sortir l'article du fil sans erreur.
+                metadata=press_metadata(None, article["publishedAt"].isoformat()
+                                        if article["publishedAt"] else "", None),
                 stats=stats,
             )
         except Exception as exc:

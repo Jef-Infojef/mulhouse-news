@@ -81,3 +81,96 @@ def article_par_lien(lien: str) -> dict | None:
         "supabaseId": r[0], "id": r[0], "title": r[1], "link": r[2],
         "description": r[3], "imageUrl": r[4], "imageCaption": r[5], "hidden": r[6],
     }
+
+
+def articles_contenu_court(limit: int = 50, hours: int = 24) -> list[dict]:
+    """Articles récents au contenu court ou absent, du plus récent au plus vieux.
+
+    Reprend `scrapers:getArticlesShortContent`. Même forme de retour que Convex
+    — les appelants lisent `a["source"]`, `a["link"]`, `a["title"]` — pour que
+    la bascule ne les oblige à rien changer. Le contenu n'est jamais rapatrié :
+    seule sa longueur sert au tri du travail restant.
+    """
+    try:
+        with _curseur() as cur:
+            cur.execute(
+                'SELECT id, title, link, source, description, "imageUrl", "imageCaption" '
+                'FROM "Article" '
+                'WHERE hidden = false '
+                '  AND (content IS NULL OR length(content) < 100) '
+                '  AND "publishedAt" > NOW() - make_interval(hours => %s) '
+                'ORDER BY "publishedAt" DESC LIMIT %s',
+                (int(hours), int(limit)),
+            )
+            lignes = cur.fetchall()
+    except Exception as exc:
+        print(f"[aiven] articles au contenu court illisibles ({exc})", file=sys.stderr)
+        return []
+    return [
+        {"id": r[0], "supabaseId": r[0], "title": r[1], "link": r[2], "source": r[3],
+         "description": r[4], "imageUrl": r[5], "imageCaption": r[6]}
+        for r in lignes
+    ]
+
+
+def articles_sans_contenu(limit: int = 300, order: str = "desc") -> list[dict]:
+    """Articles lalsace.fr sans texte, sans borne de date (backfill d'archive).
+
+    Reprend `scrapers:getArticlesMissingContentAll`. Convex devait paginer par
+    lots de 500 en rapatriant les textes ; ici l'index fait le tri en une
+    requête, et le contenu ne quitte jamais la base.
+    """
+    sens = "ASC" if str(order).lower() == "asc" else "DESC"
+    try:
+        with _curseur() as cur:
+            cur.execute(
+                'SELECT id, title, link, description, "imageUrl", "imageCaption" '
+                'FROM "Article" '
+                'WHERE hidden = false AND link LIKE %s '
+                '  AND (content IS NULL OR length(content) < 150) '
+                f'ORDER BY "publishedAt" {sens} LIMIT %s',
+                ("%lalsace.fr%", int(limit)),
+            )
+            lignes = cur.fetchall()
+    except Exception as exc:
+        print(f"[aiven] articles sans contenu illisibles ({exc})", file=sys.stderr)
+        return []
+    return [
+        {"supabaseId": r[0], "id": r[0], "title": r[1] or "", "link": r[2],
+         "description": r[3], "imageUrl": r[4], "imageCaption": r[5]}
+        for r in lignes
+    ]
+
+
+def articles_sans_legende(limit: int = 30) -> list[dict]:
+    """Articles EBRA récents illustrés mais sans légende (rattrapage).
+
+    Reprend `scrapers:getArticlesMissingCaptions`. L'appelant lit `row["link"]`.
+    """
+    try:
+        with _curseur() as cur:
+            cur.execute(
+                'SELECT id, link FROM "Article" '
+                'WHERE "imageCaption" IS NULL '
+                '  AND "imageUrl" IS NOT NULL AND "imageUrl" <> \'\' '
+                '  AND "publishedAt" > NOW() - INTERVAL \'14 days\' '
+                '  AND (link LIKE %s OR link LIKE %s OR link LIKE %s OR link LIKE %s) '
+                'ORDER BY "publishedAt" DESC LIMIT %s',
+                ("%lalsace.fr%", "%dna.fr%", "%estrepublicain.fr%", "%vosgesmatin.fr%", int(limit)),
+            )
+            lignes = cur.fetchall()
+    except Exception as exc:
+        print(f"[aiven] legendes a rattraper illisibles ({exc})", file=sys.stderr)
+        return []
+    return [{"id": r[0], "supabaseId": r[0], "link": r[1]} for r in lignes]
+
+
+def tags_actualites() -> list[dict]:
+    """Tags d'actualité : [{"id", "name", "slug"}]. Reprend `scrapers:getNewsTags`."""
+    try:
+        with _curseur() as cur:
+            cur.execute('SELECT id, name, slug FROM "NewsTag"')
+            return [{"id": r[0], "name": r[1], "slug": r[2]} for r in cur.fetchall()]
+    except Exception as exc:
+        print(f"[aiven] tags illisibles ({exc})", file=sys.stderr)
+        return []

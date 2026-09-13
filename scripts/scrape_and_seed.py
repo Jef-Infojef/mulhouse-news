@@ -165,7 +165,7 @@ def load_tags(cur):
         # du scraping. Une lecture Convex qui echoue ici tuait le run entier
         # avant le moindre article (constate le 13/09/2026, deploiement coupe).
         try:
-            rows = convex_client.get_news_tags()
+            rows = convex_client.get_news_tags_tolerant()
         except Exception as exc:
             print(f"[!] Tags indisponibles ({exc}) : articles collectes sans tag.")
             rows = []

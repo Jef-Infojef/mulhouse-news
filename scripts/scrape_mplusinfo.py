@@ -198,7 +198,7 @@ def _get_missing_content_rows(cur, limit: int | None) -> list[tuple]:
     Retourne (article_id, title, link) — en mode Convex article_id = link
     (la mise à jour Convex est indexée par link)."""
     if USE_CONVEX:
-        rows = convex_client.get_articles_short_content(limit=limit or 20, hours=48)
+        rows = convex_client.get_articles_short_content_tolerant(limit=limit or 20, hours=48)
         out = []
         for a in rows:
             if a["source"] == SOURCE:

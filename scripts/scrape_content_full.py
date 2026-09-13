@@ -124,21 +124,26 @@ def get_db_connection():
 def list_missing_content_via_pages(limit: int, order: str = "desc") -> list[dict]:
     """Articles lalsace.fr au contenu manquant/court.
 
-    1. Query dédiée `getArticlesMissingContentAll` (métadonnées seules, un
-       appel HTTP) — c'est le chemin rapide.
+    1. Requête dédiée — sur l'Aiven quand il répond, sinon
+       `getArticlesMissingContentAll` côté Convex. C'est le chemin rapide.
     2. Repli : pagination `getArticlesPage` (CONTENT inclus, lourd). Un log
        par page, sinon le terminal reste muet jusqu'à la 50ᵉ (~25 k docs).
+       Réservé à Convex : sur l'Aiven, une liste vide est une réponse — la
+       table est indexée et complète, il n'y a rien à confirmer en scannant
+       25 000 documents d'une base par ailleurs coupée.
     """
     print(f"[*] Recherche des articles lalsace.fr sans texte (ordre {order})…", flush=True)
     try:
-        found = convex_client.get_articles_missing_content_all(
+        found = convex_client.get_articles_missing_content_all_tolerant(
             limit=limit or 300,
-            max_pages=200,
             order=order,
         )
         if found:
-            print(f"[*] {len(found)} candidats (query dédiée, sans télécharger les textes)", flush=True)
+            print(f"[*] {len(found)} candidats (requête dédiée, sans télécharger les textes)", flush=True)
             return found
+        if convex_client.aiven_prioritaire():
+            print("[*] Aucun article lalsace.fr sans texte sur l'Aiven : rien à faire", flush=True)
+            return []
         print("[*] Query dédiée : 0 candidat, scan page par page pour confirmer", flush=True)
     except Exception as exc:
         print(f"[!] Query dédiée indisponible ({exc}) — scan page par page", flush=True)
@@ -853,7 +858,7 @@ def main():
             if args.archive:
                 articles = list_missing_content_via_pages(args.limit or 0, order=args.order)
             else:
-                articles = convex_client.get_articles_short_content(limit=args.limit or 50, hours=24)
+                articles = convex_client.get_articles_short_content_tolerant(limit=args.limit or 50, hours=24)
         else:
             if args.archive:
                 # Tous les articles L'Alsace au contenu manquant, du plus ancien
@@ -1032,7 +1037,7 @@ def main():
             # Rattrapage annexe : il ne doit pas annuler le travail principal,
             # deja valide, si Convex ne repond pas.
             try:
-                caption_rows = convex_client.get_articles_missing_captions(limit=30)
+                caption_rows = convex_client.get_articles_missing_captions_tolerant(limit=30)
             except Exception as exc:
                 print(f"[!] Legendes a rattraper illisibles ({str(exc).splitlines()[0][:60]}) : etape sautee.")
                 caption_rows = []

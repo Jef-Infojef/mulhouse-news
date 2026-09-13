@@ -126,6 +126,14 @@ jobs:
           python scripts/scrape_content_full.py
 
       - name: Sync RAG index (direct Aiven, sans Vercel)
+        # `always()` : le 13/09/2026, le scraper mplusinfo est mort sur une
+        # ecriture de journal Convex (deploiement coupe pour quota) et a
+        # emporte cette etape avec lui. Les articles deja collectes par les
+        # etapes precedentes — L'Alsace du jour comprise — n'ont donc jamais
+        # ete indexes : le chat servait l'avant-veille alors que la collecte
+        # avait fonctionne. L'indexation ne depend d'aucun scraper : ce qui est
+        # dans le journal doit entrer dans le RAG, meme apres un echec.
+        if: always()
         env:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

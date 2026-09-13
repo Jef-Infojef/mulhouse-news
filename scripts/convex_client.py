@@ -328,6 +328,16 @@ def _signaler_convex_indisponible(exc: Exception) -> None:
         )
 
 
+def aiven_prioritaire() -> bool:
+    """True quand les lectures d'articles partent sur l'Aiven plutot que Convex.
+
+    Public : un appelant qui garde un repli Convex couteux (scan pagine) doit
+    pouvoir savoir qu'il n'a pas lieu d'etre, une liste vide venant de l'Aiven
+    etant une reponse et non un silence.
+    """
+    return _aiven_dispo()
+
+
 def _aiven_dispo() -> bool:
     """L'Aiven porte-t-il la table Article ? C'est lui qui fait autorite pour la
     dedup depuis le 13/09/2026 : il est a jour, indexe sur `link`, et repond
@@ -368,6 +378,59 @@ def get_existing_links_for_tolerant(links: list[str]) -> set[str]:
     except Exception as exc:
         _signaler_convex_indisponible(exc)
         return set()
+
+
+def get_articles_short_content_tolerant(limit: int = 50, hours: int = 24) -> list[dict]:
+    """Liste de travail des scrapers de contenu, lue sur l'Aiven quand il repond.
+
+    Meme bascule que la dedup : la table Article de l'Aiven fait autorite depuis
+    le 13/09/2026, et elle repond quand Convex est coupe. Une liste vide, ici,
+    veut dire « rien a faire » — un scraper ne doit pas mourir pour autant.
+    """
+    if _aiven_dispo():
+        return aiven_client.articles_contenu_court(limit=limit, hours=hours)
+    try:
+        return get_articles_short_content(limit=limit, hours=hours)
+    except Exception as exc:
+        _signaler_convex_indisponible(exc)
+        return []
+
+
+def get_articles_missing_content_all_tolerant(limit: int = 300, order: str = "desc") -> list[dict]:
+    """Backfill d'archive : articles lalsace.fr sans texte. Voir ci-dessus.
+
+    Cote Aiven la question tient en une requete indexee, la ou Convex imposait
+    de paginer 500 documents a la fois en rapatriant les textes entiers.
+    """
+    if _aiven_dispo():
+        return aiven_client.articles_sans_contenu(limit=limit, order=order)
+    try:
+        return get_articles_missing_content_all(limit=limit, order=order)
+    except Exception as exc:
+        _signaler_convex_indisponible(exc)
+        return []
+
+
+def get_articles_missing_captions_tolerant(limit: int = 30) -> list[dict]:
+    """Rattrapage des legendes photo. Voir ci-dessus."""
+    if _aiven_dispo():
+        return aiven_client.articles_sans_legende(limit=limit)
+    try:
+        return get_articles_missing_captions(limit=limit)
+    except Exception as exc:
+        _signaler_convex_indisponible(exc)
+        return []
+
+
+def get_news_tags_tolerant() -> list[dict]:
+    """Tags d'actualite, lus sur l'Aiven quand il repond. Voir ci-dessus."""
+    if _aiven_dispo():
+        return aiven_client.tags_actualites()
+    try:
+        return get_news_tags()
+    except Exception as exc:
+        _signaler_convex_indisponible(exc)
+        return []
 
 
 def get_article_by_supabase_id(article_id: str) -> dict | None:
