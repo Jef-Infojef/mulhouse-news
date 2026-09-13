@@ -1,0 +1,135 @@
+name: Sauvegarde Aiven (RAG) - Hebdomadaire
+
+# L'Aiven porte désormais TOUT : le corpus RAG et ses vecteurs, le magasin de
+# fiches d'articles (Article, ArticleImage, ArticleTag, NewsTag), le GTFS et le
+# ChatLog. Depuis le 13/09/2026, ni le chat ni les sites ne dépendent plus de
+# Convex — cette base est donc le seul point dont la perte serait irréparable.
+#
+# Aiven prend ses propres sauvegardes managées ; celle-ci est HORS de chez eux,
+# restaurable sur n'importe quel PostgreSQL 17, et suit la convention déjà en
+# place pour Convex (B2, rétention 8 semaines).
+
+on:
+  schedule:
+    - cron: '0 3 * * 0' # dimanche 03:00 UTC, après la sauvegarde Convex de 02:00
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer pg_dump 17
+        # Le runner fournit pg_dump 16, qui REFUSE de lire un serveur 17.10.
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+
+      - name: Nom du fichier de sauvegarde
+        id: backup-file
+        run: |
+          echo "filename=aiven-rag-$(date +%Y-%m-%d_%H-%M-%S).dump" >> "$GITHUB_OUTPUT"
+          echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Dump de la base RAG
+        env:
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+        run: |
+          if [ -z "$RAG_DATABASE_URL" ]; then
+            echo "::error::Secret RAG_DATABASE_URL absent — sauvegarde impossible."
+            exit 1
+          fi
+
+          /usr/lib/postgresql/17/bin/pg_dump -Fc -Z 6 \
+            --no-owner --no-privileges \
+            -d "$RAG_DATABASE_URL" \
+            -f "${{ steps.backup-file.outputs.filename }}"
+
+          ls -lh "${{ steps.backup-file.outputs.filename }}"
+
+          # Un dump complet pèse ~290 Mo (300 000 chunks dont 299 854 vectorisés).
+          # En dessous de 100 Mo, quelque chose a été tronqué : mieux vaut échouer
+          # bruyamment que remplacer une sauvegarde valide par une coquille.
+          TAILLE=$(stat -c%s "${{ steps.backup-file.outputs.filename }}")
+          if [ "$TAILLE" -lt 100000000 ]; then
+            echo "::error::Sauvegarde suspecte : $TAILLE octets (< 100 Mo)."
+            exit 1
+          fi
+
+      - name: Vérifier que le dump est relisible
+        # Un fichier de bonne taille peut être illisible : on décompresse une
+        # section entière plutôt que de se fier au seul sommaire.
+        run: |
+          /usr/lib/postgresql/17/bin/pg_restore -l "${{ steps.backup-file.outputs.filename }}" \
+            | grep -c "TABLE DATA"
+          LIGNES=$(/usr/lib/postgresql/17/bin/pg_restore --data-only -t Article -f - \
+            "${{ steps.backup-file.outputs.filename }}" | wc -l)
+          echo "Table Article : $LIGNES lignes relues"
+          if [ "$LIGNES" -lt 1000 ]; then
+            echo "::error::Section Article illisible ou vide."
+            exit 1
+          fi
+
+      - name: Configurer les credentials B2
+        run: |
+          aws configure set aws_access_key_id "${{ secrets.B2_APPLICATION_KEY_ID }}"
+          aws configure set aws_secret_access_key "${{ secrets.B2_APPLICATION_KEY }}"
+          aws configure set default.region us-west-002
+
+      - name: Uploader vers B2 (aiven-dumps/<date>/)
+        env:
+          B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+          B2_BACKUP_BUCKET: mulhouse-news-backups-private
+        run: |
+          aws s3 cp "${{ steps.backup-file.outputs.filename }}" \
+            "s3://$B2_BACKUP_BUCKET/aiven-dumps/${{ steps.backup-file.outputs.date }}/${{ steps.backup-file.outputs.filename }}" \
+            "--endpoint-url=https://$B2_ENDPOINT"
+
+      - name: Purger les sauvegardes de plus de 8 semaines
+        env:
+          B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
+          B2_BACKUP_BUCKET: mulhouse-news-backups-private
+        run: |
+          aws s3 ls "s3://$B2_BACKUP_BUCKET/aiven-dumps/" \
+            "--endpoint-url=https://$B2_ENDPOINT" --recursive > aiven-dump-list.txt || true
+
+          CUTOFF_DATE=$(date -d '56 days ago' +%Y-%m-%d)
+
+          while IFS= read -r line; do
+            FILE_KEY=$(echo "$line" | awk '{print $4}')
+            FILE_DATE=$(echo "$FILE_KEY" | grep -oP 'aiven-dumps/\K[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+
+            if [ -n "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
+              echo "Suppression : $FILE_KEY"
+              aws s3 rm "s3://$B2_BACKUP_BUCKET/$FILE_KEY" \
+                "--endpoint-url=https://$B2_ENDPOINT" || true
+            fi
+          done < aiven-dump-list.txt
+
+      - name: Notifier l'échec
+        # Une sauvegarde qui échoue en silence ne vaut rien : c'est le jour de la
+        # restauration qu'on découvrirait le trou.
+        if: failure()
+        uses: ./.github/actions/telegram
+        with:
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          chat_id: ${{ secrets.TELEGRAM_CHAT_ID }}
+          status: echec
+          title: Sauvegarde Aiven en échec
+          body: |
+            Le dump hebdomadaire de la base RAG n'a pas abouti.
+            Run : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
