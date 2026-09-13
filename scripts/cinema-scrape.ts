@@ -34,7 +34,17 @@ const CONVEX_URL_ENV = "NEXT_PUBLIC_CONVEX_URL";
 const CONVEX_KEY_ENV = "CONVEX_DEPLOY_KEY";
 
 function useConvexCinema(): boolean {
-  return Boolean(process.env[CONVEX_KEY_ENV]?.trim() && process.env[CONVEX_URL_ENV]?.trim());
+  // Le miroir est coupé par défaut depuis le 13/09/2026 : plus rien ne lit le
+  // cinéma dans Convex — le chat passe par Supabase, où ce script écrit en
+  // primaire. Le miroir ne faisait que consommer un quota déjà dépassé.
+  // CONVEX_WRITES=1 le rétablit.
+  const ecrituresAutorisees = ['1', 'true', 'on', 'yes'].includes(
+    (process.env.CONVEX_WRITES ?? '').trim().toLowerCase()
+  );
+  return (
+    ecrituresAutorisees &&
+    Boolean(process.env[CONVEX_KEY_ENV]?.trim() && process.env[CONVEX_URL_ENV]?.trim())
+  );
 }
 
 function requireConvexConfig(): { url: string; key: string } {

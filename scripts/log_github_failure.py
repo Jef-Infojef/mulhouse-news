@@ -5,7 +5,12 @@ from datetime import datetime
 import convex_client
 
 def log_failure():
-    # Backend : Convex si CONVEX_DEPLOY_KEY définie, sinon Supabase.
+    # Postgres d'abord : c'est la table que lit la page d'admin depuis le
+    # 13/09/2026. Convex n'en reçoit plus qu'un miroir, coupé par défaut.
+    #
+    # L'ordre comptait : l'écriture Convex était suivie d'un `return`, donc une
+    # mutation devenue silencieuse (CONVEX_WRITES absent) aurait fait croire au
+    # script qu'il avait enregistré, et plus aucun échec n'aurait été tracé.
     if convex_client.use_convex():
         try:
             convex_client.insert_scraping_log(
@@ -16,10 +21,8 @@ def log_failure():
                     "GitHub Action a échoué avant ou pendant l'exécution du script principal."
                 ),
             )
-            print("✅ Log d'échec critique enregistré (Convex).")
         except Exception as e:
-            print(f"❌ Impossible d'enregistrer le log d'échec : {e}")
-        return
+            print(f"⚠️ Miroir Convex indisponible : {e}")
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:

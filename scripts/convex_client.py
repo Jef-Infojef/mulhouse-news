@@ -104,7 +104,17 @@ def _json_default(value):
     raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
 
 
+_mutations_coupees_signalees = False
+
+
 def _call(path: str, args: dict, *, mutation: bool) -> dict:
+    if mutation and not ecritures_convex_actives():
+        global _mutations_coupees_signalees
+        if not _mutations_coupees_signalees:
+            _mutations_coupees_signalees = True
+            print("[convex] ecritures coupees (CONVEX_WRITES absent) : miroirs ignores",
+                  file=sys.stderr)
+        return {}
     url, key = _require_config()
     endpoint = f"{url}/api/{'mutation' if mutation else 'query'}"
     payload = {"path": path, "format": "json", "args": _strip_none(args) if args else {}}
@@ -178,10 +188,23 @@ _RAG_JOURNAL_ENV = "RAG_JOURNAL_PATH"
 # depasse (6,76 Go pour 401 Mo de donnees reelles). Les ecritures d'articles y
 # sont donc coupees par defaut ; le journal RAG, lui, recoit tout.
 #
-# CONVEX_ARTICLE_WRITES=1 les retablit — a faire AVANT de revenir a Convex comme
-# magasin de reference, sans quoi sa table resterait figee.
-def ecritures_articles_actives() -> bool:
-    return os.environ.get("CONVEX_ARTICLE_WRITES", "").strip().lower() in ("1", "true", "on", "yes")
+# Etendu le 13/09/2026 a TOUTES les ecritures : plus rien ne lit Convex — ni le
+# chat, ni les trois sites, ni l'administration. Journaux de scraping,
+# configuration, cinema, sorties : leurs donnees vivent dans Supabase ou sur
+# l'Aiven, et les miroirs Convex ne faisaient que consommer un quota depasse.
+#
+# CONVEX_WRITES=1 les retablit toutes (CONVEX_ARTICLE_WRITES reste accepte).
+# A poser AVANT toute reprise de Convex comme magasin, et pour les scripts de
+# migration, qui doivent evidemment pouvoir ecrire.
+def ecritures_convex_actives() -> bool:
+    for nom in ("CONVEX_WRITES", "CONVEX_ARTICLE_WRITES"):
+        if os.environ.get(nom, "").strip().lower() in ("1", "true", "on", "yes"):
+            return True
+    return False
+
+
+# Ancien nom, conserve pour les appelants existants.
+ecritures_articles_actives = ecritures_convex_actives
 
 # Champs de fond nécessaires à l'indexation (cf. format_press_article) : ni les
 # horodatages de service, ni les identifiants de jointure.
