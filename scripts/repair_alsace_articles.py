@@ -1,59 +1,48 @@
-"""Rattrapage des articles L'Alsace incomplets (source « (archive) », titre slug, photo manquante).
+"""Rattrapage des articles L'Alsace incomplets (source « (archive) », titre slug, photos et métadonnées).
 
-Deux populations, une seule passe et une seule requête HTTP par article :
-
-  1. les articles insérés sous l'ancien libellé `L'Alsace (archive)` — un
-     doublon de source créé par le canal de découverte (sitemap) alors qu'il
-     s'agit du même journal que le flux RSS. Ils sont ramenés sous `L'Alsace` ;
-  2. les articles déjà sous `L'Alsace` mais sans `imageUrl` — reliquat des
-     insertions faites avant que `scrape_alsace_archive.py` ne lise la page.
-
-Pour chacun, la page lalsace.fr est ouverte et `parse_ebra_page_meta` en tire
-le vrai titre accentué, la description, l'`og:image` (rejet du placeholder
-`ALS_placeholder.png` et de tout ce qui n'est pas le CDN EBRA), la légende,
-l'auteur et la rubrique. Rien n'est écrasé par du vide : un champ non trouvé
-laisse la valeur existante intacte.
+Récupère l'ensemble des informations disponibles sur la page publique sans compte abonné :
+  - Vrai titre accentué (og:title)
+  - Description / chapô (og:description)
+  - Image principale HD (og:image) et légende (figcaption / alt)
+  - Galeries photos et diaporamas complets enregistrés dans `articleImages`
+  - Auteur (dataLayer dimension61)
+  - Rubrique / catégorie (dataLayer dimension15)
+  - Date de publication exacte (dataLayer dimension22 / ISO)
+  - Texte de l'article si absent (JSON-LD articleBody ou chapô + texte public)
+  - Migration de source « L'Alsace (archive) » vers « L'Alsace »
 
 Deux ordres de traitement :
-
-  • `--order recent` (défaut) : les plus récents d'abord, c'est-à-dire ce que la
-    home affiche. Idéal pour un run plafonné ;
-  • `--order source` : balayage par source (index `by_source`), pour écouler le
-    stock d'archive — là où l'ordre par date parcourt toute la table.
-
-Aucun checkpoint : la reprise est structurelle. Un article réparé quitte la
-population qu'il occupait (sa source change, ou son `imageUrl` se remplit), donc
-il disparaît de lui-même des candidats du run suivant. Un index de reprise
-figé, lui, ferait sauter du travail à mesure que la liste se raccourcit.
+  • `--order recent` (défaut) : les plus récents d'abord, ce que la home affiche.
+  • `--order source` : balayage exhaustif par source pour le rattrapage de fond.
 
 Usage :
-    python scripts/repair_alsace_articles.py --dry-run --limit 50   # sonde
-    python scripts/repair_alsace_articles.py --limit 300            # la home d'abord
-    python scripts/repair_alsace_articles.py --order source --only-legacy --limit 5000
-    python scripts/repair_alsace_articles.py --env C:/dev/MulhouseGPT/.env.local
+    python scripts/repair_alsace_articles.py --dry-run --limit 20
+    python scripts/repair_alsace_articles.py --limit 300
+    python scripts/repair_alsace_articles.py --order source --only-legacy --limit 1000
 
-Backend : Convex uniquement (CONVEX_DEPLOY_KEY + NEXT_PUBLIC_CONVEX_URL). Le
-script affiche sa progression et s'arrête seul : fin de liste, `--limit`
-atteinte, ou 30 échecs réseau consécutifs.
+Backend : Convex cloud (academic-spoonbill-914).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
+from bs4 import BeautifulSoup
 from curl_cffi import requests as curl_requests
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import convex_client
-from scrape_utils import parse_ebra_page_meta
+from scrape_utils import extract_article_images, parse_ebra_page_meta
 
 load_dotenv(".env.local")
 load_dotenv()
@@ -85,47 +74,65 @@ def fetch_page(link: str, timeout: float) -> tuple[str | None, str | None]:
 
 
 def list_candidates_recent_first(max_articles: int) -> list[dict]:
-    """À réparer, du plus récent au plus ancien (scrapers:getArticlesToRepairPage).
-
-    C'est l'ordre utile : la home n'affiche que les articles récents, un run
-    plafonné doit donc commencer par eux. La pagination s'arrête dès que
-    `max_articles` est atteint, sans parcourir les ~100 000 articles d'archive.
-    """
+    """À réparer, du plus récent au plus ancien (scrapers:getArticlesToRepairPage)."""
     rows = convex_client.get_articles_to_repair(
         [SOURCE, SOURCE_LEGACY], SOURCE_LEGACY, max_articles=max_articles
     )
     out = [
-        {"link": r["link"], "needs_source": r["needsSource"], "needs_image": r["needsImage"]}
+        {
+            "link": r["link"],
+            "needs_source": r["needsSource"],
+            "needs_image": r["needsImage"],
+            "has_content": r.get("hasContent", False),
+            "supabase_id": r.get("supabaseId"),
+            "published_at": r.get("publishedAt"),
+        }
         for r in rows
     ]
     legacy = sum(1 for r in out if r["needs_source"])
-    print(f"[*] {len(out)} articles à réparer ({legacy} sous « {SOURCE_LEGACY} », "
-          f"{len(out) - legacy} déjà sous « {SOURCE} » mais sans photo)")
+    print(
+        f"[*] {len(out)} articles à réparer ({legacy} sous « {SOURCE_LEGACY} », "
+        f"{len(out) - legacy} déjà sous « {SOURCE} » mais sans photo)"
+    )
     return out
 
 
-def list_candidates_by_source(only_legacy: bool) -> list[dict]:
-    """Balayage exhaustif par source (index by_source), sans ordre de date.
-
-    Pour le rattrapage de fond des ~100 000 articles d'archive : la pagination
-    `by_source` ne lit que les documents concernés, là où l'ordre par date
-    parcourt toute la table.
-    """
+def list_candidates_by_source(only_legacy: bool, max_articles: int = 0) -> list[dict]:
+    """Balayage exhaustif par source (index by_source), sans ordre de date."""
     rows: list[dict] = []
-    for link in convex_client.get_article_links(source=SOURCE_LEGACY):
-        rows.append({"link": link, "needs_source": True, "needs_image": True})
+    for link in convex_client.get_article_links(
+        source=SOURCE_LEGACY, max_links=max_articles or None
+    ):
+        rows.append(
+            {
+                "link": link,
+                "needs_source": True,
+                "needs_image": True,
+                "has_content": False,
+                "supabase_id": None,
+            }
+        )
     print(f"[*] {len(rows)} articles sous « {SOURCE_LEGACY} » à ramener sous « {SOURCE} »")
 
-    if only_legacy:
-        return rows
+    if only_legacy or (max_articles and len(rows) >= max_articles):
+        return rows[:max_articles] if max_articles else rows
 
     before = len(rows)
-    for art in convex_client.get_article_titles(source=SOURCE):
+    remaining = (max_articles - len(rows)) if max_articles else None
+    for art in convex_client.get_article_titles(source=SOURCE, max_articles=remaining):
         if art.get("imageUrl"):
             continue
-        rows.append({"link": art["link"], "needs_source": False, "needs_image": True})
+        rows.append(
+            {
+                "link": art["link"],
+                "needs_source": False,
+                "needs_image": True,
+                "has_content": False,
+                "supabase_id": None,
+            }
+        )
     print(f"[*] {len(rows) - before} articles déjà sous « {SOURCE} » mais sans photo")
-    return rows
+    return rows[:max_articles] if max_articles else rows
 
 
 def fmt_eta(seconds: float) -> str:
@@ -135,12 +142,13 @@ def fmt_eta(seconds: float) -> str:
     return f"{h}h{m:02d}m{s:02d}s" if h else f"{m}m{s:02d}s"
 
 
-def build_patch(candidate: dict, html: str) -> dict:
-    """Champs à écrire pour cet article — jamais de valeur vide en écrasement."""
+def build_patch(candidate: dict, html: str) -> tuple[dict, list[dict]]:
+    """Extrait l'ensemble des informations disponibles sur la page publique."""
     meta = parse_ebra_page_meta(html, candidate["link"])
     patch: dict = {"link": candidate["link"]}
     if candidate["needs_source"]:
         patch["source"] = SOURCE
+
     for field, meta_key in (
         ("title", "title"),
         ("description", "description"),
@@ -149,25 +157,109 @@ def build_patch(candidate: dict, html: str) -> dict:
         ("author", "author"),
         ("category", "category"),
     ):
-        if meta[meta_key]:
+        if meta.get(meta_key):
             patch[field] = meta[meta_key]
-    return patch
+
+    # Date de publication exacte si disponible
+    if meta.get("published_at_iso"):
+        try:
+            pub_dt = datetime.fromisoformat(meta["published_at_iso"].replace("Z", "+00:00"))
+            patch["publishedAt"] = int(pub_dt.timestamp() * 1000)
+        except Exception:
+            pass
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Contenu textuel si manquant dans le document
+    if not candidate.get("has_content"):
+        body_text = None
+        # 1. Essai JSON-LD (dépêches, vidéos, articles ouverts)
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                raw = script.string.strip()
+                data = json.loads(raw)
+                items = data.get("@graph", data) if isinstance(data, dict) else data
+                if isinstance(items, dict):
+                    items = [items]
+                for item in items:
+                    if isinstance(item, dict) and item.get("articleBody"):
+                        b = item["articleBody"].strip()
+                        if len(b) > 100:
+                            body_text = b
+                            break
+            except Exception:
+                pass
+            if body_text:
+                break
+
+        # 2. Essai texte HTML (chapô + corps public)
+        if not body_text:
+            blocks = []
+            chapo = soup.find(class_="chapo") or soup.find(class_="article__chapo")
+            if chapo:
+                t = chapo.get_text(" ", strip=True)
+                if len(t) > 20:
+                    blocks.append(t)
+            for block in soup.find_all("div", class_="textComponent"):
+                t = block.get_text("\n", strip=True)
+                if len(t) > 20:
+                    blocks.append(t)
+            if not blocks:
+                inner = soup.find(class_="innerContent")
+                if inner:
+                    t = inner.get_text("\n", strip=True)
+                    if len(t) > 20:
+                        blocks.append(t)
+            if blocks:
+                body_text = "\n\n".join(blocks)
+
+        if body_text and len(body_text) >= 100:
+            patch["content"] = body_text
+
+    # Images complètes (hero + galeries / diaporamas)
+    all_images = extract_article_images(
+        soup,
+        candidate["link"],
+        image_url=patch.get("imageUrl"),
+        image_caption=patch.get("imageCaption"),
+    )
+
+    return patch, all_images
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Rattrapage des articles L'Alsace incomplets")
+    parser = argparse.ArgumentParser(
+        description="Rattrapage complet des articles L'Alsace (photos, galeries, métadonnées, auteur, etc.)"
+    )
     parser.add_argument("--dry-run", action="store_true", help="Sonde et affiche sans écrire")
-    parser.add_argument("--limit", type=int, default=0, help="Plafonne le nombre d'articles traités (0 = illimité)")
-    parser.add_argument("--only-legacy", action="store_true",
-                        help="Ne traiter que la migration de source « (archive) » → « L'Alsace »")
-    parser.add_argument("--order", choices=["recent", "source"], default="recent",
-                        help="'recent' (défaut) : les plus récents d'abord, ce que voit la home. "
-                             "'source' : balayage exhaustif par source pour le rattrapage de fond.")
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Plafonne le nombre d'articles traités (0 = illimité)"
+    )
+    parser.add_argument(
+        "--only-legacy",
+        action="store_true",
+        help="Ne traiter que la migration de source « (archive) » → « L'Alsace »",
+    )
+    parser.add_argument(
+        "--order",
+        choices=["recent", "source"],
+        default="recent",
+        help="'recent' (défaut) : les plus récents d'abord, ce que voit la home. "
+        "'source' : balayage exhaustif par source pour le rattrapage de fond.",
+    )
     parser.add_argument("--workers", type=int, default=5, help="Threads parallèles (défaut 5)")
-    parser.add_argument("--sleep", type=float, default=0.2, help="Pause par thread entre deux requêtes (s)")
-    parser.add_argument("--timeout", type=float, default=30.0, help="Timeout HTTP par requête (s)")
-    parser.add_argument("--env", type=str, default=None,
-                        help="Fichier .env à charger EN PRIORITÉ (ex. celui du déploiement prod)")
+    parser.add_argument(
+        "--sleep", type=float, default=0.2, help="Pause par thread entre deux requêtes (s)"
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=30.0, help="Timeout HTTP par requête (s)"
+    )
+    parser.add_argument(
+        "--env",
+        type=str,
+        default=None,
+        help="Fichier .env à charger EN PRIORITÉ (ex. celui du déploiement prod)",
+    )
     args = parser.parse_args()
 
     try:
@@ -185,7 +277,7 @@ def main() -> None:
     if args.order == "recent":
         candidates = list_candidates_recent_first(args.limit)
     else:
-        candidates = list_candidates_by_source(args.only_legacy)
+        candidates = list_candidates_by_source(args.only_legacy, max_articles=args.limit)
 
     if args.limit:
         candidates = candidates[: args.limit]
@@ -195,6 +287,7 @@ def main() -> None:
         return
 
     done = migrated = with_image = no_image = gone = network_err = 0
+    with_author = with_category = with_content = with_gallery = gallery_images_count = 0
     consecutive_failures = 0
     lock = threading.Lock()
     start_time = datetime.now()
@@ -203,30 +296,44 @@ def main() -> None:
         elapsed = (datetime.now() - start_time).total_seconds()
         rate = done / elapsed if elapsed > 0 else 0.0
         remaining = (total - done) / rate if rate > 0 else float("inf")
+        pct = (done / total * 100.0) if total else 0.0
         print(
-            f"   [{done}/{total}] source migrée: {migrated} | photo trouvée: {with_image} "
-            f"| sans photo: {no_image} | page disparue: {gone} | erreurs réseau: {network_err} "
-            f"| débit {rate:.1f}/s | ETA {fmt_eta(remaining)}"
+            f"   [{done}/{total} ({pct:.1f}%)] photo: {with_image} | galeries: {with_gallery} (+{gallery_images_count} imgs) "
+            f"| auteur: {with_author} | texte: {with_content} | migrés: {migrated} "
+            f"| débit {rate:.1f}/s | ETA {fmt_eta(remaining)}",
+            flush=True,
         )
 
     def process(candidate: dict) -> None:
         nonlocal done, migrated, with_image, no_image, gone, network_err, consecutive_failures
+        nonlocal with_author, with_category, with_content, with_gallery, gallery_images_count
+
         html, err = fetch_page(candidate["link"], args.timeout)
         time.sleep(args.sleep + random.uniform(0, 0.2))
 
-        patch = build_patch(candidate, html) if html else None
-        # Page injoignable : on migre quand même la source, sinon l'article
-        # resterait indéfiniment dans une source fantôme.
+        patch, all_images = build_patch(candidate, html) if html else (None, [])
+        # Page injoignable : on migre quand même la source pour ne pas bloquer l'article
         if patch is None and candidate["needs_source"]:
             patch = {"link": candidate["link"], "source": SOURCE}
+
+        num_images = len(all_images)
+        has_hero = bool(patch and patch.get("imageUrl"))
 
         with lock:
             if html:
                 consecutive_failures = 0
-                if patch and patch.get("imageUrl"):
+                if has_hero:
                     with_image += 1
                 else:
                     no_image += 1
+                if patch and patch.get("author"):
+                    with_author += 1
+                if patch and patch.get("category"):
+                    with_category += 1
+                if patch and patch.get("content"):
+                    with_content += 1
+                if num_images > 1:
+                    with_gallery += 1
             elif err and err.startswith("HTTP 4"):
                 consecutive_failures = 0
                 gone += 1
@@ -237,15 +344,50 @@ def main() -> None:
         if patch and not args.dry_run:
             try:
                 patch["updatedAt"] = int(time.time() * 1000)
-                convex_client.upsert_article(patch)
+                # Assurer un supabaseId pour lier les images
+                if not candidate.get("supabase_id"):
+                    patch["supabaseId"] = str(uuid.uuid4())
+
+                res = convex_client.upsert_article(patch)
+                supabase_id = (
+                    (res.get("supabaseId") if res else None)
+                    or patch.get("supabaseId")
+                    or candidate.get("supabase_id")
+                )
+
+                # Sauvegarde des images dans articleImages
+                if all_images and supabase_id:
+                    rows = []
+                    for pos, img in enumerate(all_images):
+                        u = (img.get("url") or "").strip()
+                        if not u:
+                            continue
+                        rows.append(
+                            {
+                                "articleId": supabase_id,
+                                "url": u,
+                                "caption": img.get("caption"),
+                                "position": pos,
+                                "source": img.get("source") or ("hero" if pos == 0 else "gallery"),
+                            }
+                        )
+                    if rows:
+                        convex_client.upsert_article_images(rows)
+                        with lock:
+                            gallery_images_count += len(rows)
+
                 if candidate["needs_source"]:
                     with lock:
                         migrated += 1
             except convex_client.ConvexError as exc:
                 print(f"    [!] Écriture refusée ({candidate['link']}): {str(exc)[:120]}")
-        elif patch and args.dry_run and candidate["needs_source"]:
-            with lock:
-                migrated += 1
+        elif patch and args.dry_run:
+            if candidate["needs_source"]:
+                with lock:
+                    migrated += 1
+            if all_images:
+                with lock:
+                    gallery_images_count += len(all_images)
 
         with lock:
             done += 1
@@ -257,14 +399,18 @@ def main() -> None:
         for future in as_completed(futures):
             future.result()
             if consecutive_failures >= MAX_CONSECUTIVE_NETWORK_FAILURES:
-                print(f"\n❌ {MAX_CONSECUTIVE_NETWORK_FAILURES} échecs réseau consécutifs — arrêt.")
+                print(
+                    f"\n❌ {MAX_CONSECUTIVE_NETWORK_FAILURES} échecs réseau consécutifs — arrêt."
+                )
                 for pending in futures:
                     pending.cancel()
                 break
 
     print(
         f"\n[*] {'SONDE' if args.dry_run else 'TERMINÉ'} : {done} traités, "
-        f"{migrated} ramenés sous « {SOURCE} », {with_image} avec photo, "
+        f"{migrated} sources migrées sous « {SOURCE} », {with_image} avec photo principale, "
+        f"{with_gallery} avec galerie multi-images ({gallery_images_count} photos au total), "
+        f"{with_author} avec auteur, {with_content} avec texte récupéré, "
         f"{no_image} sans photo exploitable, {gone} pages disparues, {network_err} erreurs réseau."
     )
 

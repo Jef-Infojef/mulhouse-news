@@ -1175,7 +1175,7 @@ def _dedupe_images(images: list) -> list:
 
 
 def _extract_ebra_images(soup: BeautifulSoup, page_url: str) -> list:
-    """L'Alsace / DNA : figures mainImage (hero + texte).
+    """L'Alsace / DNA : figures mainImage, diaporamas (slide__figure) et illustrations.
 
     Chaque figure a un lien `a.chocolat-image[href]` vers la haute résolution
     (NW_raw) et la légende est dans le title du lien / l'alt de l'img.
@@ -1183,15 +1183,19 @@ def _extract_ebra_images(soup: BeautifulSoup, page_url: str) -> list:
     images = []
     seen = set()
 
-    for figure in soup.find_all("figure", class_="mainImage"):
+    for figure in soup.find_all("figure"):
+        img = figure.find("img")
+        if not img:
+            continue
         zoom = figure.find("a", class_="chocolat-image") or figure.find("a", href=True)
         src = None
         if zoom and zoom.get("href"):
-            src = zoom["href"].strip()
-        img = figure.find("img")
-        if not src and img:
-            src = _absolutize_media_url(page_url, _img_url_from_element(img))
+            href = zoom["href"].strip()
+            if EBRA_CDN_IMAGE_RE.match(href):
+                src = href
         if not src:
+            src = _absolutize_media_url(page_url, _img_url_from_element(img))
+        if not src or not EBRA_CDN_IMAGE_RE.match(src) or _is_generic_image_src(src):
             continue
         if _normalize_image_path(src) in seen:
             continue
@@ -1207,7 +1211,8 @@ def _extract_ebra_images(soup: BeautifulSoup, page_url: str) -> list:
             if figcap:
                 caption = _clean_caption(figcap.get_text(" ", strip=True))
 
-        is_hero = figure is soup.find("figure", class_="mainImage")
+        classes = figure.get("class") or []
+        is_hero = "mainImage" in classes or figure is soup.find("figure", class_="mainImage")
         images.append({"url": src, "caption": caption, "source": "hero" if is_hero else "gallery"})
 
     return images
