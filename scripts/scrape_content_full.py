@@ -246,8 +246,13 @@ def get_app_config(conn, key):
         # Tolerant : cookie EBRA et cooldowns sont des confforts de cache. Une
         # lecture Convex qui echoue ne doit pas empecher le scraping de contenu,
         # surtout quand c'est precisement la panne Convex qu'on rattrape.
+        #
+        # `_tolerant` sert l'AppConfig de l'Aiven des qu'il repond : sur Convex
+        # seul, la coupure quota rendait le cooldown de retry illisible, donc
+        # sans effet — les articles en echec etaient retentes a chaque passage
+        # au lieu d'attendre leur backoff (run du 15/09/2026).
         try:
-            return convex_client.get_app_config(key)
+            return convex_client.get_app_config_tolerant(key)
         except Exception as exc:
             print(f"[!] Config {key} illisible ({exc}) : on continue sans.")
             return None
@@ -400,7 +405,7 @@ def persist_retry_cooldowns(conn, cooldowns):
     try:
         payload = json.dumps(cooldowns)
         if USE_CONVEX:
-            convex_client.set_app_config(RETRY_COOLDOWN_KEY, payload)
+            convex_client.set_app_config_tolerant(RETRY_COOLDOWN_KEY, payload)
         else:
             with conn.cursor() as cur:
                 cur.execute(

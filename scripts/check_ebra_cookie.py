@@ -44,7 +44,10 @@ def get_db_connection():
 
 def get_config(cur, key):
     if USE_CONVEX:
-        return convex_client.get_app_config(key)
+        # Meme AppConfig que les scrapers : l'Aiven des qu'il repond, Convex
+        # sinon. Sans cela ce controle quotidien lit une source coupee pour
+        # quota et ne peut rien dire de l'etat reel du cookie.
+        return convex_client.get_app_config_tolerant(key)
     cur.execute('SELECT value FROM "AppConfig" WHERE key = %s', (key,))
     row = cur.fetchone()
     return row[0] if row else None
