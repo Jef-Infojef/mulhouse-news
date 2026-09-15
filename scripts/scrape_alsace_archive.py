@@ -184,7 +184,10 @@ def load_rejected_urls(use_convex: bool, cur) -> dict:
     raw = None
     try:
         if use_convex:
-            raw = convex_client.get_app_config(REJECTED_KEY)
+            # `_tolerant` : le cache vit sur l'Aiven des qu'il repond. Sur Convex
+            # seul, une coupure quota le rendait illisible et rouvrait les ~380
+            # pages deja classees hors-Mulhouse a chaque run (15/09/2026).
+            raw = convex_client.get_app_config_tolerant(REJECTED_KEY)
         elif cur:
             cur.execute('SELECT value FROM "AppConfig" WHERE key = %s', (REJECTED_KEY,))
             row = cur.fetchone()
@@ -231,7 +234,7 @@ def persist_rejected_urls(use_convex: bool, conn, cur, rejected: dict):
     payload = json.dumps(rejected)
     try:
         if use_convex:
-            convex_client.set_app_config(REJECTED_KEY, payload)
+            convex_client.set_app_config_tolerant(REJECTED_KEY, payload)
         elif cur and conn:
             cur.execute(
                 'INSERT INTO "AppConfig" (key, value, "updatedAt") VALUES (%s, %s, NOW()) '

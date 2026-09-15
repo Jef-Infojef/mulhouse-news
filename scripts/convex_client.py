@@ -701,6 +701,35 @@ def set_app_config(key: str, value: str) -> dict:
     return _call("app:setAppConfig", {"key": key, "value": value}, mutation=True)
 
 
+def get_app_config_tolerant(key: str) -> str | None:
+    """`get_app_config` servi par l'Aiven quand il repond, None si personne ne sait.
+
+    Meme bascule que la dedup. Un cache illisible n'est pas une erreur fatale —
+    il coute juste le travail qu'il devait eviter : le 15/09/2026, Convex coupe
+    pour quota, le scraper L'Alsace rouvrait les ~380 pages deja classees
+    hors-Mulhouse a chaque passage, portant le run de 2 a 13 minutes.
+    """
+    if _aiven_dispo():
+        return aiven_client.config_lue(key)
+    try:
+        return get_app_config(key)
+    except Exception as exc:
+        _signaler_convex_indisponible(exc)
+        return None
+
+
+def set_app_config_tolerant(key: str, value: str) -> bool:
+    """`set_app_config` ecrit sur l'Aiven quand il repond. True si la valeur est posee."""
+    if _aiven_dispo():
+        return aiven_client.config_ecrite(key, value)
+    try:
+        set_app_config(key, value)
+        return True
+    except Exception as exc:
+        _signaler_convex_indisponible(exc)
+        return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ScrapingLog
 # ─────────────────────────────────────────────────────────────────────────────

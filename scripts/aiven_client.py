@@ -9,7 +9,8 @@ C'est aussi le préalable à la suppression des articles côté Convex : sans ce
 bascule, une table Convex vidée ferait paraître tous les liens inconnus, et les
 scrapers la rempliraient de nouveau au passage suivant.
 
-Lecture seule. Les écritures passent par le journal RAG (convex_client).
+Lecture seule pour les articles : les écritures passent par le journal RAG
+(convex_client). Seul `AppConfig` est écrit ici — voir `config_ecrite`.
 """
 from __future__ import annotations
 
@@ -174,3 +175,40 @@ def tags_actualites() -> list[dict]:
     except Exception as exc:
         print(f"[aiven] tags illisibles ({exc})", file=sys.stderr)
         return []
+
+
+def config_lue(cle: str) -> str | None:
+    """Valeur d'`AppConfig` pour `cle`, ou None si absente/illisible.
+
+    Reprend `app:getAppConfig`. Le cache du fil d'Ariane vivait dans l'AppConfig
+    Convex : coupé pour quota, il rendait la clé illisible et le scraper L'Alsace
+    rouvrait les ~380 pages déjà classées hors-Mulhouse à chaque passage (run du
+    15/09/2026 : « 379 pages ouvertes, 0 déjà hors-Mulhouse »).
+    """
+    try:
+        with _curseur() as cur:
+            cur.execute('SELECT value FROM "AppConfig" WHERE key = %s', (cle,))
+            ligne = cur.fetchone()
+            return ligne[0] if ligne else None
+    except Exception as exc:
+        print(f"[aiven] config {cle} illisible ({exc})", file=sys.stderr)
+        return None
+
+
+def config_ecrite(cle: str, valeur: str) -> bool:
+    """Écrit `AppConfig`. Reprend `app:setAppConfig`. True si la valeur est posée.
+
+    Seule écriture de ce module : l'actualité (Article) reste alimentée par le
+    journal RAG, mais un cache que l'on ne peut pas reposer ne sert à rien.
+    """
+    try:
+        with _curseur() as cur:
+            cur.execute(
+                'INSERT INTO "AppConfig" (key, value, "updatedAt") VALUES (%s, %s, NOW()) '
+                'ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = NOW()',
+                (cle, valeur),
+            )
+            return True
+    except Exception as exc:
+        print(f"[aiven] config {cle} non persistée ({exc})", file=sys.stderr)
+        return False
