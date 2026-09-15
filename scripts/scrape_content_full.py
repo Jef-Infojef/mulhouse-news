@@ -217,7 +217,10 @@ def worklist_depuis_aiven(limit: int, archive: bool, order: str) -> list[dict]:
 
     if archive:
         condition = "link LIKE '%%lalsace.fr%%' AND (content IS NULL OR LENGTH(content) < 150)"
-        tri = "ASC"
+        # `--order` etait ignore ici : le backfill repartait toujours de 2009,
+        # meme lance pour vider le retard du jour. L'autre chemin d'archive
+        # (list_missing_content_via_pages) respectait deja le drapeau.
+        tri = "DESC" if order == "desc" else "ASC"
     else:
         condition = "(content IS NULL OR LENGTH(content) < 500) AND \"publishedAt\" > NOW() - INTERVAL '7 days'"
         tri = "DESC" if order == "desc" else "ASC"
