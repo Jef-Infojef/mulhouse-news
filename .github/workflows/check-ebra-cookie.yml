@@ -35,6 +35,10 @@ jobs:
         id: cookie_check
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # EBRA_SESSION / EBRA_POOOL vivent dans l'AppConfig de l'Aiven depuis
+          # que Convex est coupe pour quota : sans cette variable, le controle
+          # relit la source coupee et alerte a tort.
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
           NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
           USE_CONVEX: '1'
