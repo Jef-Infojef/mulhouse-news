@@ -71,8 +71,19 @@ export interface LigneGalerie {
   articleLink: string;
 }
 
-/** Articles récents dont l'image principale n'est pas encore descendue. */
-export async function imagesATelecharger(limit = 200, hours = 48): Promise<LigneArticle[]> {
+/**
+ * Articles récents dont l'image principale n'est pas encore descendue.
+ *
+ * Fenêtre portée de 48 h à 14 jours le 16/09/2026. Elle était plus étroite que
+ * la cadence réelle du cron : GitHub ne délivre qu'une fraction des
+ * déclenchements planifiés, et un article publié un vendredi soir pouvait en
+ * sortir avant d'avoir été vu. Mesure avant élargissement : 29 % des articles
+ * des trente derniers jours n'avaient aucun miroir B2.
+ *
+ * Coût nul en régime établi — requête servie par un index partiel, et un
+ * article déjà descendu n'est plus candidat.
+ */
+export async function imagesATelecharger(limit = 500, hours = 336): Promise<LigneArticle[]> {
   const c = await co();
   const r = await c.query(
     `SELECT id, id AS "supabaseId", "imageUrl", link, "localImage", "r2Url"
@@ -88,7 +99,7 @@ export async function imagesATelecharger(limit = 200, hours = 48): Promise<Ligne
 }
 
 /** Images de galerie des articles récents, pas encore descendues. */
-export async function galerieATelecharger(limit = 500, hours = 48): Promise<LigneGalerie[]> {
+export async function galerieATelecharger(limit = 500, hours = 336): Promise<LigneGalerie[]> {
   const c = await co();
   const r = await c.query(
     `SELECT i.id, i.url, i."localImage", i."r2Url",

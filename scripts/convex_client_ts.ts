@@ -226,8 +226,8 @@ export async function fermer(): Promise<void> {
 
 /** Articles récents (48h) dont l'image principale est à télécharger. */
 export async function getImagesToDownload(
-  limit = 200,
-  hours = 48
+  limit = 500,
+  hours = 336
 ): Promise<ArticleImageRow[]> {
   if (aivenDispo()) return aiven.imagesATelecharger(limit, hours) as Promise<ArticleImageRow[]>;
   // startMs stable pendant toute la boucle : voir convex/images.ts (cursor).
@@ -249,7 +249,7 @@ export async function getImagesToDownload(
 /** Images de galerie (articleImages) à télécharger (articles parents récents 48h). */
 export async function getArticleImagesToDownload(
   limit = 500,
-  hours = 48
+  hours = 336
 ): Promise<GalleryImageRow[]> {
   if (aivenDispo()) return aiven.galerieATelecharger(limit, hours) as Promise<GalleryImageRow[]>;
   const res = await callQuery<{ images: GalleryImageRow[] }>(
