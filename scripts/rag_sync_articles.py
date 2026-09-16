@@ -185,14 +185,20 @@ def format_news_article(row: dict) -> str:
     return "\n".join(p for p in parts if p)
 
 
-def ensure_fts_index(cur) -> None:
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS knowledge_chunk_fts_idx
-        ON "KnowledgeChunk"
-        USING gin (to_tsvector('french', coalesce(title, '') || ' ' || content))
-        """
-    )
+# `ensure_fts_index` a ete retiree le 2026-09-16, avec l'index qu'elle creait.
+#
+# `knowledge_chunk_fts_idx` etait un index d'expression sur
+# to_tsvector('french', title || content), d'avant la colonne `search_vector` et
+# sa configuration insensible aux accents. Plus aucune requete ne l'utilisait :
+# 216 Mo pour 0 lecture et 0 tuple lu depuis la creation des statistiques, sur
+# une instance dont le cache fait 190 Mo. Chaque INSERT et chaque UPDATE de la
+# table recalculait pourtant son tsvector et l'inserait dans ce GIN, en pure
+# perte — et l'autovacuum devait le parcourir avec le reste.
+#
+# Le CREATE INDEX IF NOT EXISTS le ressuscitait a chaque run, ce qui est
+# precisement pourquoi il avait survecu a sa suppression. Ne pas le remettre :
+# le plein texte passe par `search_vector` et
+# `knowledge_chunk_fts_vector_idx` (237 Mo, 75 lectures, activement utilise).
 
 
 def press_metadata(
@@ -826,7 +832,6 @@ def main() -> int:
 
     try:
         rag_cur = rag_conn.cursor()
-        ensure_fts_index(rag_cur)
         news_cur = news_conn.cursor() if news_conn else None
         if args.journal:
             sync_journal(rag_cur, args.journal, stats)
