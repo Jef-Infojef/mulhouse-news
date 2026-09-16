@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import * as convex from './convex_client_ts';
+import * as aiven from './aiven_client_ts';
 
 // Phase 4 : accès DB portés Prisma → Convex (scripts/convex_client_ts.ts).
 // La logique réseau (téléchargement, extensions, temps limite) est inchangée.
@@ -115,13 +116,50 @@ async function downloadImage(url: string, id: string, articleLink?: string): Pro
   }
 }
 
+/**
+ * Rattrapage des articles dont le fichier local a disparu.
+ *
+ * `localImage` est renseigne mais `r2Url` vide : le telechargement normal les
+ * ignore (ils se croient faits), l’upload B2 aussi (le fichier manque). On les
+ * reprend depuis `imageUrl`, sans borne de date, et on reecrit `localImage`
+ * avec le nouveau nom de fichier avant que sync_to_b2 ne les pousse.
+ */
+async function recupererOrphelins(limite: number) {
+  const articles = await aiven.imagesOrphelines(limite);
+  console.log(`--- Rattrapage des images orphelines (${articles.length}) ---`);
+
+  let ok = 0;
+  let ko = 0;
+  for (const [i, a] of articles.entries()) {
+    const nom = await downloadImage(a.imageUrl, a.supabaseId ?? a.id, a.link);
+    if (nom) {
+      await convex.updateArticleLocalImage(a.id, nom);
+      ok++;
+    } else {
+      ko++;
+    }
+    if ((i + 1) % 25 === 0 || i + 1 === articles.length) {
+      console.log(`Progression : ${i + 1}/${articles.length}`);
+    }
+  }
+  console.log(`Orphelins : ${ok} recuperes, ${ko} echecs`);
+}
+
 async function main() {
   if (!convex.useConvex()) {
     console.error('ERREUR : scripts images portés sur Convex (Phase 4) — définir CONVEX_DEPLOY_KEY et NEXT_PUBLIC_CONVEX_URL.');
     process.exit(1);
   }
 
-  console.log('--- Démarrage du téléchargement des images (Convex) ---');
+  // `--orphelins [n]` : rattrapage ponctuel, hors du cycle normal.
+  const iOrph = process.argv.indexOf('--orphelins');
+  if (iOrph !== -1) {
+    const limite = Number(process.argv[iOrph + 1]) || 500;
+    await recupererOrphelins(limite);
+    return;
+  }
+
+  console.log('--- Démarrage du téléchargement des images ---');
   
   const articles = await convex.getImagesToDownload();
   console.log(`Articles à traiter : ${articles.length}`);

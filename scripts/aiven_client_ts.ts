@@ -136,6 +136,29 @@ export async function galerieAUploader(limit = 500): Promise<LigneGalerie[]> {
   return r.rows;
 }
 
+/**
+ * Articles marques comme descendus mais dont le miroir B2 manque.
+ *
+ * Sequelle de la coupure Convex et des runs plus anciens : `localImage` porte
+ * un nom de fichier dont le fichier lui-meme a disparu avec le runner. Comme
+ * `localImage` est renseigne, le telechargement normal les ignore, et comme le
+ * fichier est absent, l’upload B2 les ignore aussi : ils ne sortent de cet
+ * angle mort que si on les cherche explicitement. Sans borne de date, donc.
+ */
+export async function imagesOrphelines(limit = 500): Promise<LigneArticle[]> {
+  const c = await co();
+  const r = await c.query(
+    `SELECT id, id AS "supabaseId", "imageUrl", link, "localImage", "r2Url"
+       FROM "Article"
+      WHERE "localImage" IS NOT NULL AND "r2Url" IS NULL
+        AND "imageUrl" IS NOT NULL AND "imageUrl" <> ''
+      ORDER BY "publishedAt" DESC
+      LIMIT $1`,
+    [limit]
+  );
+  return r.rows;
+}
+
 async function poser(table: string, colonne: string, id: string, valeur: string) {
   const c = await co();
   await c.query(
