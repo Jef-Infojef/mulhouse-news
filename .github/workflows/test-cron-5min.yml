@@ -1,0 +1,49 @@
+name: Test Cron 5 min
+
+# TEMPORAIRE — temoin de mesure, a supprimer une fois la question tranchee.
+#
+# Ce que ce workflow mesure, et lui seul : GitHub delivre-t-il un `*/5` neuf sur
+# ce depot ? Les faits a expliquer, releves le 2026-09-16 :
+#
+#   - `scrape-news` (*/5, 288 dus/jour) et `m68-publish-scheduled` (*/15, 96 dus)
+#     recoivent le MEME nombre de runs, jour apres jour depuis trois semaines
+#     (7/7, 8/8, 7/7, 5/5, 6/6 du 11 au 15/09) ;
+#   - `m68-airport-sync` (1/heure, 24 dus) en recoit autant : 5, 6, 6, 6 ;
+#   - les deux premiers partent ENSEMBLE, a 1-4 min d'ecart, jamais a la minute
+#     demandee (46, 42, 37, 27, 19...) ;
+#   - le 27/08 les trois se sont effondres le meme jour, de ~20/jour a ~6, sans
+#     qu'aucun fichier de .github/workflows n'ait bouge ce jour-la ;
+#   - `assocommercants`, meme compte, n'a pas connu cette rupture.
+#
+# Lecture du resultat, apres 24 h :
+#   ~288 runs  -> le plafond ne vient pas du depot, `scrape-news` a un probleme
+#                 qui lui est propre (duree, concurrency, historique d'echecs).
+#   ~6 runs    -> le budget de planification est bien celui du DEPOT, partage
+#                 entre ses 22 workflows. Aucune reecriture de cron n'y changera
+#                 quoi que ce soit : seuls workflow_dispatch et push y echappent.
+#
+# Biais assume : ce temoin est lui-meme un 23e workflow planifie et concourt donc
+# au budget qu'il mesure. C'est le prix de l'experience, et il joue contre
+# l'hypothese du plafond (il ne peut que la renforcer, jamais la fabriquer).
+#
+# Cout : pas de checkout, pas de dependances, un echo. Quelques secondes de
+# runner par declenchement, gratuites sur un depot public.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Horodater le declenchement
+        run: |
+          echo "tick reel     : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "tick demande  : $(date -u +%Y-%m-%dT%H:)$(printf '%02d' $(( $(date -u +%M) / 5 * 5 )))Z"
+          echo "evenement     : ${{ github.event_name }}"
