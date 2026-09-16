@@ -18,10 +18,27 @@ name: Scrape Mulhouse News
 
 on:
   schedule:
-    # 15 min : le */5 + scans Convex de 500–2000 articles complets par run
-    # vidait le Database I/O du plan gratuit (plusieurs Go/jour, coupure 16/08).
-    - cron: '*/15 * * * *'
+    # Retour à 5 min le 16/09/2026. Le passage à 15 min (16/08) visait le
+    # Database I/O de Convex, que les scans de 500–2000 articles complets par
+    # run vidaient ; les articles ne transitent plus par Convex depuis le 13/09,
+    # et le run est retombé de 12–14 min à 2–3 min avec le cache fil d’Ariane.
+    #
+    # A surveiller : GitHub ne délivre qu’une fraction des déclenchements
+    # planifiés (~7/jour pour 96 demandés sous */15). Rien ne garantit que
+    # demander plus en obtienne plus — c’est précisément ce que cette bascule
+    # mesure. Comparer sur quelques jours :
+    #   gh run list --workflow=scrape-news.yml --limit 30
+    - cron: '*/5 * * * *'
   workflow_dispatch:
+
+# Un seul run à la fois : à 5 min d’intervalle, un run parti à froid (7 à
+# 14 min quand le sitemap du jour paraît) chevaucherait le suivant. Deux runs
+# simultanés se marcheraient dessus sur le cache de cooldown, lu puis réécrit
+# en entier. Le suivant attend plutôt que d’être annulé : ce qu’il a à
+# collecter reste à collecter.
+concurrency:
+  group: scrape-news
+  cancel-in-progress: false
 
 permissions:
   contents: read
