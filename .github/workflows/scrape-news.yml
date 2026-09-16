@@ -29,6 +29,23 @@ on:
     # mesure. Comparer sur quelques jours :
     #   gh run list --workflow=scrape-news.yml --limit 30
     - cron: '*/5 * * * *'
+    # Run du matin, en plus du */5 : celui-ci est une loterie (7 livraisons
+    # par jour pour 288 demandees, mesure les 13-15/09/2026, avec des trous de
+    # 5 a 6 h), et le sitemap du jour paraissait sans etre collecte avant la
+    # matinee. Une entree cron distincte donne une chance de plus sur ce
+    # creneau ; elle n'en donne pas la garantie, GitHub delivrant les runs
+    # planifies au mieux de ses moyens.
+    #
+    # 04:40 UTC = 06:40 a Paris l'ete. La minute est multiple de 5, donc
+    # l'entree tombe sur un creneau du */5 : si les deux sont delivres, le
+    # concurrency group les met a la queue leu leu et le second ne trouve
+    # rien a collecter. Coincidence rare et sans consequence, vu le taux de
+    # livraison reel du */5.
+    #
+    # ATTENTION, derive saisonniere : GitHub ne connait que l'UTC. Au passage a
+    # l'heure d'hiver (fin octobre), cette ligne tombera a 05:40 a Mulhouse ;
+    # la repasser a '40 5 * * *' pour retrouver le creneau de 06:40 local.
+    - cron: '40 4 * * *'
   workflow_dispatch:
 
 # Un seul run à la fois : à 5 min d’intervalle, un run parti à froid (7 à
