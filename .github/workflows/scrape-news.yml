@@ -18,34 +18,37 @@ name: Scrape Mulhouse News
 
 on:
   schedule:
-    # Retour à 5 min le 16/09/2026. Le passage à 15 min (16/08) visait le
-    # Database I/O de Convex, que les scans de 500–2000 articles complets par
-    # run vidaient ; les articles ne transitent plus par Convex depuis le 13/09,
-    # et le run est retombé de 12–14 min à 2–3 min avec le cache fil d’Ariane.
+    # Filet de secours, et rien de plus : le declenchement normal vient
+    # desormais de ce poste, toutes les 15 minutes, via la tache Windows
+    # MulhouseGPT-ScrapeNews-15min (voir scripts/Planifier-ScrapeNews.ps1).
     #
-    # A surveiller : GitHub ne délivre qu’une fraction des déclenchements
-    # planifiés (~7/jour pour 96 demandés sous */15). Rien ne garantit que
-    # demander plus en obtienne plus — c’est précisément ce que cette bascule
-    # mesure. Comparer sur quelques jours :
-    #   gh run list --workflow=scrape-news.yml --limit 30
-    - cron: '*/5 * * * *'
-    # Run du matin, en plus du */5 : celui-ci est une loterie (7 livraisons
-    # par jour pour 288 demandees, mesure les 13-15/09/2026, avec des trous de
-    # 5 a 6 h), et le sitemap du jour paraissait sans etre collecte avant la
-    # matinee. Une entree cron distincte donne une chance de plus sur ce
-    # creneau ; elle n'en donne pas la garantie, GitHub delivrant les runs
-    # planifies au mieux de ses moyens.
+    # Pourquoi avoir renonce au cron comme declencheur principal, mesure le
+    # 2026-09-16 :
+    #   - ce workflow (*/5, 288 dus/jour), m68-publish-scheduled (*/15, 96 dus)
+    #     et m68-airport-sync (1/heure, 24 dus) recevaient le MEME nombre de
+    #     runs, 5 a 7 par jour, jour apres jour. La frequence demandee n'avait
+    #     aucun effet ;
+    #   - les livraisons arrivaient groupees, a des minutes arbitraires (46, 42,
+    #     37, 27...), jamais celle du cron. Cinema Scrape, cron « 0 2 * * * », a
+    #     ete livre a 07h33 UTC : 5 h 33 de retard ;
+    #   - le 27/08 les trois se sont effondres le meme jour, de ~20/jour a ~6,
+    #     sans qu'aucun fichier de .github/workflows n'ait bouge ce jour-la, et
+    #     sans que assocommercants (meme compte) ne connaisse la meme rupture ;
+    #   - en regard, les 15 derniers workflow_dispatch du depot ont tous demarre
+    #     a la seconde ou ils ont ete crees.
     #
-    # 04:40 UTC = 06:40 a Paris l'ete. La minute est multiple de 5, donc
-    # l'entree tombe sur un creneau du */5 : si les deux sont delivres, le
-    # concurrency group les met a la queue leu leu et le second ne trouve
-    # rien a collecter. Coincidence rare et sans consequence, vu le taux de
-    # livraison reel du */5.
+    # Demander 288 runs pour en obtenir 6 ne decrivait donc plus aucune
+    # intention reelle. Quatre creneaux par jour suffisent a ce qu'ils sont : de
+    # quoi rattraper une journee ou le poste serait reste eteint.
     #
-    # ATTENTION, derive saisonniere : GitHub ne connait que l'UTC. Au passage a
-    # l'heure d'hiver (fin octobre), cette ligne tombera a 05:40 a Mulhouse ;
-    # la repasser a '40 5 * * *' pour retrouver le creneau de 06:40 local.
-    - cron: '40 4 * * *'
+    # Minute 35 et non 00 : GitHub documente le debut d'heure comme periode de
+    # forte charge, ou les evenements planifies sont retardes en priorite.
+    # 00:35, 06:35, 12:35 et 18:35 UTC, soit deux heures de plus a Paris l'ete.
+    #
+    # Le temoin .github/workflows/test-cron-5min.yml mesure en parallele si un
+    # */5 neuf est mieux servi. A supprimer, avec ce commentaire, une fois la
+    # question tranchee.
+    - cron: '35 */6 * * *'
   workflow_dispatch:
 
 # Un seul run à la fois : à 5 min d’intervalle, un run parti à froid (7 à
