@@ -6,6 +6,19 @@ pas de texte. Ils ont été découverts par les sitemaps journaliers et jamais
 rouverts. Rien n'est récupérable ailleurs — vérifié sur l'export Convex du
 30/08/2026, ces articles y sont vides aussi.
 
+CE QUE CE SCRIPT NE PEUT PAS RATTRAPER, et c'est l'essentiel du stock :
+`fetch_grdc_content` rejette tout corps de moins de 400 caractères, pour ne
+pas ranger l'amorce gratuite d'un article payant à la place de l'article.
+Mesure du 16/09/2026 sur 30 articles tirés au hasard dans ce stock : corps
+réel de 186 caractères en médiane, et AUCUN au-dessus de 400. Les brèves
+d'archive — résultats sportifs, questions du jour, annonces locales de
+2009-2019 — sont donc sous le seuil par nature, et le resteront.
+
+Le stock de ~5 400 articles lalsace.fr sans texte n'est pas un retard de
+scraping : c'est un plancher. Ce script sert à rattraper ce qui arrive
+vraiment à passer — l'actualité récente, les articles complets — pas à vider
+un compteur qui ne descendra plus.
+
 Ce script fait à la main ce que le cron ferait s'il tournait en continu :
 
   1. `scrape_content_full --archive` ouvre les articles sans texte (API interne
@@ -212,11 +225,20 @@ def main() -> int:
     cur = conn.cursor()
 
     depart = stock(cur)
+    recent = stock(cur, True)
     gel = cooldowns_actifs(cur)
-    print(f"Stock L'Alsace sans contenu : {depart}, dont {stock(cur, True)} "
-          f"publies dans les 30 derniers jours")
+    print(f"Stock L'Alsace sans contenu : {depart}, dont {recent} publies dans "
+          f"les 30 derniers jours")
     if gel:
         print(f"  {gel} deja juges sans corps, en cooldown : ignores sans requete")
+    # Le gros du stock est constitue de breves sous le seuil de 400 caracteres
+    # de fetch_grdc_content : les rouvrir ne donnera rien. Le dire ici evite de
+    # lancer un run de plusieurs heures en esperant voir le compteur descendre.
+    if depart - recent > 500:
+        print(f"  ATTENTION : ~{depart - recent} articles d'archive dont le corps")
+        print("  est sous les 400 caracteres exiges. Ils seront rouverts puis")
+        print("  rejetes : c'est un plancher, pas un retard. Viser --order desc")
+        print("  pour ne travailler que sur l'actualite recente.")
     if args.compter:
         return 0
 

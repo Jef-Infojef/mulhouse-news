@@ -87,7 +87,18 @@ def fetch_grdc_content(page_text, target_url, cookies_dict):
                 txt = el.get_text("\n", strip=True)
                 if len(txt) > 20:
                     blocks.append(txt)
-        content = "\n\n".join(dict.fromkeys(blocks))
+        # Seuil volontaire : sur un article recent payant, l'amorce gratuite fait
+        # quelques centaines de caracteres, et l'enregistrer reviendrait a ranger
+        # une accroche a la place de l'article.
+        #
+        # Consequence assumee, mesuree le 16/09/2026 : les breves d'archive
+        # (resultats sportifs, questions du jour, annonces locales de 2009-2019)
+        # ont un corps REEL de 186 caracteres en mediane, et 0 sur 30 depassent
+        # 400. Elles sont donc rejetees par construction, definitivement. Les
+        # ~5 400 articles lalsace.fr sans texte ne sont pas un retard de
+        # scraping : ce sont des breves plus courtes que ce seuil. Inutile de
+        # les rouvrir en esperant mieux — voir rattrape_contenu_en_attente.py,
+        # qui les compte a part.
         if len(content) < 400:
             return None, []
         return content, images
