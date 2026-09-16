@@ -195,7 +195,12 @@ def ensure_fts_index(cur) -> None:
     )
 
 
-def press_metadata(source: str | None, published_at: str, image_url: str | None) -> dict:
+def press_metadata(
+    source: str | None,
+    published_at: str,
+    image_url: str | None,
+    image_caption: str | None = None,
+) -> dict:
     """Metadonnees d'un article presse pour le RAG.
 
     `imageUrl` illustre la carte de source cote MulhouseGPT ; l'omettre laissait
@@ -216,6 +221,14 @@ def press_metadata(source: str | None, published_at: str, image_url: str | None)
         meta["publishedAt"] = published_at
     if image_url:
         meta["imageUrl"] = image_url
+    # La legende accompagne la photo sous la carte de source (ask.ts la lit dans
+    # `metadata->>'imageCaption'`). Meme regle que le reste : cle absente plutot
+    # que vide. Le pont TypeScript (MulhouseGPT, formatters.ts) ecrit exactement
+    # les memes cles — sans quoi chaque synchro deferait le travail de l'autre,
+    # reecrivant des chunks pour rien sur une table ou tout UPDATE coute dix
+    # index.
+    if image_caption:
+        meta["imageCaption"] = image_caption
     return meta
 
 
@@ -431,6 +444,62 @@ def purge_articles_masques(rag_cur) -> int:
     return rag_cur.rowcount or 0
 
 
+def rafraichir_metadonnees(rag_cur, source_ids: list[str], stats: dict) -> None:
+    """Recolle les metadonnees des chunks sur ce que porte la table Article.
+
+    Le journal est ecrit AU FIL du scraping : quand un article y est consigne,
+    son illustration n'est pas encore connue — elle arrive quelques minutes plus
+    tard, par l'etape « Full Content & Image Scraper », et atterrit dans Article
+    / ArticleImage. Le chunk, lui, etait deja ecrit sans `imageUrl`.
+
+    Le rafraichissement de upsert_document ne pouvait pas rattraper ce cas : il
+    ne s'applique qu'a un document qu'on lui represente, et un article deja
+    indexe ne reapparait pas dans le journal. Seule la synchro quotidienne
+    (MulhouseGPT, syncArticlesToRag) le faisait — et elle etait en echec sur
+    Convex depuis le 12/09/2026. Resultat : les articles du jour, les plus
+    servis, etaient justement ceux qui s'affichaient sans photo.
+
+    On relit donc la table a la fin du run, une fois les annexes ecrites, et on
+    remet a jour ce qui a change. `IS DISTINCT FROM` sur le jsonb compare cote
+    SQL, independamment de l'ordre des cles : un chunk deja correct n'est pas
+    reecrit, ce qui compte sur une table ou chaque UPDATE touche dix index.
+    """
+    if not source_ids:
+        return
+    rag_cur.execute(
+        """
+        SELECT id, title, link, source, "publishedAt",
+               coalesce(NULLIF("imageUrl", ''), NULLIF("r2Url", '')) AS "imageUrl",
+               "imageCaption"
+          FROM "Article" WHERE id = ANY(%s)
+        """,
+        (source_ids,),
+    )
+    recolles = 0
+    for row in rag_cur.fetchall():
+        art_id, titre, lien, source, publie, image_url, legende = row
+        meta = press_metadata(
+            source,
+            publie.isoformat() if publie else "",
+            image_url,
+            legende,
+        )
+        rag_cur.execute(
+            """
+            UPDATE "KnowledgeChunk"
+               SET metadata = %s, title = %s, url = %s
+             WHERE "sourceType" = 'article' AND "sourceId" = %s
+               AND (metadata IS DISTINCT FROM %s OR title IS DISTINCT FROM %s
+                    OR url IS DISTINCT FROM %s)
+            """,
+            (Json(meta), titre, lien, art_id, Json(meta), titre, lien),
+        )
+        if rag_cur.rowcount:
+            recolles += rag_cur.rowcount
+    if recolles:
+        print(f"[journal] {recolles} chunk(s) recolles sur la table Article (photo, legende, date)")
+
+
 def sync_journal(rag_cur, path: str, stats: dict) -> None:
     """Indexe les articles consignes par les scrapers, SANS lire Convex.
 
@@ -448,6 +517,7 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
 
     fusionnes: dict[str, dict] = {}
     annexes: list[dict] = []
+    traites: list[str] = []
     lignes = 0
     with open(path, encoding="utf-8") as handle:
         for ligne in handle:
@@ -545,6 +615,7 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
                 ),
                 stats=stats,
             )
+            traites.append(source_id)
             store_article(rag_cur, source_id, lien, article, publie)
             if stable_id:
                 # Convex repond de nouveau : le document de secours eventuel,
@@ -569,6 +640,10 @@ def sync_journal(rag_cur, path: str, stats: dict) -> None:
             print(f"  [ERR] annexe {entree.get('kind')}: {exc}", file=sys.stderr)
     if annexes:
         print(f"[journal] {len(annexes)} images/tags ecrits dans le magasin de fiches")
+
+    # APRES les annexes, jamais avant : c'est leur ecriture qui pose l'image sur
+    # l'article, et c'est elle qu'on veut voir remonter dans les chunks.
+    rafraichir_metadonnees(rag_cur, traites, stats)
 
 
 def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool = False, use_convex_mode: bool = False) -> None:
