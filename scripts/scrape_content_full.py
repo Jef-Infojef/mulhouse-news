@@ -759,7 +759,25 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
         return None, None, True, str(e), [], {}
 
 def run_image_scripts():
-    """Lance les scripts TS et retourne un résumé."""
+    """Lance les scripts TS et retourne un résumé.
+
+    Les deux scripts TS lisent leur liste de travail dans Convex et y
+    réécrivent `localImage` / `r2Url`. Tant que les écritures Convex sont
+    coupées, ils échouent sur leur première requête : depuis le 11/09/2026,
+    chaque run affichait deux traces ConvexError sans qu’aucune image ne soit
+    traitée. On saute l’étape explicitement plutôt que de la laisser échouer,
+    pour que la mise en pause se voie au lieu de passer pour une panne.
+
+    Les métadonnées d’images continuent d’arriver sur l’Aiven par le journal
+    RAG (ArticleImage) ; c’est le miroir B2 qui est suspendu.
+    """
+    if not convex_client.ecritures_convex_actives():
+        print("")
+        print("[*] Images et B2 : en pause (ecritures Convex coupees). "
+              "Poser CONVEX_WRITES=1 pour les relancer, ou porter les deux "
+              "scripts TS sur l'Aiven.")
+        return "Skipped (Convex writes off)"
+
     print("\n[*] Traitement des images et B2...")
     try:
         # Utilisation de tsx (plus robuste sur GitHub Actions/ESM)

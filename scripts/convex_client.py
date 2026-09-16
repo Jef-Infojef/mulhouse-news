@@ -46,7 +46,21 @@ def get_deploy_key() -> str | None:
 
 
 def use_convex() -> bool:
-    """True si la bascule Convex est activée (clef deploy + URL définies)."""
+    """True quand les scripts tournent en mode « cloud ».
+
+    Le nom est hérité de la Phase 4, où ce mode signifiait littéralement « lire
+    et écrire dans Convex ». Ce n’est plus ce qu’il fait : depuis le 13/09/2026
+    les lectures partent sur l’Aiven dès que RAG_DATABASE_URL est défini (voir
+    les fonctions `*_tolerant`) et les écritures vont au journal RAG tant que
+    CONVEX_WRITES n’est pas posé. Convex ne reçoit donc plus rien.
+
+    Ce qu’il sélectionne aujourd’hui, c’est la branche moderne des scripts,
+    par opposition à la branche historique Supabase/psycopg2 sur DATABASE_URL.
+    Retirer CONVEX_DEPLOY_KEY ou NEXT_PUBLIC_CONVEX_URL des workflows pour
+    « faire propre » ferait donc retomber les scrapers sur Supabase, pas sur
+    l’Aiven : ces deux variables restent l’interrupteur, même si leur nom ne
+    décrit plus la destination des données.
+    """
     return bool(get_deploy_key() and get_convex_url())
 
 

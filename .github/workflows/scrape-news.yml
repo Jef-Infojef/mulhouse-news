@@ -1,5 +1,21 @@
 name: Scrape Mulhouse News
 
+# Où vont les données, malgré les apparences.
+#
+# Chaque étape pose CONVEX_DEPLOY_KEY, NEXT_PUBLIC_CONVEX_URL et USE_CONVEX=1,
+# ce qui laisse croire que tout part dans Convex. Ce n’est plus le cas depuis la
+# coupure pour quota du 11/09/2026 :
+#
+#   lectures  -> Aiven, dès que RAG_DATABASE_URL est défini (fonctions *_tolerant)
+#   ecritures -> journal RAG, puis Aiven à l’étape « Sync RAG index »
+#   Convex    -> ne reçoit plus rien (mutations coupées tant que CONVEX_WRITES
+#                n’est pas posé)
+#
+# Ces deux variables Convex restent néanmoins obligatoires : elles sont
+# l’interrupteur qui sélectionne la branche moderne des scripts. Les retirer
+# ferait retomber les scrapers sur la branche Supabase/psycopg2 (DATABASE_URL),
+# pas sur l’Aiven. Voir la docstring de convex_client.use_convex().
+
 on:
   schedule:
     # 15 min : le */5 + scans Convex de 500–2000 articles complets par run
