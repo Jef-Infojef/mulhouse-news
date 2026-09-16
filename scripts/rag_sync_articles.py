@@ -622,7 +622,14 @@ def sync_press_articles(rag_cur, news_cur, limit: int, stats: dict, full: bool =
 
     sql = f"""
         SELECT id, title, description, content, source, link, "publishedAt",
-               coalesce(NULLIF("r2Url", ''), "imageUrl") AS "imageUrl"
+               -- imageUrl AVANT r2Url : l'exemplaire B2 est dans un seau prive
+               -- (401), et MulhouseGPT ecarte toute URL backblazeb2.com avant de
+               -- l'afficher. La preferer revenait a n'ecrire dans l'index que des
+               -- adresses inutilisables : 18 310 articles se sont retrouves sans
+               -- photo sous les sources alors que l'URL du CDN d'origine etait en
+               -- base (mesure le 2026-09-16). Les deux chemins Convex de ce
+               -- fichier utilisaient deja cet ordre ; seul celui-ci l'inversait.
+               coalesce(NULLIF("imageUrl", ''), NULLIF("r2Url", '')) AS "imageUrl"
         FROM "Article"
         {where_clause}
         ORDER BY "publishedAt" DESC
