@@ -82,11 +82,16 @@ jobs:
         if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/outings-sync.ts
         env:
-          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          # SITE_DATABASE_URL, et surtout pas Convex : le scraper d'agenda écrit
+          # Outing / OutingCategory / OutingTag dans la base Supabase PRINCIPALE
+          # et ne fait que miroiter vers Convex, coupé pour quota depuis le
+          # 11/09/2026. Le code lisait la bonne base depuis MulhouseGPT f00f0f5
+          # (13/09), mais cette étape ne lui passait pas la variable : hasSiteDb()
+          # rendait false et l'indexation repartait sur Convex — en échec tous
+          # les jours, emportant le job avec elle.
+          SITE_DATABASE_URL: ${{ secrets.SITE_DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
 
       # Vide-greniers.org (Réseau des agendas) : vide-greniers, brocantes et
       # bourses à 20 km de Mulhouse. Une seule page listing, bloc JSON-LD par
