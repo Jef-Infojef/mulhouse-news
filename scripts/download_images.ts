@@ -180,4 +180,6 @@ async function downloadArticleImages() {
 }
 
 main()
-  .catch((e) => console.error(e));
+  .catch((e) => console.error(e))
+  // La connexion Postgres de l’Aiven garde le process en vie sans ceci.
+  .finally(() => convex.fermer());

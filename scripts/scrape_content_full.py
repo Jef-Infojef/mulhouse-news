@@ -761,22 +761,21 @@ def fetch_article_content(url, cookies_dict, alsace_cookies_active):
 def run_image_scripts():
     """Lance les scripts TS et retourne un résumé.
 
-    Les deux scripts TS lisent leur liste de travail dans Convex et y
-    réécrivent `localImage` / `r2Url`. Tant que les écritures Convex sont
-    coupées, ils échouent sur leur première requête : depuis le 11/09/2026,
-    chaque run affichait deux traces ConvexError sans qu’aucune image ne soit
-    traitée. On saute l’étape explicitement plutôt que de la laisser échouer,
-    pour que la mise en pause se voie au lieu de passer pour une panne.
+    Les deux scripts TS lisent leur liste de travail et y réécrivent
+    `localImage` / `r2Url`. Depuis le 16/09/2026 cette liste vient de l’Aiven
+    (aiven_client_ts) dès que RAG_DATABASE_URL est défini ; auparavant elle
+    venait de Convex, et le déploiement coupé pour quota les faisait échouer
+    sur leur première requête — cinq jours sans qu’une seule image descende.
 
-    Les métadonnées d’images continuent d’arriver sur l’Aiven par le journal
-    RAG (ArticleImage) ; c’est le miroir B2 qui est suspendu.
+    On ne saute l’étape que si aucune destination n’est joignable : sans elle,
+    les articles gardent l’URL distante de leur image, sans miroir B2.
     """
-    if not convex_client.ecritures_convex_actives():
+    if not (convex_client.aiven_prioritaire() or convex_client.ecritures_convex_actives()):
         print("")
-        print("[*] Images et B2 : en pause (ecritures Convex coupees). "
-              "Poser CONVEX_WRITES=1 pour les relancer, ou porter les deux "
-              "scripts TS sur l'Aiven.")
-        return "Skipped (Convex writes off)"
+        print("[*] Images et B2 : en pause. Ni RAG_DATABASE_URL (miroir Aiven) "
+              "ni CONVEX_WRITES=1 : les deux scripts TS n'auraient nulle part "
+              "ou ecrire localImage / r2Url.")
+        return "Skipped (aucune destination)"
 
     print("\n[*] Traitement des images et B2...")
     try:

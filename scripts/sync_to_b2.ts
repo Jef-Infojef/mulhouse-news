@@ -90,4 +90,7 @@ async function main() {
   console.log('--- Terminé ---');
 }
 
-main().catch(console.error);
+main()
+  .catch((e) => console.error(e))
+  // La connexion Postgres de l’Aiven garde le process en vie sans ceci.
+  .finally(() => convex.fermer());

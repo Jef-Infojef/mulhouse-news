@@ -22,6 +22,8 @@
 // (dotenv ne surcharge pas une variable déjà définie).
 
 import * as dotenv from "dotenv";
+import * as aiven from "./aiven_client_ts";
+
 
 dotenv.config();
 dotenv.config({ path: ".env.local" });
@@ -183,6 +185,25 @@ interface Paged<T> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Aiguillage Aiven
+//
+// Les six fonctions d’images lisent et ecrivent sur l’Aiven des qu’il repond,
+// comme les `*_tolerant` du client Python. Convex ne reste qu’un repli : son
+// deploiement est coupe pour quota depuis le 11/09/2026, et tant qu’il l’etait
+// ces deux scripts echouaient sur leur premiere requete sans traiter la moindre
+// image.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function aivenDispo(): boolean {
+  return aiven.disponible();
+}
+
+/** A appeler en fin de script : libere la connexion Postgres. */
+export async function fermer(): Promise<void> {
+  await aiven.fermer();
+}
+
 // Queries — téléchargement
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -191,6 +212,7 @@ export async function getImagesToDownload(
   limit = 200,
   hours = 48
 ): Promise<ArticleImageRow[]> {
+  if (aivenDispo()) return aiven.imagesATelecharger(limit, hours) as Promise<ArticleImageRow[]>;
   // startMs stable pendant toute la boucle : voir convex/images.ts (cursor).
   const startMs = Date.now() - hours * 3600_000;
   const rows: ArticleImageRow[] = [];
@@ -212,6 +234,7 @@ export async function getArticleImagesToDownload(
   limit = 500,
   hours = 48
 ): Promise<GalleryImageRow[]> {
+  if (aivenDispo()) return aiven.galerieATelecharger(limit, hours) as Promise<GalleryImageRow[]>;
   const res = await callQuery<{ images: GalleryImageRow[] }>(
     "images:getArticleImagesToDownload",
     { limit, hours }
@@ -225,6 +248,7 @@ export async function getArticleImagesToDownload(
 
 /** Articles avec localImage mais sans r2Url (à uploader sur B2). */
 export async function getImagesToUpload(limit = 500): Promise<UploadArticleRow[]> {
+  if (aivenDispo()) return aiven.imagesAUploader(limit) as unknown as Promise<UploadArticleRow[]>;
   const res = await callQuery<{ articles: UploadArticleRow[] }>("images:getImagesToUpload", {
     limit,
   });
@@ -233,6 +257,7 @@ export async function getImagesToUpload(limit = 500): Promise<UploadArticleRow[]
 
 /** Images de galerie avec localImage mais sans r2Url (à uploader sur B2). */
 export async function getArticleImagesToUpload(limit = 500): Promise<UploadGalleryRow[]> {
+  if (aivenDispo()) return aiven.galerieAUploader(limit) as unknown as Promise<UploadGalleryRow[]>;
   const res = await callQuery<{ images: UploadGalleryRow[] }>("images:getArticleImagesToUpload", {
     limit,
   });
@@ -244,17 +269,21 @@ export async function getArticleImagesToUpload(limit = 500): Promise<UploadGalle
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function updateArticleLocalImage(id: string, localImage: string): Promise<unknown> {
+  if (aivenDispo()) return aiven.poserArticleLocalImage(id, localImage);
   return callMutation("images:updateArticleLocalImage", { id, localImage });
 }
 
 export function updateArticleR2Url(id: string, r2Url: string): Promise<unknown> {
+  if (aivenDispo()) return aiven.poserArticleR2Url(id, r2Url);
   return callMutation("images:updateArticleR2Url", { id, r2Url });
 }
 
 export function updateArticleImageLocalImage(id: string, localImage: string): Promise<unknown> {
+  if (aivenDispo()) return aiven.poserGalerieLocalImage(id, localImage);
   return callMutation("images:updateArticleImageLocalImage", { id, localImage });
 }
 
 export function updateArticleImageR2Url(id: string, r2Url: string): Promise<unknown> {
+  if (aivenDispo()) return aiven.poserGalerieR2Url(id, r2Url);
   return callMutation("images:updateArticleImageR2Url", { id, r2Url });
 }
