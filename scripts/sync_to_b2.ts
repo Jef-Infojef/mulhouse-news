@@ -3,7 +3,9 @@ import path from 'path';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import * as convex from './convex_client_ts';
 
-// Phase 4 : accès DB portés Prisma → Convex (scripts/convex_client_ts.ts).
+// Accès DB : Prisma → Convex (Phase 4), puis Convex → Aiven (16/09/2026).
+// La liste de travail et l’écriture de r2Url passent par convex_client_ts,
+// qui bascule sur aiven_client_ts dès que RAG_DATABASE_URL est défini.
 // La logique réseau (upload B2, content-type, URL publique) est inchangée.
 
 const IMAGE_DIR = path.join(process.cwd(), 'public', 'article-images');
@@ -44,12 +46,12 @@ async function main() {
     console.error('ERREUR : Les variables Backblaze B2 ne sont pas configurées dans le .env');
     return;
   }
-  if (!convex.useConvex()) {
-    console.error('ERREUR : scripts images portés sur Convex (Phase 4) — définir CONVEX_DEPLOY_KEY et NEXT_PUBLIC_CONVEX_URL.');
+  if (!convex.magasinDisponible()) {
+    console.error('ERREUR : aucun magasin joignable — définir RAG_DATABASE_URL (Aiven), ou CONVEX_DEPLOY_KEY + NEXT_PUBLIC_CONVEX_URL.');
     return;
   }
 
-  console.log('--- Synchronisation vers Backblaze B2 (Convex) ---');
+  console.log(`--- Synchronisation vers Backblaze B2 (${convex.nomDuMagasin()}) ---`);
   
   // Tous les articles qui ont une image locale mais pas encore de lien R2/B2
   const articles = await convex.getImagesToUpload();

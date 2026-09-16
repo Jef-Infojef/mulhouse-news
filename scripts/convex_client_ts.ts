@@ -199,6 +199,23 @@ function aivenDispo(): boolean {
   return aiven.disponible();
 }
 
+/** Ou vont reellement les lectures et les ecritures d’images. */
+export function nomDuMagasin(): string {
+  return aivenDispo() ? "Aiven" : "Convex";
+}
+
+/**
+ * Un magasin est-il joignable ?
+ *
+ * Les deux scripts d’images exigeaient les identifiants Convex pour demarrer,
+ * heritage de la Phase 4. L’Aiven suffit desormais, et c’est meme lui qui sert
+ * en pratique : la garde porte donc sur « une destination existe », pas sur
+ * « Convex est configure ».
+ */
+export function magasinDisponible(): boolean {
+  return aivenDispo() || useConvex();
+}
+
 /** A appeler en fin de script : libere la connexion Postgres. */
 export async function fermer(): Promise<void> {
   await aiven.fermer();

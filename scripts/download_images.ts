@@ -3,7 +3,9 @@ import path from 'path';
 import * as convex from './convex_client_ts';
 import * as aiven from './aiven_client_ts';
 
-// Phase 4 : accès DB portés Prisma → Convex (scripts/convex_client_ts.ts).
+// Accès DB : Prisma → Convex (Phase 4), puis Convex → Aiven (16/09/2026).
+// La liste de travail et l’écriture de localImage passent par convex_client_ts,
+// qui bascule sur aiven_client_ts dès que RAG_DATABASE_URL est défini.
 // La logique réseau (téléchargement, extensions, temps limite) est inchangée.
 // Les noms de fichiers restent basés sur `supabaseId` (ex-cuid Prisma) pour
 // les articles : stabilité des clés B2 et des valeurs localImage existantes.
@@ -146,8 +148,8 @@ async function recupererOrphelins(limite: number) {
 }
 
 async function main() {
-  if (!convex.useConvex()) {
-    console.error('ERREUR : scripts images portés sur Convex (Phase 4) — définir CONVEX_DEPLOY_KEY et NEXT_PUBLIC_CONVEX_URL.');
+  if (!convex.magasinDisponible()) {
+    console.error('ERREUR : aucun magasin joignable — définir RAG_DATABASE_URL (Aiven), ou CONVEX_DEPLOY_KEY + NEXT_PUBLIC_CONVEX_URL.');
     process.exit(1);
   }
 
@@ -159,7 +161,7 @@ async function main() {
     return;
   }
 
-  console.log('--- Démarrage du téléchargement des images ---');
+  console.log(`--- Démarrage du téléchargement des images (${convex.nomDuMagasin()}) ---`);
   
   const articles = await convex.getImagesToDownload();
   console.log(`Articles à traiter : ${articles.length}`);
