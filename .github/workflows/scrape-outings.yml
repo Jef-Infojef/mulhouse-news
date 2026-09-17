@@ -45,8 +45,7 @@ jobs:
       - name: Invalider le cache sorties
         if: success()
         run: |
-          curl -sf "https://www.mulhouse68.fr/api/cron/revalidate?tag=outings" \
-            -H "Authorization: ${{ secrets.CRON_SECRET }}" \
+          curl -sf "https://www.mulhouse68.fr/api/cron/revalidate?tag=outings&key=${{ secrets.CRON_SECRET }}" \
             && echo "Cache sorties invalidé" \
             || echo "Revalidation cache ignorée"
 

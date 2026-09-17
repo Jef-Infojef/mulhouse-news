@@ -1,8 +1,14 @@
 import { getLatestArticles } from './actions'
 import HomeClient from '@/components/HomeClient'
 
-// Cache on-demand + fallback 24h
-export const revalidate = 86400 
+// L'« on-demand » annonce ici n'a jamais existe pour la collecte : le seul
+// revalidatePath('/') du depot est dans revalidateSite() (app/actions.ts), une
+// action reservee a l'admin connecte. Les scrapers, eux, ecrivent directement
+// dans l'Aiven sans rien invalider — cette page restait donc figee 24 h (le
+// 17/09 elle servait encore l'etat du 16/09 16 h, sept heures de retard).
+// Le TTL est le seul mecanisme qui suit la collecte : 5 minutes, le scrape
+// tournant toutes les 15 minutes.
+export const revalidate = 300
 
 export default async function Home() {
   const { articles } = await getLatestArticles()

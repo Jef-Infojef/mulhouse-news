@@ -199,6 +199,20 @@ jobs:
         # inchanges et les ignorera.
         run: python scripts/rag_sync_articles.py --journal "$RAG_JOURNAL_PATH"
 
+      - name: Invalider le cache presse de mulhouse68.fr
+        # Seul scraper du depot qui n'invalidait rien (cinema, pharmacies et
+        # sorties le font depuis toujours) : /actualites lisait donc un cache
+        # fige jusqu'a son expiration, une journee entiere — prod bloquee au
+        # 15/09 le 17/09 alors que la collecte tournait toutes les 15 minutes.
+        # `always()` pour la meme raison que l'etape ci-dessus : les articles
+        # sont dans l'Aiven des que le journal est ecrit, meme si un scraper a
+        # echoue ensuite.
+        if: always()
+        run: |
+          curl -sf "https://www.mulhouse68.fr/api/cron/revalidate?tag=google-news&key=${{ secrets.CRON_SECRET }}" \
+            && echo "Cache presse invalidé" \
+            || echo "Revalidation cache ignorée"
+
       - name: Log Convex I/O du run
         if: always()
         continue-on-error: true
