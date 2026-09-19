@@ -30,15 +30,9 @@ jobs:
 
       - name: Scrape agendas (M+ Info, m2A le mag, JDS.fr)
         env:
-          # Double écriture : Supabase (chemin primaire — assocommercants.fr
-          # sert encore les sorties depuis Supabase) + Convex (miroir RAG).
-          # DATABASE_URL reste donc REQUIS ; USE_CONVEX=1 active le miroir
-          # Convex dans outing_scrape_utils (voir scripts/outing_scrape_utils.py).
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Écriture directe dans la base Supabase principale (tables Outing, OutingCategory, OutingTag).
+          DATABASE_URL: ${{ secrets.SITE_DATABASE_URL || secrets.DATABASE_URL }}
           ASSOCIATION_ID: ${{ secrets.ASSOCIATION_ID }}
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
-          USE_CONVEX: "1"
         run: |
           python scripts/scrape_outings.py --source all --past-days=7 --ahead-days=120
 
@@ -76,11 +70,9 @@ jobs:
         env:
           JINA_KEY_ENV: github
           PUPPETEER_SKIP_DOWNLOAD: "true"
-          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          SITE_DATABASE_URL: ${{ secrets.SITE_DATABASE_URL || secrets.DATABASE_URL }}
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
         run: npx tsx scripts/outings-sync.ts
 
       - name: Log failure to DB
