@@ -27,12 +27,26 @@ export function hasAivenNews(): boolean {
   return Boolean(process.env.RAG_DATABASE_URL?.trim())
 }
 
+function resolveSsl(url: string) {
+  if (
+    url.includes("sslmode=require") ||
+    url.includes("sslmode=verify") ||
+    url.includes("supabase.co") ||
+    url.includes("aivencloud.com") ||
+    url.includes("pooler.supabase.com")
+  ) {
+    if (url.includes("sslmode=disable")) return false
+    return { rejectUnauthorized: false }
+  }
+  return false
+}
+
 function getPool(): Pool {
   if (!globalForAiven.aivenNewsPool) {
+    const url = process.env.RAG_DATABASE_URL || ""
     globalForAiven.aivenNewsPool = new Pool({
-      connectionString: process.env.RAG_DATABASE_URL,
-      // Aiven présente un certificat que Node ne valide pas sans son CA.
-      ssl: { rejectUnauthorized: false },
+      connectionString: url,
+      ssl: resolveSsl(url),
       max: 5,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 15000,

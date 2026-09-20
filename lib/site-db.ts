@@ -15,6 +15,20 @@ import { Pool } from "pg"
 
 const globalForSite = globalThis as unknown as { sitePool: Pool | undefined }
 
+function resolveSsl(url: string) {
+  if (
+    url.includes("sslmode=require") ||
+    url.includes("sslmode=verify") ||
+    url.includes("supabase.co") ||
+    url.includes("aivencloud.com") ||
+    url.includes("pooler.supabase.com")
+  ) {
+    if (url.includes("sslmode=disable")) return false
+    return { rejectUnauthorized: false }
+  }
+  return false
+}
+
 export function getSitePool(): Pool {
   if (!globalForSite.sitePool) {
     const url = process.env.DATABASE_URL?.trim()
@@ -22,7 +36,7 @@ export function getSitePool(): Pool {
     globalForSite.sitePool = new Pool({
       // `pgbouncer=true` est un paramètre Prisma : libpq le refuse.
       connectionString: url.replace(/[?&]pgbouncer=true/, ""),
-      ssl: { rejectUnauthorized: false },
+      ssl: resolveSsl(url),
       max: 5,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 15000,
