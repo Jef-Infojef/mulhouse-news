@@ -24,22 +24,27 @@ export function disponible(): boolean {
   return Boolean(url());
 }
 
+function resolveSsl(rawUrl: string) {
+  if (
+    rawUrl.includes("sslmode=require") ||
+    rawUrl.includes("sslmode=verify") ||
+    rawUrl.includes("supabase.co") ||
+    rawUrl.includes("aivencloud.com") ||
+    rawUrl.includes("pooler.supabase.com")
+  ) {
+    const cheminCa = process.env.PGSSLROOTCERT || process.env.RAG_DATABASE_CA || "";
+    return cheminCa
+      ? { ca: require("fs").readFileSync(cheminCa, "utf8"), rejectUnauthorized: true }
+      : { rejectUnauthorized: false };
+  }
+  return false;
+}
+
 /** Connexion paresseuse, partagée par tout le run. */
 async function co(): Promise<Client> {
   if (client) return client;
-  // Aiven impose TLS et refuse la connexion en clair (FATAL 28000). psycopg2
-  // negocie SSL tout seul, pas node-pg : sans ce bloc, les scripts d’images
-  // echouent a l’authentification la ou leur pendant Python passe.
-  //
-  // La chaine de certification n’est verifiee que si un CA est fourni
-  // (PGSSLROOTCERT ou RAG_DATABASE_CA, chemin d’un fichier .pem) ; sans lui on
-  // chiffre sans authentifier le serveur. Poser l’un des deux dans les secrets
-  // du workflow reste souhaitable.
-  const cheminCa = process.env.PGSSLROOTCERT || process.env.RAG_DATABASE_CA || "";
-  const ssl = cheminCa
-    ? { ca: require("fs").readFileSync(cheminCa, "utf8"), rejectUnauthorized: true }
-    : { rejectUnauthorized: false };
-  const c = new Client({ connectionString: url() as string, ssl });
+  const connectionUrl = url() as string;
+  const c = new Client({ connectionString: connectionUrl, ssl: resolveSsl(connectionUrl) });
   await c.connect();
   client = c;
   return c;
