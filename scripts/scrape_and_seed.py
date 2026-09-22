@@ -176,11 +176,6 @@ def load_tags(cur):
     
     # Mapping tag slug -> mots-clés pour la détection automatique
     TAG_KEYWORDS = {
-        'municipales-2026': [
-            'municipales', 'municipales 2026', 'élections municipales',
-            'conseil municipal', 'restaurer mulhouse', 'lutte ouvrière',
-            'taffarelli', 'michèle lutz',
-        ],
         'sports': [
             'sport', 'sportif', 'football', 'rugby', 'basket', 'basket-ball', 'basketball', 'handball',
             'volley-ball', 'volleyball', 'natation', 'tennis', 'cyclisme', 'athlétisme',

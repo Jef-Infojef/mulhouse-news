@@ -5,7 +5,7 @@ import { getLatestArticles, checkAdminAuth } from '@/app/actions'
 import { ArticleCard } from '@/components/ArticleCard'
 import { Logo } from '@/components/Logo'
 import { SplashScreen } from '@/components/SplashScreen'
-import { AlertTriangle, Search, Loader2, Moon, Sun, Calendar, Clock, Cloud, CloudRain, CloudSnow, Vote, BookOpen } from 'lucide-react'
+import { AlertTriangle, Search, Loader2, Moon, Sun, Calendar, Clock, Cloud, CloudRain, CloudSnow, BookOpen } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import Link from 'next/link'
 
@@ -133,13 +133,6 @@ function TopInfoBar({
               >
                 <BookOpen size={12} />
                 <span>M+Mag</span>
-              </Link>
-              <Link
-                href="/municipales-2026"
-                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm text-[10px] sm:text-xs font-bold"
-              >
-                <Vote size={12} />
-                <span>Municipales 2026</span>
               </Link>
               
               <button
