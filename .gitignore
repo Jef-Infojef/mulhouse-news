@@ -29,6 +29,7 @@ __pycache__/
 .DS_Store
 *.pem
 *.log
+scratch/
 
 # Environment & Secrets
 .env

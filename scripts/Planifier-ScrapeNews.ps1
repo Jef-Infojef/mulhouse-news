@@ -74,13 +74,27 @@ if (-not $GhExe) {
 }
 
 $Log = Join-Path $LogDir "scrape-news-dispatch.log"
-$CmdExe = "$env:ComSpec"
+$WscriptExe = "$env:SystemRoot\System32\wscript.exe"
+$VbsPath = Join-Path $ScriptDir "dispatch-scrape-news.vbs"
+$CmdPath = Join-Path $ScriptDir "dispatch-scrape-news.cmd"
 
-# La date d'horodatage sert à lire le journal : sans elle, on ne distingue pas
-# un lancement qui a échoué d'un lancement qui n'a jamais eu lieu.
-$Commande = "echo [%date% %time%] dispatch $Workflow >> `"$Log`" && `"$GhExe`" workflow run $Workflow -R $Depot --ref main >> `"$Log`" 2>&1"
+# Génère le script batch d'exécution
+$CmdContent = @"
+@echo off
+setlocal
+echo [%date% %time%] dispatch $Workflow >> "$Log"
+"$GhExe" workflow run $Workflow -R $Depot --ref main >> "$Log" 2>&1
+"@
+Set-Content -Path $CmdPath -Value $CmdContent -Encoding ASCII
 
-$Action = New-ScheduledTaskAction -Execute $CmdExe -Argument "/c `"$Commande`"" -WorkingDirectory $ScriptDir
+# Génère le lanceur VBScript silencieux (SW_HIDE = 0 : aucune fenêtre console n'apparaît)
+$VbsContent = @"
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "%comspec% /c ""$CmdPath""", 0, True
+"@
+Set-Content -Path $VbsPath -Value $VbsContent -Encoding ASCII
+
+$Action = New-ScheduledTaskAction -Execute $WscriptExe -Argument "`"$VbsPath`"" -WorkingDirectory $ScriptDir
 
 # Départ à minuit puis répétition, pour couvrir la journée entière quel que soit
 # le moment de l'installation.

@@ -1,10 +1,6 @@
 'use server'
 
-import { convex } from '@/lib/prisma'
-import { api } from '@/convex/_generated/api'
-import type { Id } from '@/convex/_generated/dataModel'
 import {
-  hasAivenNews,
   fetchAivenLatestArticles,
   fetchAivenArticleContent,
   setAivenArticleHidden,
@@ -21,17 +17,9 @@ import { revalidatePath } from 'next/cache'
 import { createAdminSession, isAdminAuthenticated, safeEqual } from '@/lib/adminAuth'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 2 : tous les accès données passent par les fonctions Convex
-// (convex/app.ts) via ConvexHttpClient (lib/prisma.ts). Signatures exportées
-// inchangées. Le retrait complet de Prisma du build se fera après la Phase 3
-// (scripts GitHub Actions encore sur Prisma) : `prisma generate` reste dans le
-// script build tant que phase 3 n'est pas faite.
+// Accès 100 % PostgreSQL direct sur le serveur Hostinger VPS (rag_db)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Limitation des essais de connexion. Le compteur vit en base (table AppConfig,
-// simple clé/valeur : aucune migration requise) et non en mémoire : sur Vercel,
-// chaque instance serverless a son propre tas et disparaît au cold start, donc un
-// compteur en mémoire ne limitait rien en pratique.
 const MAX_ATTEMPTS = 10
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000
 const RL_PREFIX = 'ratelimit:login:'
@@ -44,17 +32,9 @@ async function clientIp(): Promise<string> {
 async function isRateLimited(): Promise<boolean> {
   const key = RL_PREFIX + (await clientIp())
   try {
-    // Compteur (JSON {c,t}, fenêtre glissante, purge opportuniste) dans la table
-    // AppConfig de la base principale — là où il a toujours vécu. Il lisait
-    // Convex, dont la coupure du 11/09/2026 refermait ce portillon à chaque
-    // tentative : l'admin était inaccessible alors que toutes ses données
-    // étaient joignables.
     const count = await incrementRateLimit(key, RL_PREFIX, ATTEMPT_WINDOW_MS)
     return count > MAX_ATTEMPTS
   } catch (error) {
-    // En cas d'indisponibilité de la base, on refuse la tentative plutôt que de
-    // laisser passer un bruteforce non compté. L'admin dépend de toute façon de la
-    // base pour tout le reste, il n'y a donc rien à perdre à échouer ici.
     console.error('[LOGIN] Rate limit indisponible, tentative refusée:', error)
     return true
   }
@@ -64,7 +44,7 @@ async function clearRateLimit(): Promise<void> {
   try {
     await deleteConfigValue(RL_PREFIX + (await clientIp()))
   } catch {
-    // Rien à nettoyer (ou base indisponible) : sans conséquence.
+    // Rien à nettoyer
   }
 }
 
@@ -89,9 +69,6 @@ export async function revalidateSite() {
   return { success: true }
 }
 
-// Convex stocke les timestamps en epoch ms (number) ; le reste de l'app
-// consomme des Date (JSON-LD, toLocaleString, date-fns). Conversion ici,
-// comme le faisait Prisma (Date natifs).
 const toDate = (value: number | null | undefined, fallback: number): Date =>
   new Date(typeof value === 'number' ? value : fallback)
 
@@ -101,12 +78,7 @@ const errorMessage = (error: unknown): string =>
 export async function getLatestArticles(query?: string) {
   try {
     const trimmed = query?.trim()
-    // L'Aiven d'abord : c'est la seule base que les scrapers tiennent à jour
-    // quoi qu'il arrive à Convex, coupé pour quota le 11/09/2026 — cette page
-    // affichait « Aucun article trouvé » pendant que la collecte continuait.
-    const articles = hasAivenNews()
-      ? await fetchAivenLatestArticles(trimmed)
-      : (await convex.query(api.app.getLatestArticles, trimmed ? { query: trimmed } : {})).articles
+    const articles = await fetchAivenLatestArticles(trimmed)
 
     const mapped = (articles ?? []).map((article) => ({
       ...article,
@@ -126,14 +98,12 @@ export async function getLatestArticles(query?: string) {
       // 1. Filtrage par Titre (nettoyé et minuscule)
       const cleanTitle = article.title.trim().toLowerCase()
       if (seenTitles.has(cleanTitle)) {
-        console.log(`Filtrage doublon TITRE ignoré: ${article.title}`)
         return false
       }
 
       // 2. Filtrage par URL d'image identique (si présente)
       if (article.imageUrl) {
         if (seenImageUrls.has(article.imageUrl)) {
-          console.log(`Filtrage doublon IMAGE_URL ignoré: ${article.title}`)
           return false
         }
         seenImageUrls.add(article.imageUrl)
@@ -145,7 +115,6 @@ export async function getLatestArticles(query?: string) {
         if (match) {
           const uuid = match[1]
           if (seenImageUuids.has(uuid)) {
-            console.log(`Filtrage doublon UUID EBRA ignoré: ${article.title}`)
             return false
           }
           seenImageUuids.add(uuid)
@@ -157,10 +126,9 @@ export async function getLatestArticles(query?: string) {
       return true
     })
 
-    console.log(`${filteredArticles.length} articles uniques récupérés (sur ${mapped.length}).`)
     return { articles: filteredArticles, error: null }
   } catch (error: unknown) {
-    console.error('ERREUR CONVEX:', error)
+    console.error('ERREUR DB HOSTINGER:', error)
     return { articles: [], error: errorMessage(error) }
   }
 }
@@ -168,14 +136,8 @@ export async function getLatestArticles(query?: string) {
 export async function getArticleContent(id: string) {
   if (!(await isAdminAuthenticated())) return { content: null, error: 'Non autorisé' }
   try {
-    // `id` vient de getLatestArticles : UUID quand la liste sort de l'Aiven,
-    // id Convex sinon. Lire au meme endroit que la liste, sans quoi l'id ne
-    // designe rien.
-    if (hasAivenNews()) {
-      return { content: await fetchAivenArticleContent(id), error: null }
-    }
-    const { content } = await convex.query(api.app.getArticleContent, { id: id as Id<'articles'> })
-    return { content: content ?? null, error: null }
+    const content = await fetchAivenArticleContent(id)
+    return { content, error: null }
   } catch (error: unknown) {
     console.error('Erreur récupération contenu article:', error)
     return { content: null, error: errorMessage(error) }
@@ -185,8 +147,6 @@ export async function getArticleContent(id: string) {
 export async function getScrapingLogs() {
   if (!(await isAdminAuthenticated())) return { logs: [], error: 'Non autorisé' }
   try {
-    // Table ScrapingLog de la base principale : les scrapers y écrivent, Convex
-    // n'en recevait qu'une copie.
     const logs = await fetchScrapingLogs(100)
     return { logs, error: null }
   } catch (error: unknown) {
@@ -217,11 +177,71 @@ export async function updateAppConfig(key: string, value: string) {
 export async function testEbraConnection(sessionValue: string, pooolValue?: string) {
   if (!(await isAdminAuthenticated())) return { success: false, message: 'Non autorisé' }
   try {
-    // La logique réseau (fetch lalsace.fr + détection de marqueurs) vit dans
-    // l'action Convex app:testEbraConnection.
-    return await convex.action(api.app.testEbraConnection, pooolValue
-      ? { session: sessionValue, poool: pooolValue }
-      : { session: sessionValue })
+    const cleanSession = String(sessionValue).trim()
+    const cleanPoool = pooolValue
+      ? String(pooolValue).trim()
+      : '9aab6ee3-fda6-43fc-a90e-29de3c73d8f7'
+
+    let finalSession = cleanSession
+    if (cleanSession.includes('2=')) {
+      finalSession = cleanSession.substring(cleanSession.indexOf('2='))
+      if (finalSession.includes(';')) finalSession = finalSession.split(';')[0]
+    }
+    finalSession = finalSession.replace(/['"]/g, '').trim()
+
+    let finalPoool = cleanPoool
+    if (cleanPoool.includes('_poool=')) {
+      finalPoool = cleanPoool.split('_poool=')[1].split(';')[0]
+    }
+    const uuidMatch = finalPoool.match(
+      /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/
+    )
+    if (uuidMatch) finalPoool = uuidMatch[0]
+    finalPoool = finalPoool.replace(/['"]/g, '').trim()
+
+    const finalCookie = `.XCONNECT_SESSION=${finalSession}; .XCONNECTKeepAlive=2=1; .XCONNECT=2=1; _poool=${finalPoool}`
+
+    const homeResponse = await fetch('https://www.lalsace.fr/', {
+      headers: {
+        Cookie: finalCookie,
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,application/apng,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cache-Control': 'no-store',
+      },
+    })
+
+    const html = await homeResponse.text()
+    const checks = {
+      'Se déconnecter': html.includes('Se déconnecter'),
+      'Mon compte': html.includes('Mon compte'),
+      'Mon profil': html.includes('Mon profil'),
+      subscriber: html.includes('subscriber'),
+      Abonné: html.includes('Abonné'),
+      premium: html.includes('premium'),
+      'pro-item': html.includes('pro-item'),
+      AccountCircle: html.includes('AccountCircle'),
+      connected: html.includes('connected'),
+      'logged-in': html.includes('logged-in'),
+      auth: html.includes('auth'),
+      XCONNECT: html.includes('XCONNECT'),
+      JSESSIONID: html.includes('JSESSIONID'),
+      'user-menu': html.includes('user-menu'),
+      'mon-espace': html.includes('mon-espace'),
+      'espace-client': html.includes('espace-client'),
+    }
+
+    const isConnected = Object.values(checks).some((value) => value === true)
+    if (isConnected || html.length > 300000) {
+      return { success: true, message: 'Connexion EBRA valide (session active)' }
+    } else {
+      if (html.includes('Ray ID:') || html.includes('cloudflare')) {
+        return { success: false, message: 'Bloqué par Cloudflare' }
+      }
+      return { success: false, message: 'Session invalide ou expirée' }
+    }
   } catch (error: unknown) {
     console.error('[TEST EBRA] Erreur:', error)
     return { success: false, message: 'Erreur technique : ' + errorMessage(error) }
@@ -231,17 +251,10 @@ export async function testEbraConnection(sessionValue: string, pooolValue?: stri
 export async function deleteArticle(id: string) {
   if (!(await isAdminAuthenticated())) return { success: false, error: 'Non autorisé' }
   try {
-    // Cote Aiven on MASQUE au lieu d'effacer : la ligne reste la fiche de
-    // reference de l'article, et la purge du pont RAG retire de l'index du chat
-    // les articles masques. L'effet visible est le meme, en reversible.
-    if (hasAivenNews()) {
-      const ok = await setAivenArticleHidden(id, true)
-      return ok
-        ? { success: true, error: null }
-        : { success: false, error: 'Article introuvable' }
-    }
-    await convex.mutation(api.app.deleteArticle, { id: id as Id<'articles'> })
-    return { success: true, error: null }
+    const ok = await setAivenArticleHidden(id, true)
+    return ok
+      ? { success: true, error: null }
+      : { success: false, error: 'Article introuvable' }
   } catch (error: unknown) {
     console.error('Erreur suppression article:', error)
     return { success: false, error: errorMessage(error) }
