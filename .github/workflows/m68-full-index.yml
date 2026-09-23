@@ -192,9 +192,8 @@ jobs:
         run: |
           set -euo pipefail
           install -m 600 /dev/null ~/.vps_db_tunnel_key
-          printf '%s
-' "$SSH_KEY" > ~/.vps_db_tunnel_key
-          ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new             -o ExitOnForwardFailure=yes -o ServerAliveInterval=30             -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
+          echo "$SSH_KEY" > ~/.vps_db_tunnel_key
+          ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
           sudo sysctl -qw net.ipv4.conf.all.route_localnet=1
           sudo iptables -t nat -A OUTPUT -p tcp -d "$SSH_HOST" --dport 5432 -j DNAT --to-destination 127.0.0.1:15432
           for i in $(seq 1 20); do
@@ -240,9 +239,8 @@ jobs:
         run: |
           set -euo pipefail
           install -m 600 /dev/null ~/.vps_db_tunnel_key
-          printf '%s
-' "$SSH_KEY" > ~/.vps_db_tunnel_key
-          ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new             -o ExitOnForwardFailure=yes -o ServerAliveInterval=30             -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
+          echo "$SSH_KEY" > ~/.vps_db_tunnel_key
+          ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
           sudo sysctl -qw net.ipv4.conf.all.route_localnet=1
           sudo iptables -t nat -A OUTPUT -p tcp -d "$SSH_HOST" --dport 5432 -j DNAT --to-destination 127.0.0.1:15432
           for i in $(seq 1 20); do
@@ -283,9 +281,8 @@ jobs:
         run: |
           set -euo pipefail
           install -m 600 /dev/null ~/.vps_db_tunnel_key
-          printf '%s
-' "$SSH_KEY" > ~/.vps_db_tunnel_key
-          ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new             -o ExitOnForwardFailure=yes -o ServerAliveInterval=30             -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
+          echo "$SSH_KEY" > ~/.vps_db_tunnel_key
+          ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
           sudo sysctl -qw net.ipv4.conf.all.route_localnet=1
           sudo iptables -t nat -A OUTPUT -p tcp -d "$SSH_HOST" --dport 5432 -j DNAT --to-destination 127.0.0.1:15432
           for i in $(seq 1 20); do
