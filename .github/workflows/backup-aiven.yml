@@ -42,6 +42,8 @@ jobs:
           SSH_KEY: ${{ secrets.VPS_TUNNEL_KEY }}
         run: |
           set -euo pipefail
+          # Déjà ouvert par une étape précédente du même job (jobs à deux checkouts)
+          if sudo iptables -t nat -C OUTPUT -p tcp -d "$SSH_HOST" --dport 5432 -j DNAT --to-destination 127.0.0.1:15432 2>/dev/null; then echo "Tunnel déjà ouvert"; exit 0; fi
           install -m 600 /dev/null ~/.vps_db_tunnel_key
           echo "$SSH_KEY" > ~/.vps_db_tunnel_key
           ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
