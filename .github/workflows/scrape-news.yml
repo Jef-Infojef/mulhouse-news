@@ -88,13 +88,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Postgres du VPS filtré par IP : accès par tunnel SSH (clé limitée au transfert)
+      # Postgres du VPS filtré par IP (DOCKER-USER, 22/09) : tunnel SSH avec une clé
+      # limitée au transfert vers 127.0.0.1:5432, puis <VPS>:5432 redirigé vers le
+      # tunnel sur le runner. Les URL de base restent inchangées. Script en ligne
+      # (pas d'action locale) : certains jobs récupèrent un autre dépôt.
       - name: Tunnel SSH vers le Postgres du VPS
-        uses: ./.github/actions/vps-db-tunnel
-        with:
-          ssh-host: ${{ secrets.VPS_TUNNEL_HOST }}
-          ssh-user: ${{ secrets.VPS_TUNNEL_USER }}
-          ssh-key: ${{ secrets.VPS_TUNNEL_KEY }}
+        env:
+          SSH_HOST: ${{ secrets.VPS_TUNNEL_HOST }}
+          SSH_USER: ${{ secrets.VPS_TUNNEL_USER }}
+          SSH_KEY: ${{ secrets.VPS_TUNNEL_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 600 /dev/null ~/.vps_db_tunnel_key
+          printf '%s
+' "$SSH_KEY" > ~/.vps_db_tunnel_key
+          ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new             -o ExitOnForwardFailure=yes -o ServerAliveInterval=30             -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
+          sudo sysctl -qw net.ipv4.conf.all.route_localnet=1
+          sudo iptables -t nat -A OUTPUT -p tcp -d "$SSH_HOST" --dport 5432 -j DNAT --to-destination 127.0.0.1:15432
+          for i in $(seq 1 20); do
+            (echo > /dev/tcp/"$SSH_HOST"/5432) 2>/dev/null && { echo "Tunnel prêt"; exit 0; }
+            sleep 0.5
+          done
+          echo "::error::Tunnel vers le Postgres du VPS injoignable"; exit 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
