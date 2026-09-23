@@ -562,8 +562,17 @@ def main() -> int:
         result = runners[source]()
         results.append(result)
         print(json.dumps(result, indent=2, ensure_ascii=False))
-        if not result["success"]:
+        # Une page isolée qui expire (JDS.fr, curl 28 après 25 s, le 23/09/2026)
+        # ne doit pas passer tout le run en échec : les autres pages et sources
+        # ont été écrites. Seule une source qui n'a RIEN traité est un vrai
+        # incident (site en panne, base injoignable).
+        if result["errors"] and result["processed"] == 0:
             had_errors = True
+        elif result["errors"]:
+            print(
+                f"::warning::{source} : {result['errors']} erreur(s) isolée(s) sur "
+                f"{result['processed']} élément(s) traité(s), run conservé"
+            )
 
     if had_errors:
         return 1
