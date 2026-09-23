@@ -1,6 +1,10 @@
 {
-  "framework": "nextjs",
-  "buildCommand": "npm run build",
-  "outputDirectory": ".next",
-  "installCommand": "npm install"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "echo 'Façade : rien à installer'",
+  "buildCommand": "mkdir -p vercel-proxy-out && echo ok > vercel-proxy-out/.proxy",
+  "outputDirectory": "vercel-proxy-out",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "https://actu.187.127.86.106.sslip.io/$1" }
+  ]
 }
