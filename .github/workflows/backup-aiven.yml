@@ -31,6 +31,14 @@ jobs:
       - name: Checkout du code
         uses: actions/checkout@v4
 
+      # Postgres du VPS filtré par IP : accès par tunnel SSH (clé limitée au transfert)
+      - name: Tunnel SSH vers le Postgres du VPS
+        uses: ./.github/actions/vps-db-tunnel
+        with:
+          ssh-host: ${{ secrets.VPS_TUNNEL_HOST }}
+          ssh-user: ${{ secrets.VPS_TUNNEL_USER }}
+          ssh-key: ${{ secrets.VPS_TUNNEL_KEY }}
+
       - name: Installer pg_dump 17
         # Le runner fournit pg_dump 16, qui REFUSE de lire un serveur 17.10.
         run: |

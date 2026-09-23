@@ -28,6 +28,14 @@ jobs:
           repository: Jef-Infojef/assocommercants
           ssh-key: ${{ secrets.ASSOCOMMERCANTS_DEPLOY_KEY }}
 
+      # Postgres du VPS filtré par IP : accès par tunnel SSH (clé limitée au transfert)
+      - name: Tunnel SSH vers le Postgres du VPS
+        uses: ./.github/actions/vps-db-tunnel
+        with:
+          ssh-host: ${{ secrets.VPS_TUNNEL_HOST }}
+          ssh-user: ${{ secrets.VPS_TUNNEL_USER }}
+          ssh-key: ${{ secrets.VPS_TUNNEL_KEY }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -66,6 +74,14 @@ jobs:
         with:
           repository: Jef-Infojef/mulhouse-news
           path: mulhouse-news
+
+      # Postgres du VPS filtré par IP : accès par tunnel SSH (clé limitée au transfert)
+      - name: Tunnel SSH vers le Postgres du VPS
+        uses: ./.github/actions/vps-db-tunnel
+        with:
+          ssh-host: ${{ secrets.VPS_TUNNEL_HOST }}
+          ssh-user: ${{ secrets.VPS_TUNNEL_USER }}
+          ssh-key: ${{ secrets.VPS_TUNNEL_KEY }}
 
       - name: Install dependencies (mulhouse-news)
         working-directory: mulhouse-news
