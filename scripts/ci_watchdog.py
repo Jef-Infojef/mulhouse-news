@@ -1,4 +1,7 @@
-"""Filet anti-silence : cron mort, I/O Convex trop haut.
+"""Filet anti-silence : cron mort.
+
+Le contrôle de l'I/O Convex a été retiré le 24/09/2026 : le déploiement est
+coupé depuis le 11/09 et le code Convex purgé des dépôts.
 
 Sortie 0 = tout va. Sortie 1 = au moins une alerte (le job GitHub passe rouge).
 N'envoie pas Telegram lui-même : le step appelant le fait.
@@ -11,15 +14,8 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import log_convex_io as io
-
 MAX_SCRAPE_AGE_MIN = 90
 MAX_KNOWLEDGE_AGE_H = 36
-# 4 Go faisait sonner tout le 16/08 : le jour restait à 5,45 Go (fuite
-# .take(500) déjà stoppée, ~2 Mo/scrape depuis). Plafond disable = 8 Go/j.
-IO_DAY_WARN_GB = 6.0
-IO_MONTH_WARN_GB = 64.0  # 80 % du plafond disable 80 Go
 
 
 def gh_json(args: list[str]):
@@ -91,18 +87,6 @@ def main() -> int:
         alerts.append("M68 Knowledge Sync : aucun run vert connu (YAML invalide / cron arrêté ?)")
     elif kn_age > MAX_KNOWLEDGE_AGE_H * 60:
         alerts.append(f"M68 Knowledge Sync : dernier succès il y a {kn_age / 60:.1f} h (seuil {MAX_KNOWLEDGE_AGE_H} h)")
-
-    try:
-        usage = io.fetch_usage()
-        day = io.metric(usage, "databaseIoGb", "current_day")
-        month = io.metric(usage, "databaseIoGb", "current_month")
-        print(f"[watchdog] Convex I/O  jour={io.fmt_gb(day)}  mois={io.fmt_gb(month)}")
-        if day >= IO_DAY_WARN_GB:
-            alerts.append(f"Convex Database I/O jour = {io.fmt_gb(day)} (seuil {IO_DAY_WARN_GB:.0f} Go)")
-        if month >= IO_MONTH_WARN_GB:
-            alerts.append(f"Convex Database I/O mois = {io.fmt_gb(month)} (seuil {IO_MONTH_WARN_GB:.0f} Go / plafond 80)")
-    except Exception as exc:
-        alerts.append(f"Impossible de lire l'I/O Convex : {exc}")
 
     if not alerts:
         print("[watchdog] OK")
