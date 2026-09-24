@@ -72,12 +72,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Sync pages mulhouse.fr (via Vercel, IPs GitHub bloquées)
+      # mulhouse.fr bloque les IP GitHub, et Vercel ne passe plus le filtre IP du
+      # Postgres du VPS (22/09) : la route tourne sur l'instance VPS de MulhouseGPT,
+      # qui voit mulhouse.fr et la base. www : l'apex redirige (308) et la
+      # redirection perd l'en-tête Authorization.
+      - name: Sync pages mulhouse.fr (via le VPS, IPs GitHub bloquées)
         if: github.event.schedule != '0 3 * * 3'
         run: |
-          response=$(curl -s -w "\n%{http_code}" --max-time 310 \
-            -H "Authorization: ${{ secrets.M68_CRON_SECRET }}" \
-            "https://mulhousegpt.vercel.app/api/cron/city-sync")
+          response=$(curl -s -w "\n%{http_code}" --max-time 900 \
+            -H "Authorization: Bearer ${{ secrets.MULHOUSEGPT_VPS_CRON_SECRET }}" \
+            "https://www.mulhousegpt.fr/api/cron/city-sync")
           echo "$response" | head -1
           [ "$(echo "$response" | tail -1)" = "200" ]
 
@@ -324,12 +328,13 @@ jobs:
         env:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
 
-      - name: Sync PDF isolés (via Vercel, IPs GitHub bloquées par mulhouse.fr)
+      # Même raison que la sync des pages mulhouse.fr : exécutée par l'instance VPS.
+      - name: Sync PDF isolés (via le VPS, IPs GitHub bloquées par mulhouse.fr)
         if: always() && github.event.schedule != '0 3 * * 3'
         run: |
-          response=$(curl -s -w "\n%{http_code}" --max-time 310 \
-            -H "Authorization: ${{ secrets.M68_CRON_SECRET }}" \
-            "https://mulhousegpt.vercel.app/api/cron/standalone-pdfs")
+          response=$(curl -s -w "\n%{http_code}" --max-time 900 \
+            -H "Authorization: Bearer ${{ secrets.MULHOUSEGPT_VPS_CRON_SECRET }}" \
+            "https://www.mulhousegpt.fr/api/cron/standalone-pdfs")
           echo "$response" | head -1
           [ "$(echo "$response" | tail -1)" = "200" ]
 
