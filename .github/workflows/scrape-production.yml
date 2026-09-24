@@ -58,13 +58,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install beautifulsoup4 curl_cffi psycopg2-binary python-dotenv requests
 
-      - name: Snapshot Convex I/O (avant)
-        continue-on-error: true
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
-        run: python scripts/log_convex_io.py before
-
       - name: Run L'Alsace archive discovery (sitemaps)
         env:
           # Cache fil d'Ariane et cooldowns : AppConfig de l'Aiven.
@@ -89,15 +82,6 @@ jobs:
           USE_CONVEX: '1'
         run: |
           python scripts/scrape_content_full.py --archive
-
-      - name: Log Convex I/O du run
-        if: always()
-        continue-on-error: true
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
-          USE_CONVEX: '1'
-        run: python scripts/log_convex_io.py after
 
       - name: Log failure to DB
         if: failure()

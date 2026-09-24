@@ -136,12 +136,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 lxml psycopg2-binary python-dotenv curl_cffi googlenewsdecoder
 
-      - name: Snapshot Convex I/O (avant)
-        continue-on-error: true
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-        run: python scripts/log_convex_io.py before
-
       - name: Run Scraper Script (Discovery)
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
@@ -236,15 +230,6 @@ jobs:
           curl -sf "https://www.mulhouse68.fr/api/cron/revalidate?tag=google-news&key=${{ secrets.CRON_SECRET }}" \
             && echo "Cache presse invalidé" \
             || echo "Revalidation cache ignorée"
-
-      - name: Log Convex I/O du run
-        if: always()
-        continue-on-error: true
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
-          NEXT_PUBLIC_CONVEX_URL: ${{ secrets.NEXT_PUBLIC_CONVEX_URL }}
-          USE_CONVEX: '1'
-        run: python scripts/log_convex_io.py after
 
       - name: Log failure to DB
         if: failure()
