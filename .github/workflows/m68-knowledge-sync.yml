@@ -149,6 +149,14 @@ jobs:
           RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
 
+      - name: Sync SPA Mulhouse (animaux à adopter, fourrière)
+        if: always() && github.event.schedule != '0 3 * * 3'
+        run: npx tsx scripts/spa-sync.ts
+        env:
+          NEWS_DATABASE_URL: ${{ secrets.MULHOUSEGPT_NEWS_DATABASE_URL }}
+          RAG_DATABASE_URL: ${{ secrets.RAG_DATABASE_URL }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+
       - name: Sync Zoo de Mulhouse (pages + PDF)
         if: always() && github.event.schedule != '0 3 * * 3'
         run: npx tsx scripts/zoo-sync.ts
