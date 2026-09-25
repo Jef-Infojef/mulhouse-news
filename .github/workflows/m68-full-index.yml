@@ -220,6 +220,13 @@ jobs:
             sources: afut_page
           - name: salles-municipales
             sources: city_rooms
+          # Pôle santé & secours (script manuel jusqu'au 2026-09-26)
+          - name: diaconat
+            sources: diaconat_page
+          - name: ghrmsa
+            sources: ghrmsa_page
+          - name: sdis68
+            sources: sdis68_page
     runs-on: ubuntu-latest
     timeout-minutes: 60
     name: Index (${{ matrix.name }})
