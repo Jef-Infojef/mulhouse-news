@@ -169,6 +169,57 @@ jobs:
             sources: hiring_company
           - name: emploi-evenements
             sources: employment_event
+          # Sources ajoutées le 2026-09-25 : couvertes jusque-là par le seul index
+          # monolithique (assocommercants rag-index-full.yml), qui dépassait 2 h
+          # depuis le 06/09. Une source par job, pour voir laquelle bloque.
+          - name: avocats
+            sources: avocat_directory
+          - name: guide-sports-loisirs
+            sources: sports_loisirs_guide
+          - name: guide-tourisme
+            sources: tourism_guide
+          - name: guide-immobilier
+            sources: real_estate_guide
+          - name: guide-associations-commercants
+            sources: commerce_association_guide
+          - name: guide-chiffres-ville
+            sources: city_facts_guide
+          - name: annonces-immobilieres
+            sources: real_estate_listing
+          - name: vide-greniers
+            sources: vide_grenier
+          - name: droit-local-associations
+            sources: droit_local_association
+          - name: culture-gouv
+            sources: culture_gouv_page
+          - name: marches-pages
+            sources: marche_page
+          - name: marches-articles
+            sources: marche_article
+          - name: mustang
+            sources: mustang_page
+          - name: ecomusee
+            sources: ecomusee_page
+          - name: parc-petit-prince
+            sources: petit_prince_page
+          - name: volley
+            sources: volley_page
+          - name: scorpions-hockey
+            sources: scorpion_page
+          - name: squart
+            sources: squart_page
+          - name: parc-expo
+            sources: parcexpo_page
+          - name: opera
+            sources: opera_page
+          - name: cestvous
+            sources: cestvous_page
+          - name: sport-sante
+            sources: sport_sante_page
+          - name: afut
+            sources: afut_page
+          - name: salles-municipales
+            sources: city_rooms
     runs-on: ubuntu-latest
     timeout-minutes: 60
     name: Index (${{ matrix.name }})
