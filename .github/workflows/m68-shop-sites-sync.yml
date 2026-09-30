@@ -70,7 +70,15 @@ jobs:
           if sudo iptables -t nat -C OUTPUT -p tcp -d "$SSH_HOST" --dport 5432 -j DNAT --to-destination 127.0.0.1:15432 2>/dev/null; then echo "Tunnel déjà ouvert"; exit 0; fi
           install -m 600 /dev/null ~/.vps_db_tunnel_key
           echo "$SSH_KEY" > ~/.vps_db_tunnel_key
-          ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST"
+          # Le port 22 du VPS ignore parfois la connexion d'un runner (~2-3 % des
+          # passages depuis le 23/09) : délai court et trois tentatives plutôt
+          # qu'un échec au bout de 2 min 16 s.
+          for tentative in 1 2 3; do
+            ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ConnectTimeout=20 -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST" && break
+            if [ "$tentative" -eq 3 ]; then echo "::error::Tunnel SSH vers le VPS : 3 tentatives sans réponse"; exit 1; fi
+            echo "::warning::Tunnel SSH vers le VPS : tentative $tentative sans réponse, nouvel essai dans 10 s"
+            sleep 10
+          done
           sudo sysctl -qw net.ipv4.conf.all.route_localnet=1
           sudo iptables -t nat -A OUTPUT -p tcp -d "$SSH_HOST" --dport 5432 -j DNAT --to-destination 127.0.0.1:15432
           for _ in $(seq 1 20); do
