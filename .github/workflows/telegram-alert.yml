@@ -31,7 +31,6 @@ on:
       - M68 Shop Sites Sync
       - Scrape Mulhouse News
       - Scrape Outings (Agenda)
-      - Sauvegarde Convex - Hebdomadaire
     types: [completed]
 
 permissions:

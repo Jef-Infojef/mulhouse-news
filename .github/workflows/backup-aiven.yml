@@ -6,12 +6,11 @@ name: Sauvegarde Aiven (RAG) - Hebdomadaire
 # Convex — c'est le seul point dont la perte serait irréparable.
 #
 # Aiven prend ses propres sauvegardes managées ; celle-ci est HORS de chez eux,
-# restaurable sur n'importe quel PostgreSQL 17, et suit la convention déjà en
-# place pour Convex (B2, rétention 8 semaines).
+# restaurable sur n'importe quel PostgreSQL 17 (B2, rétention 8 semaines).
 
 on:
   schedule:
-    - cron: '0 3 * * 0' # dimanche 03:00 UTC, après la sauvegarde Convex de 02:00
+    - cron: '0 3 * * 0' # dimanche 03:00 UTC
   workflow_dispatch:
 
 permissions:
