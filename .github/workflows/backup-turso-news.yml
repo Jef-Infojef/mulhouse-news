@@ -137,22 +137,25 @@ jobs:
           fi
           echo "[OK] Sauvegarde PostgreSQL vérifiée sur B2 ($DISTANT octets)"
 
-      - name: Purger les sauvegardes de plus de 90 jours
+      - name: Purger les anciennes sauvegardes (News 7 jours, Turso 30 jours)
         env:
           B2_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
           B2_APP_KEY: ${{ secrets.B2_APPLICATION_KEY }}
         run: |
-          # Le workflow tourne 4x/jour (~8 Mo par passage) : sans purge le
-          # bucket dépasse le palier gratuit B2 en quelques mois. 90 jours
-          # de rétention = ~3 Go maximum.
+          # 90 jours partout supposaient ~8 Mo par passage. Le dump News pèse
+          # en réalité 122 Mo : 90 jours = 11 Go, et le compte B2 (10 Go
+          # gratuits, partagés avec les images) a été plein au bout de 19 jours
+          # — storage_cap_exceeded le 20/09/2026, toutes les sauvegardes en
+          # échec pendant dix jours. News : 7 jours (~0,85 Go) ; Turso, 11 Mo
+          # par dump : 30 jours (~0,3 Go).
           aws configure set aws_access_key_id "$B2_KEY_ID"
           aws configure set aws_secret_access_key "$B2_APP_KEY"
           aws configure set region us-west-002
 
-          CUTOFF_DATE=$(date -d '90 days ago' +%Y%m%d)
-          echo "Purge des sauvegardes antérieures au ${CUTOFF_DATE}"
-
           for PREFIX in turso news; do
+            if [ "$PREFIX" = news ]; then JOURS=7; else JOURS=30; fi
+            CUTOFF_DATE=$(date -d "$JOURS days ago" +%Y%m%d)
+            echo "Purge de backups/${PREFIX} antérieures au ${CUTOFF_DATE} (${JOURS} jours)"
             aws s3 ls "s3://asso-franklin-turso/backups/${PREFIX}/" \
               --endpoint-url https://s3.eu-central-003.backblazeb2.com > backup-list.txt || true
 

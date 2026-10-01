@@ -6,7 +6,10 @@ name: Sauvegarde Aiven (RAG) - Hebdomadaire
 # Convex — c'est le seul point dont la perte serait irréparable.
 #
 # Aiven prend ses propres sauvegardes managées ; celle-ci est HORS de chez eux,
-# restaurable sur n'importe quel PostgreSQL 17 (B2, rétention 8 semaines).
+# restaurable sur n'importe quel PostgreSQL 17. Stockée sur le compte B2
+# « archives » (celui des PDF du conseil municipal), un seul dump conservé :
+# le compte principal a dépassé ses 10 Go gratuits le 20/09/2026 et toutes
+# les sauvegardes ont échoué pendant dix jours (storage_cap_exceeded).
 
 on:
   schedule:
@@ -23,7 +26,9 @@ jobs:
 
     env:
       B2_ENDPOINT: s3.eu-central-003.backblazeb2.com
-      B2_BACKUP_BUCKET: mulhouse-news-backups-private
+      # Bucket privé du compte B2 « archives » (secrets B2_ARCHIVE_*), pas celui
+      # du compte principal, qui porte déjà les images et les sauvegardes Turso.
+      B2_BACKUP_BUCKET: mulhousegpt-rag-backups
       PGBIN: /usr/lib/postgresql/17/bin
 
     steps:
@@ -120,8 +125,8 @@ jobs:
 
       - name: Configurer les credentials B2
         run: |
-          aws configure set aws_access_key_id "${{ secrets.B2_APPLICATION_KEY_ID }}"
-          aws configure set aws_secret_access_key "${{ secrets.B2_APPLICATION_KEY }}"
+          aws configure set aws_access_key_id "${{ secrets.B2_ARCHIVE_KEY_ID }}"
+          aws configure set aws_secret_access_key "${{ secrets.B2_ARCHIVE_APPLICATION_KEY }}"
           aws configure set default.region us-west-002
 
       - name: Uploader vers B2 et vérifier l'arrivée
@@ -167,22 +172,22 @@ jobs:
           echo "::error::Envoi vers B2 incomplet après 3 tentatives."
           exit 1
 
-      - name: Purger les sauvegardes de plus de 2 semaines
-        # Un dump pèse 1,76 Gio et le compte B2 plafonne à 10 Go, dont 3 Go
-        # d'images et 1,5 Go de sauvegardes Turso : huit copies hebdomadaires
-        # (14 Go) auraient rempli le compte à elles seules et refait tomber
-        # TOUTES les sauvegardes, comme le 20/08 et le 30/08. Deux copies
-        # tiennent ; au-delà, il faut relever le plafond (~0,09 $/mois).
+      - name: Ne garder que le dump qui vient d'être vérifié
+        # Un dump pèse ~1,8 Go et le compte « archives » porte déjà ~2 Go de PDF
+        # du conseil municipal, sous un plafond gratuit de 10 Go : on ne garde
+        # qu'une copie. Cette étape ne tourne qu'après l'étape précédente, qui
+        # a comparé la taille distante à la taille locale : l'ancien dump n'est
+        # jamais effacé avant que le nouveau soit arrivé entier.
+        env:
+          FICHIER: ${{ steps.backup-file.outputs.filename }}
+          DATE_JOUR: ${{ steps.backup-file.outputs.date }}
         run: |
+          GARDE="aiven-dumps/$DATE_JOUR/$FICHIER"
           aws s3 ls "s3://$B2_BACKUP_BUCKET/aiven-dumps/" "--endpoint-url=https://$B2_ENDPOINT" --recursive > aiven-dump-list.txt || true
-
-          CUTOFF_DATE=$(date -d '14 days ago' +%Y-%m-%d)
 
           while IFS= read -r line; do
             FILE_KEY=$(echo "$line" | awk '{print $4}')
-            FILE_DATE=$(echo "$FILE_KEY" | grep -oP 'aiven-dumps/\K[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
-
-            if [ -n "$FILE_DATE" ] && [ "$FILE_DATE" \< "$CUTOFF_DATE" ]; then
+            if [ -n "$FILE_KEY" ] && [ "$FILE_KEY" != "$GARDE" ]; then
               echo "Suppression : $FILE_KEY"
               aws s3 rm "s3://$B2_BACKUP_BUCKET/$FILE_KEY" "--endpoint-url=https://$B2_ENDPOINT" || true
             fi
