@@ -45,11 +45,11 @@ jobs:
           install -m 600 /dev/null ~/.vps_db_tunnel_key
           echo "$SSH_KEY" > ~/.vps_db_tunnel_key
           # Le port 22 du VPS ignore parfois la connexion d'un runner (~2-3 % des
-          # passages depuis le 23/09) : délai court et trois tentatives plutôt
-          # qu'un échec au bout de 2 min 16 s.
-          for tentative in 1 2 3; do
-            ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ConnectTimeout=20 -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST" && break
-            if [ "$tentative" -eq 3 ]; then echo "::error::Tunnel SSH vers le VPS : 3 tentatives sans réponse"; exit 1; fi
+          # passages depuis le 23/09) : délai court et 5 tentatives avec backoff
+          # plutôt qu'un échec brutal.
+          for tentative in 1 2 3 4 5; do
+            ssh -i ~/.vps_db_tunnel_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ConnectTimeout=25 -fN -L 127.0.0.1:15432:127.0.0.1:5432 "$SSH_USER@$SSH_HOST" && break
+            if [ "$tentative" -eq 5 ]; then echo "::error::Tunnel SSH vers le VPS : 5 tentatives sans réponse"; exit 1; fi
             echo "::warning::Tunnel SSH vers le VPS : tentative $tentative sans réponse, nouvel essai dans 10 s"
             sleep 10
           done
