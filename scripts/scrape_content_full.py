@@ -20,8 +20,10 @@ from scrape_utils import (
     parse_ebra_datalayer,
     _absolutize_media_url,
     _normalize_image_path,
+    revalidate_mulhouse68_news,
 )
 import convex_client
+
 
 SKIP_PHRASES = ['cookie', 'abonnez', 'newsletter', 'mentions légales', 'politique de confidentialité', 'publicité']
 
@@ -1115,7 +1117,11 @@ def main():
         # Image processing
         img_status = "Skipped" if args.skip_images else run_image_scripts()
 
+        if stats.get("success", 0) > 0:
+            revalidate_mulhouse68_news("google-news")
+
         # Enregistrement du LOG final
+
         finished_at = datetime.now()
         status_final = "SUCCESS" if stats["error"] == 0 else "PARTIAL"
         if any(d["status"] == "SESSION_LOST" for d in session_details): status_final = "SESSION_LOST"

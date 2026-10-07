@@ -38,6 +38,8 @@ if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
 import convex_client
+from scrape_utils import revalidate_mulhouse68_news
+
 
 _root = os.path.dirname(_script_dir)
 for _env in (".envenv", ".env.local", ".env"):
@@ -862,7 +864,11 @@ def main() -> int:
     if stats["by_source"]:
         print("Par source :", stats["by_source"])
 
+    if stats.get("indexed", 0) > 0:
+        revalidate_mulhouse68_news("google-news")
+
     return 0 if stats["errors"] == 0 else 1
+
 
 
 if __name__ == "__main__":

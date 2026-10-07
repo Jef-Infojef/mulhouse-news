@@ -1298,3 +1298,22 @@ def extract_article_images(
         ]
 
     return _dedupe_images(images)
+
+
+def revalidate_mulhouse68_news(tag: str = "google-news") -> bool:
+    """Invalide le cache de https://www.mulhouse68.fr/actualites."""
+    import os
+    import requests as std_requests
+
+    secret = os.environ.get("CRON_SECRET", "VeryCoolCronSecret12345")
+    url = f"https://www.mulhouse68.fr/api/cron/revalidate?tag={tag}&key={secret}"
+    try:
+        resp = std_requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            print(f"[*] Cache https://www.mulhouse68.fr/actualites invalidé avec succès (tag={tag}).")
+            return True
+        else:
+            print(f"[!] Revalidation mulhouse68 (tag={tag}) statut {resp.status_code}: {resp.text[:100]}")
+    except Exception as e:
+        print(f"[!] Exception revalidation mulhouse68 (tag={tag}): {e}")
+    return False

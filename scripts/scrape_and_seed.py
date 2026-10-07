@@ -17,8 +17,9 @@ import time
 import random
 from urllib.parse import urljoin
 import unicodedata
-from scrape_utils import extract_image_caption, html_is_mulhouse_edition, is_ebra_url, is_mulhouse_url
+from scrape_utils import extract_image_caption, html_is_mulhouse_edition, is_ebra_url, is_mulhouse_url, revalidate_mulhouse68_news
 import convex_client
+
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -57,8 +58,11 @@ def get_db_connection():
 def extract_real_url(google_url):
     try:
         decoded = gnewsdecoder(google_url)
-        if decoded.get("status"):
+        # Compatible googlenewsdecoder 0.1.x (status) et 0.2.x+ (success / decoded_url)
+        if decoded.get("decoded_url"):
             return decoded["decoded_url"]
+        elif decoded.get("status") or decoded.get("success"):
+            return decoded.get("decoded_url", google_url)
         else:
             print(f"    [!] Échec décodage Google: {decoded.get('message', 'Erreur inconnue')}")
     except Exception as e:
@@ -491,8 +495,11 @@ def main():
                 print(f"      [!] Erreur insertion: {e}")
 
     print(f"\n[*] Terminé. {new_count} articles ajoutés au total.")
+    if new_count > 0:
+        revalidate_mulhouse68_news("google-news")
     
     # Enregistrement du log en base de données
+
     try:
         finished_at = datetime.now()
         status = "SUCCESS" if stats["google_decode_errors"] == 0 else "WARNING"

@@ -8,8 +8,9 @@ from xml.etree import ElementTree as ET
 import psycopg2
 from dotenv import load_dotenv
 
-from scrape_utils import fetch_mag_m2a_page, fetch_sitemap_xml, parse_mag_m2a_article
+from scrape_utils import fetch_mag_m2a_page, fetch_sitemap_xml, parse_mag_m2a_article, revalidate_mulhouse68_news
 import convex_client
+
 
 load_dotenv(".env.local")
 load_dotenv(".env")
@@ -408,9 +409,13 @@ def main():
             f"Mis à jour: {stats['updated']} | Erreurs: {stats['errors']}"
         )
 
+        if not args.dry_run and (stats.get("inserted", 0) > 0 or stats.get("updated", 0) > 0):
+            revalidate_mulhouse68_news("google-news")
+
         if not args.dry_run:
             status = "SUCCESS" if stats["errors"] == 0 else "WARNING"
             log_scraping(cur, conn, stats, status)
+
     finally:
         if cur:
             cur.close()

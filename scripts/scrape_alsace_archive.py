@@ -50,7 +50,8 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import convex_client
-from scrape_utils import html_is_mulhouse_edition, is_mulhouse_url, parse_ebra_page_meta
+from scrape_utils import html_is_mulhouse_edition, is_mulhouse_url, parse_ebra_page_meta, revalidate_mulhouse68_news
+
 
 # .env.local d'abord (c'est là que vivent les clés Convex en local), .env en
 # complément. Sans cela, le script annonçait « Backend : Convex si les clés sont
@@ -427,7 +428,9 @@ def main():
         persist_rejected_urls(use_convex, conn, cur, rejected)
 
     if not args.dry_run and inserted > 0:
+        revalidate_mulhouse68_news("google-news")
         try:
+
             details = json.dumps({"sitemaps": len(sitemaps), "skipped": skipped, "errors": errors})
             if use_convex:
                 # `insert_scraping_log(started_at, status, *, finished_at=…)` :
