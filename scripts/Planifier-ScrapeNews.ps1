@@ -3,6 +3,11 @@
     Déclenche le workflow « Scrape Mulhouse News » depuis ce poste, toutes les 15 minutes.
 
 .DESCRIPTION
+    REMPLACÉ le 2026-10-21 par le cron du VPS (/root/scripts/dispatch-scrape-news.sh,
+    toutes les 15 min, jeton fine-grained dans /root/.config/scrape-news.token) :
+    la tâche Windows a été supprimée, le poste n'a plus à rester allumé. Ce script
+    ne sert plus qu'à la recréer en secours si le VPS ne peut plus déclencher.
+
     Le travail tourne toujours chez GitHub : cette tâche n'envoie que le coup
     d'envoi, via `gh workflow run`. Elle existe parce que le cron de GitHub ne
     tient pas ses rendez-vous sur ce dépôt.

@@ -18,9 +18,11 @@ name: Scrape Mulhouse News
 
 on:
   schedule:
-    # Filet de secours, et rien de plus : le declenchement normal vient
-    # desormais de ce poste, toutes les 15 minutes, via la tache Windows
-    # MulhouseGPT-ScrapeNews-15min (voir scripts/Planifier-ScrapeNews.ps1).
+    # Filet de secours, et rien de plus : le declenchement normal vient du
+    # VPS, toutes les 15 minutes, par workflow_dispatch
+    # (/root/scripts/dispatch-scrape-news.sh, crontab root, depuis le
+    # 2026-10-21). Il remplace la tache Windows MulhouseGPT-ScrapeNews-15min,
+    # supprimee : scripts/Planifier-ScrapeNews.ps1 la recree en secours.
     #
     # Pourquoi avoir renonce au cron comme declencheur principal, mesure le
     # 2026-09-16 :
