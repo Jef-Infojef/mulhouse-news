@@ -223,6 +223,19 @@ jobs:
         # dans le RAG Postgres du VPS sans interroger le backend Convex desactive.
         run: python scripts/rag_sync_articles.py --journal "$RAG_JOURNAL_PATH" --journal-only
 
+      - name: Embeddings des articles indexés (MulhouseGPT)
+        # rag_sync_articles.py insère sans embedding : sans cet appel, les
+        # articles restaient invisibles à la recherche sémantique jusqu'au
+        # rattrapage du lendemain matin (constaté le 2026-10-21). Non bloquant :
+        # un échec ici ne doit pas faire échouer la collecte.
+        if: always()
+        run: |
+          response=$(curl -s -w "\n%{http_code}" --max-time 300 \
+            -H "Authorization: Bearer ${{ secrets.MULHOUSEGPT_VPS_CRON_SECRET }}" \
+            "https://www.mulhousegpt.fr/api/cron/rag-backfill")
+          echo "$response" | head -1
+          [ "$(echo "$response" | tail -1)" = "200" ] || echo "::warning::Embeddings non calculés"
+
       - name: Invalider le cache presse de mulhouse68.fr
         # Seul scraper du depot qui n'invalidait rien (cinema, pharmacies et
         # sorties le font depuis toujours) : /actualites lisait donc un cache
