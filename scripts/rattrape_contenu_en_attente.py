@@ -35,6 +35,8 @@ Usage:
   python scripts/rattrape_contenu_en_attente.py --tout          # vide le stock
   python scripts/rattrape_contenu_en_attente.py --tout --max 500
   python scripts/rattrape_contenu_en_attente.py --limit 50      # un seul lot
+  # après une panne du cookie EBRA : articles payants rangés avec leur seul chapeau
+  python scripts/rattrape_contenu_en_attente.py --tout --seuil 400 --depuis 2026-09-14 --order desc
 
 Ctrl+C : le lot en cours est perdu, pas les précédents. Le script est
 reprenable tel quel, la liste de travail étant relue en base à chaque lot.
@@ -58,16 +60,24 @@ for _env in (".envenv", ".env.local", ".env"):
 
 # Même critère que `aiven_client.articles_sans_contenu` : sous 150 caractères,
 # il n'y a qu'un chapô, pas un article.
+# `--seuil 400 --depuis AAAA-MM-JJ` élargit aux articles rangés avec leur seul
+# chapeau pendant une panne du cookie EBRA (même critère dans
+# scrape_content_full.worklist_depuis_aiven).
 STOCK_SQL = (
     'SELECT count(*) FROM "Article" '
     "WHERE hidden = false AND link LIKE %s "
-    "  AND (content IS NULL OR length(content) < 150)"
+    "  AND (content IS NULL OR length(content) < %s)"
 )
 CLE_COOLDOWN = "SCRAPE_CONTENT_RETRY_COOLDOWNS"
+SEUIL = 150
+DEPUIS: str | None = None
 
 
 def stock(cur, recent_seulement: bool = False) -> int:
-    sql, args = STOCK_SQL, ["%lalsace.fr%"]
+    sql, args = STOCK_SQL, ["%lalsace.fr%", SEUIL]
+    if DEPUIS:
+        sql += ' AND "publishedAt" >= %s'
+        args.append(DEPUIS)
     if recent_seulement:
         sql += ' AND "publishedAt" > NOW() - INTERVAL %s'
         args.append("30 days")
@@ -177,7 +187,8 @@ def lancer_lot(fenetre: int, ordre: str, env: dict, av: Avancement) -> None:
     qu'entre deux lots : un lot de 50 dure plusieurs minutes.
     """
     cmd = [sys.executable, "-u", "scripts/scrape_content_full.py", "--archive",
-           "--limit", str(fenetre), "--order", ordre, "--worklist-aiven"]
+           "--limit", str(fenetre), "--order", ordre, "--worklist-aiven",
+           "--seuil", str(SEUIL)] + (["--depuis", DEPUIS] if DEPUIS else [])
     p = subprocess.Popen(cmd, cwd=_racine, env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                          errors="replace", bufsize=1)
@@ -213,7 +224,12 @@ def main() -> int:
     p.add_argument("--order", choices=["desc", "asc"], default="asc",
                    help="asc : les plus anciens d'abord (defaut archive)")
     p.add_argument("--compter", action="store_true", help="afficher le stock et sortir")
+    p.add_argument("--seuil", type=int, default=150,
+                   help="reprendre les articles de moins de N car. (400 : chapeau seul)")
+    p.add_argument("--depuis", default=None, help="seulement publies depuis AAAA-MM-JJ")
     args = p.parse_args()
+    global SEUIL, DEPUIS
+    SEUIL, DEPUIS = args.seuil, args.depuis
 
     if not os.environ.get("RAG_DATABASE_URL"):
         print("RAG_DATABASE_URL manquant : c'est la base qui fait autorite.",
@@ -234,6 +250,9 @@ def main() -> int:
     # Le gros du stock est constitue de breves sous le seuil de 400 caracteres
     # de fetch_grdc_content : les rouvrir ne donnera rien. Le dire ici evite de
     # lancer un run de plusieurs heures en esperant voir le compteur descendre.
+    if SEUIL != 150 or DEPUIS:
+        print(f"  (filtre : moins de {SEUIL} car."
+              + (f", publies depuis le {DEPUIS}" if DEPUIS else "") + ")")
     if depart - recent > 500:
         print(f"  ATTENTION : ~{depart - recent} articles d'archive dont le corps")
         print("  est sous les 400 caracteres exiges. Ils seront rouverts puis")
@@ -293,7 +312,8 @@ def main() -> int:
     print(f"  sans corps : {av.vides}")
     print(f"  stock      : {depart} -> {restant}")
     if restant:
-        print(f"  relancer   : python scripts/{os.path.basename(__file__)} --tout")
+        extra = (f" --seuil {SEUIL}" if SEUIL != 150 else "") + (f" --depuis {DEPUIS}" if DEPUIS else "")
+        print(f"  relancer   : python scripts/{os.path.basename(__file__)} --tout{extra}")
     return 0
 
 

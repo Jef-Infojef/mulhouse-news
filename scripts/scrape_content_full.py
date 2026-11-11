@@ -210,7 +210,8 @@ def maj_article(payload: dict) -> None:
         print(f"    [!] Convex refuse l'ecriture ({str(exc).splitlines()[0][:70]}) - journalisee")
 
 
-def worklist_depuis_aiven(limit: int, archive: bool, order: str) -> list[dict]:
+def worklist_depuis_aiven(limit: int, archive: bool, order: str,
+                          seuil: int = 150, depuis: str | None = None) -> list[dict]:
     """Articles a completer, lus dans la table Article de l'Aiven.
 
     La liste de travail habituelle vient de Convex. Deploiement coupe pour
@@ -228,8 +229,16 @@ def worklist_depuis_aiven(limit: int, archive: bool, order: str) -> list[dict]:
     if not url:
         raise SystemExit("RAG_DATABASE_URL manquant : impossible de lire la liste de travail.")
 
+    params: list = []
     if archive:
-        condition = "link LIKE '%%lalsace.fr%%' AND (content IS NULL OR LENGTH(content) < 150)"
+        # seuil 150 = sans texte. Seuil 400 : reprend aussi les articles payants
+        # rangés avec leur seul chapeau (150-399 car.) pendant une panne du
+        # cookie EBRA — 14/09 -> 11/11/2026, ~450 articles.
+        condition = "link LIKE '%%lalsace.fr%%' AND (content IS NULL OR LENGTH(content) < %s)"
+        params.append(int(seuil))
+        if depuis:
+            condition += ' AND "publishedAt" >= %s'
+            params.append(depuis)
         # `--order` etait ignore ici : le backfill repartait toujours de 2009,
         # meme lance pour vider le retard du jour. L'autre chemin d'archive
         # (list_missing_content_via_pages) respectait deja le drapeau.
@@ -246,7 +255,7 @@ def worklist_depuis_aiven(limit: int, archive: bool, order: str) -> list[dict]:
                     WHERE hidden = false AND {condition}
                     ORDER BY "publishedAt" {tri} NULLS LAST
                     LIMIT %s''',
-                (limit if limit > 0 else 500,),
+                (*params, limit if limit > 0 else 500),
             )
             lignes = cur.fetchall()
 
@@ -812,6 +821,11 @@ def main():
     parser.add_argument("--worklist-aiven", action="store_true",
                         help="Lit la liste des articles a completer dans la table Article de "
                              "l'Aiven au lieu de Convex (indispensable quand Convex est coupe)")
+    parser.add_argument("--seuil", type=int, default=150,
+                        help="--archive --worklist-aiven : reprendre les articles de moins de N car. "
+                             "(defaut 150 ; 400 pour ceux ranges avec leur seul chapeau)")
+    parser.add_argument("--depuis", type=str, default=None,
+                        help="--archive --worklist-aiven : seulement les articles publies depuis AAAA-MM-JJ")
     parser.add_argument("--skip-images", action="store_true",
                         help="Ne pas exécuter les scripts de téléchargement/sync B2 en fin de run")
     args = parser.parse_args()
@@ -891,7 +905,8 @@ def main():
             if not USE_CONVEX:
                 raise SystemExit("--worklist-aiven suppose le mode Convex pour les ecritures "
                                  "(CONVEX_DEPLOY_KEY + NEXT_PUBLIC_CONVEX_URL).")
-            articles = worklist_depuis_aiven(args.limit or 50, args.archive, args.order)
+            articles = worklist_depuis_aiven(args.limit or 50, args.archive, args.order,
+                                             seuil=args.seuil, depuis=args.depuis)
         elif USE_CONVEX:
             if args.archive:
                 articles = list_missing_content_via_pages(args.limit or 0, order=args.order)
