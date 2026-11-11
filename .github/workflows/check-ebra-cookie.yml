@@ -92,3 +92,12 @@ jobs:
       - name: Afficher stade OK
         if: steps.cookie_check.outputs.cookie_ok == 'true'
         run: echo "Cookie EBRA OK, rien a signaler."
+
+      # continue-on-error laisse passer la notification, mais le run restait
+      # vert : la panne d'octobre-novembre 2026 a dure 40 jours sans un seul
+      # run rouge dans l'onglet Actions. Le run doit echouer quand le cookie est KO.
+      - name: Echec du run (cookie KO)
+        if: steps.cookie_check.outcome == 'failure'
+        run: |
+          echo "::error::Cookie EBRA KO : renouveler EBRA_SESSION / EBRA_POOOL dans AppConfig et le secret ALSACE_COOKIES"
+          exit 1
