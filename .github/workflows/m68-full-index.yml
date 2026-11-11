@@ -209,6 +209,8 @@ jobs:
             sources: opera_page
           - name: cestvous
             sources: cestvous_page
+          - name: cigogne
+            sources: cigogne_page
           - name: sport-sante
             sources: sport_sante_page
           - name: afut
