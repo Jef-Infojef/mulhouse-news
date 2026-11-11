@@ -290,6 +290,28 @@ def get_app_config(conn, key):
         return None
 
 
+def session_ebra_debloque(cookies_dict: dict):
+    """True si la session débloque le contenu payant, False sinon, None si
+    aucun article de test n'a répondu (non concluant : on ne crie pas au loup).
+
+    Réutilise les articles et le seuil du contrôle quotidien pour que les deux
+    diagnostics ne divergent pas.
+    """
+    import check_ebra_cookie as chk
+    for url in chk.TEST_URLS:
+        try:
+            avec = chk.fetch_page(url, cookies_dict)
+            sans = chk.fetch_page(url, None)
+            if avec.status_code != 200 or sans.status_code != 200:
+                continue
+            ecart = chk.extract_body_len(avec.text) - chk.extract_body_len(sans.text)
+            print(f"[*] Test session EBRA : écart abonné/public {ecart} car. (seuil {chk.MIN_DELTA})")
+            return ecart >= chk.MIN_DELTA
+        except Exception as err:
+            print(f"[!] Test session EBRA : {url[:50]}… {err}")
+    return None
+
+
 def load_ebra_cookies(conn=None) -> tuple[dict, bool]:
     """Session EBRA (Poool) pour GRDC. Retourne (cookies, session_connue)."""
     cookies_dict: dict = {}
@@ -892,14 +914,19 @@ def main():
         if not USE_CONVEX:
             cur = conn.cursor()
 
-        # Vérification connexion initiale
-        try:
-            test_resp = requests.get("https://www.lalsace.fr/", cookies=cookies_dict, impersonate="chrome110", timeout=15)
-            stats["is_connected"] = any(x in test_resp.text for x in ["Se déconnecter", "Mon compte"])
-        except:
-            stats["is_connected"] = False
-            
-        print(f"[*] État initial connexion : {'✅' if stats['is_connected'] else '❌'}")
+        # Vérification connexion initiale. L'ancien test cherchait « Se déconnecter »
+        # / « Mon compte » sur la page d'accueil : il affichait ✅ avec une session
+        # expirée, et la panne du 14/09 au 11/11/2026 est passée inaperçue. On
+        # mesure désormais ce que la session débloque vraiment, comme le contrôle
+        # quotidien (check_ebra_cookie.py) : même article payant, avec et sans.
+        etat_session = session_ebra_debloque(cookies_dict)
+        # Non concluant (sites injoignables) : on ne marque pas le run déconnecté.
+        stats["is_connected"] = etat_session is not False
+        print(f"[*] État initial connexion : "
+              f"{'❔ test non concluant' if etat_session is None else '✅' if etat_session else '❌'}")
+        if etat_session is False:
+            print("::warning::Session EBRA expirée : les articles payants ne seront lus "
+                  "qu'en aperçu. Renouveler EBRA_SESSION / EBRA_POOOL dans AppConfig.")
 
         if args.worklist_aiven:
             if not USE_CONVEX:
